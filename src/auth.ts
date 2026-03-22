@@ -63,40 +63,45 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
        * NextAuth affiche une erreur générique "CredentialsSignin" en cas de null.
        */
       async authorize(credentials) {
-        // 1. Valider le format des credentials
-        const parsed = credentialsSchema.safeParse(credentials)
-        if (!parsed.success) return null
+        try {
+          // 1. Valider le format des credentials
+          const parsed = credentialsSchema.safeParse(credentials)
+          if (!parsed.success) return null
 
-        // 2. Chercher l'utilisateur actif (non soft-deleted)
-        const user = await prisma.user.findFirst({
-          where: {
-            email:     parsed.data.email,
-            deletedAt: null,            // exclut les comptes supprimés
-          },
-          select: {
-            id:           true,
-            email:        true,
-            name:         true,
-            passwordHash: true,
-          },
-        })
+          // 2. Chercher l'utilisateur actif (non soft-deleted)
+          const user = await prisma.user.findFirst({
+            where: {
+              email:     parsed.data.email,
+              deletedAt: null,            // exclut les comptes supprimés
+            },
+            select: {
+              id:           true,
+              email:        true,
+              name:         true,
+              passwordHash: true,
+            },
+          })
 
-        // 3. Vérifier l'existence et la présence d'un mot de passe
-        //    (un compte sans passwordHash = compte OAuth-only, pas autorisé ici)
-        if (!user || !user.passwordHash) return null
+          // 3. Vérifier l'existence et la présence d'un mot de passe
+          //    (un compte sans passwordHash = compte OAuth-only, pas autorisé ici)
+          if (!user || !user.passwordHash) return null
 
-        // 4. Vérifier le mot de passe
-        const passwordValid = await bcrypt.compare(
-          parsed.data.password,
-          user.passwordHash,
-        )
-        if (!passwordValid) return null
+          // 4. Vérifier le mot de passe
+          const passwordValid = await bcrypt.compare(
+            parsed.data.password,
+            user.passwordHash,
+          )
+          if (!passwordValid) return null
 
-        // 5. Retourner uniquement ce qui doit aller dans le token
-        return {
-          id:    user.id,
-          email: user.email,
-          name:  user.name,
+          // 5. Retourner uniquement ce qui doit aller dans le token
+          return {
+            id:    user.id,
+            email: user.email,
+            name:  user.name,
+          }
+        } catch {
+          // Erreur DB ou réseau — retourner null pour éviter un CallbackRouteError
+          return null
         }
       },
     }),
