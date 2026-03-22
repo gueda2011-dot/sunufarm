@@ -137,7 +137,6 @@ export function ActiveBatchList({
                 </span>
                 <Link
                   href={`/daily?batchId=${batch.id}`}
-                  onClick={(e) => e.stopPropagation()}
                   className={cn(
                     "text-xs font-medium rounded-lg px-3 py-1 transition-colors whitespace-nowrap",
                     noSaisie
