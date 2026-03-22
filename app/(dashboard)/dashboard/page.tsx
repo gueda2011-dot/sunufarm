@@ -25,9 +25,9 @@ import { auth }                from "@/src/auth"
 import prisma                  from "@/src/lib/prisma"
 import { getBatches }          from "@/src/actions/batches"
 import { getExpenses }         from "@/src/actions/expenses"
-import { AlertBanner }         from "./_components/AlertBanner"
-import { DashboardKpis }       from "./_components/DashboardKpis"
-import { ActiveBatchList }     from "./_components/ActiveBatchList"
+import { AlertBanner }         from "../_components/AlertBanner"
+import { DashboardKpis }       from "../_components/DashboardKpis"
+import { ActiveBatchList }     from "../_components/ActiveBatchList"
 
 export const metadata: Metadata = { title: "Tableau de bord" }
 
