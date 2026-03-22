@@ -17,6 +17,7 @@ import {
   BatchStatus,
   BuildingType,
   FeedMovementType,
+  MedicineMovementType,
   SaleProductType,
   UserRole,
 } from "../src/generated/prisma"
@@ -121,7 +122,7 @@ async function main() {
   ])
 
   // Types d'aliment
-  const [feedDemarrage, feedCroissance, feedFinition, feedPonte] = await Promise.all([
+  const [feedPreDemarrage, feedDemarrage, feedCroissance, feedFinition] = await Promise.all([
     prisma.feedType.create({ data: { name: "Pré-démarrage", code: "PREDEMARRAGE" } }),
     prisma.feedType.create({ data: { name: "Démarrage",     code: "DEMARRAGE"    } }),
     prisma.feedType.create({ data: { name: "Croissance",    code: "CROISSANCE"   } }),
@@ -329,6 +330,65 @@ async function main() {
     },
   })
 
+  // Stock médicaments ferme 1
+  const medStock1 = await prisma.medicineStock.create({
+    data: {
+      organizationId:  org1.id,
+      farmId:          farm1.id,
+      name:            "Vaccin Newcastle HB1",
+      category:        "Vaccin",
+      unit:            "dose",
+      quantityOnHand:  5000,
+      alertThreshold:  1000,
+      unitPriceFcfa:   45,
+      expiryDate:      dt(addDays(today, 180)),
+      notes:           "Conserver entre 2°C et 8°C",
+    },
+  })
+
+  const medStock2 = await prisma.medicineStock.create({
+    data: {
+      organizationId:  org1.id,
+      farmId:          farm1.id,
+      name:            "Amoxicilline 10% — poudre",
+      category:        "Antibiotique",
+      unit:            "g",
+      quantityOnHand:  800,
+      alertThreshold:  200,
+      unitPriceFcfa:   1_200,
+      expiryDate:      dt(addDays(today, 90)),
+    },
+  })
+
+  await prisma.medicineStock.create({
+    data: {
+      organizationId:  org1.id,
+      farmId:          farm1.id,
+      name:            "Vitamine E + Sélénium",
+      category:        "Complément",
+      unit:            "ml",
+      quantityOnHand:  150,
+      alertThreshold:  300,   // en dessous du seuil → alerte
+      unitPriceFcfa:   3_500,
+      expiryDate:      dt(addDays(today, 45)),   // péremption proche → double alerte
+    },
+  })
+
+  // Entrée stock Newcastle (mouvement)
+  await prisma.medicineMovement.create({
+    data: {
+      organizationId: org1.id,
+      medicineStockId: medStock1.id,
+      type:            MedicineMovementType.ENTREE,
+      quantity:        5000,
+      unitPriceFcfa:   45,
+      totalFcfa:       225_000,
+      date:            dt(addDays(today, -20)),
+      reference:       "VACC-2026-012",
+      recordedById:    manager1.id,
+    },
+  })
+
   // ── LOT 1 — SF-2026-001 : Poulet de chair actif (Cobb 500, 30 jours) ──────
 
   const entryDate1 = addDays(today, -30)
@@ -462,15 +522,52 @@ async function main() {
     })
   }
 
-  // Vente lot 2
+  // Dépenses lot 2 (nécessaires pour calculer la rentabilité)
+  await Promise.all([
+    prisma.expense.create({ data: {
+      organizationId: org1.id,
+      batchId:        batch2.id,
+      farmId:         farm1.id,
+      date:           dt(entryDate2),
+      description:    "Achat 1500 poussins Ross 308 — AVISEN",
+      amountFcfa:     1_080_000,
+      supplierId:     supplierPoussins.id,
+      createdById:    manager1.id,
+    }}),
+    prisma.expense.create({ data: {
+      organizationId: org1.id,
+      batchId:        batch2.id,
+      farmId:         farm1.id,
+      date:           dt(addDays(entryDate2, -2)),
+      description:    "Aliment démarrage + croissance — lot Ross 308",
+      amountFcfa:     950_000,
+      supplierId:     supplierAliment1.id,
+      reference:      "BL-2025-147",
+      createdById:    manager1.id,
+    }}),
+    prisma.expense.create({ data: {
+      organizationId: org1.id,
+      batchId:        batch2.id,
+      farmId:         farm1.id,
+      date:           dt(addDays(entryDate2, 5)),
+      description:    "Vaccins + médicaments lot Ross 308",
+      amountFcfa:     85_000,
+      createdById:    manager1.id,
+    }}),
+  ])
+
+  // Vente lot 2 — totalFcfa = SUM des SaleItems (calculé depuis les lignes)
+  // 1440 sujets × 1.55 kg moyen = 2232 kg × 1480 FCFA/kg = 3 303 360 FCFA
+  const saleItemTotal2 = Math.round(2232 * 1480)   // 3 303 360
+
   const sale1 = await prisma.sale.create({
     data: {
       organizationId: org1.id,
       customerId:     clientSandaga.id,
       saleDate:       closeDate2,
       productType:    SaleProductType.POULET_VIF,
-      totalFcfa:      3_312_000,
-      paidFcfa:       3_312_000,
+      totalFcfa:      saleItemTotal2,
+      paidFcfa:       saleItemTotal2,
       notes:          "1440 sujets × 1.55 kg moyen × 1480 FCFA/kg",
       createdById:    manager1.id,
     },
@@ -478,13 +575,42 @@ async function main() {
 
   await prisma.saleItem.create({
     data: {
-      saleId:       sale1.id,
-      batchId:      batch2.id,
-      description:  "Poulets vifs Ross 308 — 1440 sujets × 1.55 kg",
-      quantity:     2232,
-      unit:         "KG",
+      saleId:        sale1.id,
+      batchId:       batch2.id,
+      description:   "Poulets vifs Ross 308 — 1440 sujets × 1.55 kg",
+      quantity:      2232,
+      unit:          "KG",
       unitPriceFcfa: 1480,
-      totalFcfa:    3_303_360,
+      totalFcfa:     saleItemTotal2,
+    },
+  })
+
+  // Vente partiellement payée — pour tester "Reste à encaisser" dans SalesPage
+  // Lot 1 (actif) : acompte reçu sur une commande en cours
+  const saleItemPartial = Math.round(500 * 1550)   // 500 sujets × 1550 FCFA
+
+  const sale2 = await prisma.sale.create({
+    data: {
+      organizationId: org1.id,
+      customerId:     clientSandaga.id,
+      saleDate:       dt(addDays(today, -3)),
+      productType:    SaleProductType.POULET_VIF,
+      totalFcfa:      saleItemPartial,
+      paidFcfa:       Math.round(saleItemPartial / 2),   // 50 % versé
+      notes:          "Commande en cours — acompte 50% reçu",
+      createdById:    manager1.id,
+    },
+  })
+
+  await prisma.saleItem.create({
+    data: {
+      saleId:        sale2.id,
+      batchId:       batch1.id,
+      description:   "Poulets vifs Cobb 500 — 500 sujets (commande à venir)",
+      quantity:      500,
+      unit:          "PIECE",
+      unitPriceFcfa: 1550,
+      totalFcfa:     saleItemPartial,
     },
   })
 
@@ -682,6 +808,11 @@ async function main() {
   console.log("   → aminata.diop@sunufarm.sn       (ACCOUNTANT)")
   console.log("\n   Organisation 2 — Avicole Thiès SARL :")
   console.log("   → cheikh.ndiaye@sunufarm.sn     (OWNER)")
+  console.log("\n📦 Données créées (org 1) :")
+  console.log("   → 3 lots (SF-2026-001 actif J30, SF-2025-018 vendu, SF-2026-002 pondeuses)")
+  console.log("   → 2 ventes (intégrale + acompte partiel pour tester 'Reste à encaisser')")
+  console.log("   → 3 stocks médicaments (dont 1 stock bas + péremption proche)")
+  console.log("   → Rentabilité lot SF-2025-018 : ~3.3M FCFA revenus / ~2.1M FCFA coûts")
   console.log("\n🔒 Test isolation multi-tenant : connectez-vous avec cheikh.ndiaye")
   console.log("   Il ne voit PAS les données de l'organisation Diallo.")
 }
