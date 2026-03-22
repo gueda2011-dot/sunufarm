@@ -99,8 +99,9 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             email: user.email,
             name:  user.name,
           }
-        } catch {
-          // Erreur DB ou réseau — retourner null pour éviter un CallbackRouteError
+        } catch (err) {
+          // Erreur DB ou réseau — logger pour debug, retourner null proprement
+          console.error("[auth][authorize] Erreur inattendue:", err)
           return null
         }
       },
