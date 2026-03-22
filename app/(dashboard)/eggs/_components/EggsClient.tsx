@@ -1,14 +1,14 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 import { Plus, Egg, Trash2, TrendingUp } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
-import { Input }  from "@/src/components/ui/input"
-import { Label }  from "@/src/components/ui/label"
+import { Input } from "@/src/components/ui/input"
+import { Label } from "@/src/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
 import {
   getEggRecords,
@@ -24,17 +24,19 @@ import { formatDate, formatNumber, formatPercent } from "@/src/lib/formatters"
 // ---------------------------------------------------------------------------
 
 const schema = z.object({
-  batchId:      z.string().min(1, "Lot requis"),
-  date:         z.string().min(1, "Date requise"),
-  totalEggs:    z.coerce.number().int().nonnegative("Valeur invalide"),
+  batchId: z.string().min(1, "Lot requis"),
+  date: z.string().min(1, "Date requise"),
+  totalEggs: z.coerce.number().int().nonnegative("Valeur invalide"),
   sellableEggs: z.coerce.number().int().nonnegative("Valeur invalide"),
-  brokenEggs:   z.coerce.number().int().nonnegative().default(0),
-  dirtyEggs:    z.coerce.number().int().nonnegative().default(0),
-  smallEggs:    z.coerce.number().int().nonnegative().default(0),
+  brokenEggs: z.coerce.number().int().nonnegative().default(0),
+  dirtyEggs: z.coerce.number().int().nonnegative().default(0),
+  smallEggs: z.coerce.number().int().nonnegative().default(0),
   passageCount: z.coerce.number().int().min(1).max(10).default(1),
   observations: z.string().max(1000).optional(),
 })
-type FormValues = z.infer<typeof schema>
+
+type FormValues = z.input<typeof schema>
+type SubmitValues = z.output<typeof schema>
 
 // ---------------------------------------------------------------------------
 // Props
@@ -42,9 +44,9 @@ type FormValues = z.infer<typeof schema>
 
 interface Props {
   organizationId: string
-  userRole:       string
+  userRole: string
   pondeuseBatches: BatchSummary[]
-  initialRecords:  EggRecordSummary[]
+  initialRecords: EggRecordSummary[]
 }
 
 // ---------------------------------------------------------------------------
@@ -61,36 +63,43 @@ function layingRate(totalEggs: number, batchEntryCount: number): number {
 // ---------------------------------------------------------------------------
 
 export function EggsClient({ organizationId, userRole, pondeuseBatches, initialRecords }: Props) {
-  const [records, setRecords]       = useState<EggRecordSummary[]>(initialRecords)
-  const [showForm, setShowForm]     = useState(false)
+  const [records, setRecords] = useState<EggRecordSummary[]>(initialRecords)
+  const [showForm, setShowForm] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   const canEdit = ["SUPER_ADMIN", "OWNER", "MANAGER", "TECHNICIAN", "DATA_ENTRY"].includes(userRole)
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<FormValues, any, SubmitValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      date:         new Date().toISOString().split("T")[0],
-      totalEggs:    0,
+      batchId: "",
+      date: new Date().toISOString().split("T")[0],
+      totalEggs: 0,
       sellableEggs: 0,
-      brokenEggs:   0,
-      dirtyEggs:    0,
-      smallEggs:    0,
+      brokenEggs: 0,
+      dirtyEggs: 0,
+      smallEggs: 0,
       passageCount: 1,
+      observations: "",
     },
   })
 
-  async function onSubmit(data: FormValues) {
+  const onSubmit: SubmitHandler<SubmitValues> = async (data) => {
     startTransition(async () => {
       const res = await createEggRecord({
         organizationId,
-        batchId:      data.batchId,
-        date:         new Date(data.date),
-        totalEggs:    data.totalEggs,
+        batchId: data.batchId,
+        date: new Date(data.date),
+        totalEggs: data.totalEggs,
         sellableEggs: data.sellableEggs,
-        brokenEggs:   data.brokenEggs,
-        dirtyEggs:    data.dirtyEggs,
-        smallEggs:    data.smallEggs,
+        brokenEggs: data.brokenEggs,
+        dirtyEggs: data.dirtyEggs,
+        smallEggs: data.smallEggs,
         passageCount: data.passageCount,
         observations: data.observations || undefined,
       })
@@ -99,7 +108,17 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
         toast.success("Record d'œufs enregistré")
         const refreshed = await getEggRecords({ organizationId, limit: 50 })
         if (refreshed.success) setRecords(refreshed.data)
-        reset()
+        reset({
+          batchId: "",
+          date: new Date().toISOString().split("T")[0],
+          totalEggs: 0,
+          sellableEggs: 0,
+          brokenEggs: 0,
+          dirtyEggs: 0,
+          smallEggs: 0,
+          passageCount: 1,
+          observations: "",
+        })
         setShowForm(false)
       } else {
         toast.error(res.error)
@@ -126,12 +145,11 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
   const todayRecords = records.filter(
     (r) => new Date(r.date).toISOString().split("T")[0] === todayStr,
   )
-  const totalTodayEggs     = todayRecords.reduce((s, r) => s + r.totalEggs, 0)
+  const totalTodayEggs = todayRecords.reduce((s, r) => s + r.totalEggs, 0)
   const totalTodaySellable = todayRecords.reduce((s, r) => s + r.sellableEggs, 0)
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      {/* En-tête */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Production d&apos;œufs</h1>
@@ -147,7 +165,6 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
         )}
       </div>
 
-      {/* Résumé du jour */}
       {todayRecords.length > 0 && (
         <div className="grid grid-cols-2 gap-3">
           <Card>
@@ -170,7 +187,6 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
         </div>
       )}
 
-      {/* Formulaire */}
       {showForm && canEdit && (
         <Card>
           <CardHeader className="pb-3">
@@ -197,42 +213,112 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
                     <p className="mt-1 text-xs text-red-600">{errors.batchId.message}</p>
                   )}
                 </div>
+
                 <div>
                   <Label htmlFor="egg-date" required>Date</Label>
-                  <Input id="egg-date" type="date" {...register("date")} />
+                  <Input
+                    id="egg-date"
+                    type="date"
+                    error={errors.date?.message}
+                    {...register("date")}
+                  />
                 </div>
+
                 <div>
                   <Label htmlFor="total-eggs" required>Total œufs ramassés</Label>
-                  <Input id="total-eggs" type="number" {...register("totalEggs")} />
+                  <Input
+                    id="total-eggs"
+                    type="number"
+                    error={errors.totalEggs?.message}
+                    {...register("totalEggs")}
+                  />
                 </div>
+
                 <div>
                   <Label htmlFor="sellable-eggs" required>Commercialisables</Label>
-                  <Input id="sellable-eggs" type="number" {...register("sellableEggs")} />
+                  <Input
+                    id="sellable-eggs"
+                    type="number"
+                    error={errors.sellableEggs?.message}
+                    {...register("sellableEggs")}
+                  />
                 </div>
+
                 <div>
                   <Label htmlFor="broken">Cassés</Label>
-                  <Input id="broken" type="number" {...register("brokenEggs")} />
+                  <Input
+                    id="broken"
+                    type="number"
+                    error={errors.brokenEggs?.message}
+                    {...register("brokenEggs")}
+                  />
                 </div>
+
                 <div>
                   <Label htmlFor="dirty">Sales</Label>
-                  <Input id="dirty" type="number" {...register("dirtyEggs")} />
+                  <Input
+                    id="dirty"
+                    type="number"
+                    error={errors.dirtyEggs?.message}
+                    {...register("dirtyEggs")}
+                  />
                 </div>
+
                 <div>
                   <Label htmlFor="small">Petits / Déclassés</Label>
-                  <Input id="small" type="number" {...register("smallEggs")} />
+                  <Input
+                    id="small"
+                    type="number"
+                    error={errors.smallEggs?.message}
+                    {...register("smallEggs")}
+                  />
                 </div>
+
                 <div>
                   <Label htmlFor="passages">Nb passages</Label>
-                  <Input id="passages" type="number" min="1" max="10" {...register("passageCount")} />
+                  <Input
+                    id="passages"
+                    type="number"
+                    min="1"
+                    max="10"
+                    error={errors.passageCount?.message}
+                    {...register("passageCount")}
+                  />
                 </div>
               </div>
+
               <div>
                 <Label htmlFor="obs">Observations</Label>
-                <Input id="obs" placeholder="Observations optionnelles..." {...register("observations")} />
+                <Input
+                  id="obs"
+                  placeholder="Observations optionnelles..."
+                  error={errors.observations?.message}
+                  {...register("observations")}
+                />
               </div>
+
               <div className="flex gap-3">
-                <Button type="submit" variant="primary" loading={isPending}>Enregistrer</Button>
-                <Button type="button" variant="outline" onClick={() => { setShowForm(false); reset() }}>
+                <Button type="submit" variant="primary" loading={isPending}>
+                  Enregistrer
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowForm(false)
+                    reset({
+                      batchId: "",
+                      date: new Date().toISOString().split("T")[0],
+                      totalEggs: 0,
+                      sellableEggs: 0,
+                      brokenEggs: 0,
+                      dirtyEggs: 0,
+                      smallEggs: 0,
+                      passageCount: 1,
+                      observations: "",
+                    })
+                  }}
+                >
                   Annuler
                 </Button>
               </div>
@@ -241,7 +327,6 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
         </Card>
       )}
 
-      {/* Pas de lots pondeuses */}
       {pondeuseBatches.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
@@ -253,7 +338,6 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
           </CardContent>
         </Card>
       ) : (
-        /* Liste des records */
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -269,8 +353,8 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
             ) : (
               <div className="divide-y divide-gray-100">
                 {records.map((rec) => {
-                  const batch  = pondeuseBatches.find((b) => b.id === rec.batchId)
-                  const rate   = batch ? layingRate(rec.totalEggs, batch.entryCount) : null
+                  const batch = pondeuseBatches.find((b) => b.id === rec.batchId)
+                  const rate = batch ? layingRate(rec.totalEggs, batch.entryCount) : null
 
                   return (
                     <div key={rec.id} className="flex items-center justify-between px-4 py-3">

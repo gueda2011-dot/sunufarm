@@ -1,14 +1,14 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 import { Plus, ChevronDown, ChevronUp, Pencil, Trash2, Warehouse, Building2 } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
-import { Input }  from "@/src/components/ui/input"
-import { Label }  from "@/src/components/ui/label"
+import { Input } from "@/src/components/ui/input"
+import { Label } from "@/src/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
 import {
   getFarms,
@@ -29,26 +29,32 @@ import {
 // ---------------------------------------------------------------------------
 
 const farmSchema = z.object({
-  name:          z.string().min(1, "Nom requis").max(100),
-  code:          z.string().max(20).optional(),
-  address:       z.string().max(255).optional(),
-  totalCapacity: z.coerce.number().int().positive().optional().or(z.literal("")),
+  name: z.string().min(1, "Nom requis").max(100),
+  code: z.string().max(20).optional(),
+  address: z.string().max(255).optional(),
+  totalCapacity: z.union([
+    z.literal(""),
+    z.coerce.number().int().positive(),
+  ]).optional(),
 })
 
 const buildingSchema = z.object({
-  name:     z.string().min(1, "Nom requis").max(100),
-  code:     z.string().max(20).optional(),
-  type:     z.enum(["POULAILLER_OUVERT", "POULAILLER_FERME", "POULAILLER_SEMI_FERME"]),
+  name: z.string().min(1, "Nom requis").max(100),
+  code: z.string().max(20).optional(),
+  type: z.enum(["POULAILLER_OUVERT", "POULAILLER_FERME", "POULAILLER_SEMI_FERME"]),
   capacity: z.coerce.number().int().positive("Capacité requise"),
 })
 
-type FarmForm     = z.infer<typeof farmSchema>
-type BuildingForm = z.infer<typeof buildingSchema>
+type FarmFormValues = z.input<typeof farmSchema>
+type FarmSubmitValues = z.output<typeof farmSchema>
+
+type BuildingFormValues = z.input<typeof buildingSchema>
+type BuildingSubmitValues = z.output<typeof buildingSchema>
 
 const BUILDING_TYPE_LABELS: Record<string, string> = {
-  POULAILLER_OUVERT:      "Ouvert",
-  POULAILLER_FERME:       "Fermé",
-  POULAILLER_SEMI_FERME:  "Semi-fermé",
+  POULAILLER_OUVERT: "Ouvert",
+  POULAILLER_FERME: "Fermé",
+  POULAILLER_SEMI_FERME: "Semi-fermé",
 }
 
 // ---------------------------------------------------------------------------
@@ -57,8 +63,8 @@ const BUILDING_TYPE_LABELS: Record<string, string> = {
 
 interface Props {
   organizationId: string
-  userRole:       string
-  initialFarms:   FarmSummary[]
+  userRole: string
+  initialFarms: FarmSummary[]
 }
 
 // ---------------------------------------------------------------------------
@@ -66,26 +72,36 @@ interface Props {
 // ---------------------------------------------------------------------------
 
 export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
-  const [farms, setFarms]           = useState<FarmSummary[]>(initialFarms)
+  const [farms, setFarms] = useState<FarmSummary[]>(initialFarms)
   const [expandedFarm, setExpanded] = useState<string | null>(null)
-  const [buildings, setBuildings]   = useState<Record<string, BuildingSummary[]>>({})
+  const [buildings, setBuildings] = useState<Record<string, BuildingSummary[]>>({})
   const [showFarmForm, setShowFarm] = useState(false)
-  const [editingFarm, setEditFarm]  = useState<FarmSummary | null>(null)
-  const [addBldgFor, setAddBldg]    = useState<string | null>(null)
+  const [editingFarm, setEditFarm] = useState<FarmSummary | null>(null)
+  const [addBldgFor, setAddBldg] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const canEdit = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(userRole)
 
   // Formulaire ferme
-  const farmForm = useForm<FarmForm>({
+  const farmForm = useForm<FarmFormValues, any, FarmSubmitValues>({
     resolver: zodResolver(farmSchema),
-    defaultValues: { name: "", code: "", address: "", totalCapacity: "" },
+    defaultValues: {
+      name: "",
+      code: "",
+      address: "",
+      totalCapacity: "",
+    },
   })
 
   // Formulaire bâtiment
-  const bldgForm = useForm<BuildingForm>({
+  const bldgForm = useForm<BuildingFormValues, any, BuildingSubmitValues>({
     resolver: zodResolver(buildingSchema),
-    defaultValues: { name: "", code: "", type: "POULAILLER_FERME", capacity: 0 },
+    defaultValues: {
+      name: "",
+      code: "",
+      type: "POULAILLER_FERME",
+      capacity: 0,
+    },
   })
 
   // ── Fermes ─────────────────────────────────────────────────────────────
@@ -110,9 +126,9 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
   function openEditFarm(farm: FarmSummary) {
     setEditFarm(farm)
     farmForm.reset({
-      name:          farm.name,
-      code:          farm.code ?? "",
-      address:       farm.address ?? "",
+      name: farm.name,
+      code: farm.code ?? "",
+      address: farm.address ?? "",
       totalCapacity: farm.totalCapacity ?? "",
     })
     setShowFarm(true)
@@ -121,17 +137,25 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
   function resetFarmForm() {
     setShowFarm(false)
     setEditFarm(null)
-    farmForm.reset({ name: "", code: "", address: "", totalCapacity: "" })
+    farmForm.reset({
+      name: "",
+      code: "",
+      address: "",
+      totalCapacity: "",
+    })
   }
 
-  async function onFarmSubmit(data: FarmForm) {
+  const onFarmSubmit: SubmitHandler<FarmSubmitValues> = async (data) => {
     startTransition(async () => {
       const payload = {
         organizationId,
-        name:          data.name,
-        code:          data.code || undefined,
-        address:       data.address || undefined,
-        totalCapacity: data.totalCapacity ? Number(data.totalCapacity) : undefined,
+        name: data.name,
+        code: data.code || undefined,
+        address: data.address || undefined,
+        totalCapacity:
+          data.totalCapacity === "" || data.totalCapacity === undefined
+            ? undefined
+            : Number(data.totalCapacity),
       }
 
       const res = editingFarm
@@ -167,33 +191,45 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
 
   function openAddBuilding(farmId: string) {
     setAddBldg(farmId)
-    bldgForm.reset({ name: "", code: "", type: "POULAILLER_FERME", capacity: 0 })
+    bldgForm.reset({
+      name: "",
+      code: "",
+      type: "POULAILLER_FERME",
+      capacity: 0,
+    })
   }
 
-  async function onBuildingSubmit(data: BuildingForm) {
+  const onBuildingSubmit: SubmitHandler<BuildingSubmitValues> = async (data) => {
     if (!addBldgFor) return
+
     startTransition(async () => {
       const res = await createBuilding({
         organizationId,
-        farmId:   addBldgFor,
-        name:     data.name,
-        code:     data.code || undefined,
-        type:     data.type as "POULAILLER_OUVERT" | "POULAILLER_FERME" | "POULAILLER_SEMI_FERME",
+        farmId: addBldgFor,
+        name: data.name,
+        code: data.code || undefined,
+        type: data.type,
         capacity: data.capacity,
       })
 
       if (res.success) {
         toast.success("Bâtiment créé")
-        // Rafraîchir les bâtiments de cette ferme
+
         const refreshed = await getBuildings({ organizationId, farmId: addBldgFor })
         if (refreshed.success) {
           setBuildings((prev) => ({ ...prev, [addBldgFor]: refreshed.data }))
         }
-        // Mettre à jour le compteur de bâtiments dans la liste des fermes
+
         const refreshedFarms = await getFarms({ organizationId })
         if (refreshedFarms.success) setFarms(refreshedFarms.data)
+
         setAddBldg(null)
-        bldgForm.reset()
+        bldgForm.reset({
+          name: "",
+          code: "",
+          type: "POULAILLER_FERME",
+          capacity: 0,
+        })
       } else {
         toast.error(res.error)
       }
@@ -220,7 +256,6 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      {/* En-tête */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Fermes & Bâtiments</h1>
@@ -243,7 +278,6 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
         )}
       </div>
 
-      {/* Formulaire de création / modification de ferme */}
       {showFarmForm && canEdit && (
         <Card>
           <CardHeader className="pb-3">
@@ -290,11 +324,7 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
                 </div>
               </div>
               <div className="flex gap-3">
-                <Button
-                  type="submit"
-                  variant="primary"
-                  loading={isPending}
-                >
+                <Button type="submit" variant="primary" loading={isPending}>
                   {editingFarm ? "Enregistrer" : "Créer la ferme"}
                 </Button>
                 <Button type="button" variant="outline" onClick={resetFarmForm}>
@@ -306,7 +336,6 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
         </Card>
       )}
 
-      {/* Liste des fermes */}
       {farms.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
@@ -321,7 +350,6 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
         <div className="space-y-3">
           {farms.map((farm) => (
             <Card key={farm.id} className="overflow-hidden">
-              {/* Ligne ferme */}
               <div
                 className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
                 onClick={() => toggleFarm(farm.id)}
@@ -368,14 +396,12 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
                 </div>
               </div>
 
-              {/* Bâtiments (dépliés) */}
               {expandedFarm === farm.id && (
                 <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
                   {farm.address && (
                     <p className="text-xs text-gray-500 mb-3">{farm.address}</p>
                   )}
 
-                  {/* Liste des bâtiments */}
                   {(buildings[farm.id] ?? []).length === 0 ? (
                     <p className="text-sm text-gray-400 py-2">Aucun bâtiment.</p>
                   ) : (
@@ -410,7 +436,6 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
                     </div>
                   )}
 
-                  {/* Formulaire bâtiment */}
                   {addBldgFor === farm.id ? (
                     <form
                       onSubmit={bldgForm.handleSubmit(onBuildingSubmit)}
