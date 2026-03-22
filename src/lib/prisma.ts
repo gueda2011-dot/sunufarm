@@ -16,8 +16,6 @@ import { PrismaPg } from "@prisma/adapter-pg"
 const prismaClientSingleton = () => {
   const adapter = new PrismaPg({
     connectionString: process.env.SUNUFARM_DATABASE_URL,
-    // Supabase exige SSL pour les connexions externes (production)
-    ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
   })
   return new PrismaClient({ adapter })
 }
