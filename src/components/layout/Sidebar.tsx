@@ -40,6 +40,7 @@ const navItems = [
   { href: "/farms",     label: "Fermes & Bâtiments",icon: Warehouse },
   { href: "/stock",     label: "Stock",             icon: Package },
   { href: "/sales",     label: "Ventes",            icon: ShoppingCart },
+  { href: "/customers", label: "Clients",           icon: Users },
   { href: "/purchases", label: "Achats",            icon: ShoppingBag },
   { href: "/health",    label: "Santé animale",     icon: Syringe },
   { href: "/finances",  label: "Finances",          icon: DollarSign },
