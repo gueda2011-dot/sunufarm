@@ -24,7 +24,7 @@ import {
 import { cn } from "@/src/lib/utils"
 
 const tabs = [
-  { href: "/",         label: "Accueil",  icon: LayoutDashboard },
+  { href: "/dashboard", label: "Accueil",  icon: LayoutDashboard },
   { href: "/daily",    label: "Saisie",   icon: ClipboardList,   primary: true },
   { href: "/batches",  label: "Lots",     icon: Bird },
   { href: "/reports",  label: "Stats",    icon: BarChart3 },
@@ -35,7 +35,7 @@ export function BottomNav() {
   const pathname = usePathname()
 
   const isActive = (href: string) => {
-    if (href === "/") return pathname === "/"
+    if (href === "/dashboard") return pathname === "/dashboard"
     return pathname.startsWith(href)
   }
 

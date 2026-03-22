@@ -33,7 +33,7 @@ import { cn } from "@/src/lib/utils"
 // ---------------------------------------------------------------------------
 
 const navItems = [
-  { href: "/",          label: "Tableau de bord",   icon: LayoutDashboard },
+  { href: "/dashboard",  label: "Tableau de bord",   icon: LayoutDashboard },
   { href: "/daily",     label: "Saisie journalière",icon: ClipboardList,   highlight: true },
   { href: "/batches",   label: "Lots d'élevage",    icon: Bird },
   { href: "/eggs",      label: "Production œufs",   icon: Egg },
@@ -63,7 +63,7 @@ export function Sidebar({ orgName }: SidebarProps) {
   const pathname = usePathname()
 
   const isActive = (href: string) => {
-    if (href === "/") return pathname === "/"
+    if (href === "/dashboard") return pathname === "/dashboard"
     return pathname.startsWith(href)
   }
 
