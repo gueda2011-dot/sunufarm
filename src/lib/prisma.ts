@@ -1,22 +1,17 @@
-import { PrismaClient } from "../generated/prisma/client"
-import { PrismaPg } from "@prisma/adapter-pg"
-import { Pool } from "pg"
+import { PrismaClient } from "@prisma/client"
 
-const pool = new Pool({
-  connectionString: process.env.SUNUFARM_DATABASE_URL,
-})
-const adapter = new PrismaPg(pool)
-
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
+const prismaClientSingleton = () => {
+  return new PrismaClient()
 }
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({ adapter })
+declare global {
+  var prisma: undefined | ReturnType<typeof prismaClientSingleton>
+}
+
+const prisma = globalThis.prisma ?? prismaClientSingleton()
 
 if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma
+  globalThis.prisma = prisma
 }
 
 export default prisma
