@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(find /c/Users/pcpro/sunufarm/src/app -type f -name *.tsx -o -name *.ts)",
+      "Bash(npm list:*)",
+      "Bash(find /c/Users/pcpro/sunufarm -maxdepth 2 -name *.css -o -name tailwind.config* -o -name postcss.config*)",
+      "Bash(npm install:*)",
+      "Bash(ls /c/Users/pcpro/sunufarm/app/\\\\\\(dashboard\\\\\\)/)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); all_deps={**d.get\\(''''dependencies'''',{}\\), **d.get\\(''''devDependencies'''',{}\\)}; targets=[''''sonner'''',''''@hookform/resolvers'''',''''class-variance-authority'''',''''lucide-react'''',''''@tanstack/react-query'''']; [print\\(f''''{t}: {all_deps.get\\(t,\"\"NOT INSTALLED\"\"\\)}''''\\) for t in targets]\")",
+      "Bash(node -e \"const d=require\\(''./package.json''\\); const all={...d.dependencies,...d.devDependencies}; [''sonner'',''@hookform/resolvers'',''class-variance-authority'',''lucide-react'',''@tanstack/react-query''].forEach\\(t=>console.log\\(t+'': ''+\\(all[t]||''NOT INSTALLED''\\)\\)\\)\")"
+    ]
+  }
+}

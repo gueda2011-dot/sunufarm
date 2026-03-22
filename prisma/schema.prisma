@@ -1,0 +1,1006 @@
+// =============================================================================
+// SunuFarm — Schema Prisma complet
+// Prisma 7 | PostgreSQL 15+
+// Multi-tenant : organizationId OBLIGATOIRE sur tous les modèles opérationnels
+// Montants     : Int uniquement (FCFA entiers, jamais Float ou Decimal)
+// Soft delete  : deletedAt sur Organization, Farm, Building, Batch, User
+// Timestamps   : createdAt + updatedAt sur TOUS les modèles sans exception
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UserRole {
+  SUPER_ADMIN
+  OWNER
+  MANAGER
+  TECHNICIAN
+  DATA_ENTRY
+  ACCOUNTANT
+  VET
+  VIEWER
+}
+
+enum BatchType {
+  CHAIR
+  PONDEUSE
+  REPRODUCTEUR
+}
+
+enum BatchStatus {
+  ACTIVE
+  CLOSED
+  SOLD
+  SLAUGHTERED
+}
+
+enum BuildingType {
+  POULAILLER_OUVERT
+  POULAILLER_FERME
+  POULAILLER_SEMI_FERME
+}
+
+enum FeedMovementType {
+  ENTREE
+  SORTIE
+  INVENTAIRE
+  AJUSTEMENT
+}
+
+enum MedicineMovementType {
+  ENTREE
+  SORTIE
+  PEREMPTION
+  INVENTAIRE
+}
+
+enum SaleProductType {
+  POULET_VIF
+  OEUF
+  FIENTE
+}
+
+enum InvoiceType {
+  VENTE
+  ACHAT
+}
+
+enum InvoiceStatus {
+  BROUILLON
+  EMISE
+  PARTIELLEMENT_PAYEE
+  PAYEE
+  ANNULEE
+}
+
+enum PaymentMethod {
+  ESPECES
+  VIREMENT
+  CHEQUE
+  MOBILE_MONEY
+  AUTRE
+}
+
+enum NotificationType {
+  MORTALITE_ELEVEE
+  TAUX_PONTE_BAS
+  STOCK_ALIMENT_CRITIQUE
+  RETARD_VACCINATION
+  CREANCE_EN_RETARD
+  MOTIF_MORTALITE_MANQUANT
+  AUTRE
+}
+
+enum NotificationStatus {
+  NON_LU
+  LU
+  ARCHIVE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+}
+
+// =============================================================================
+// RÉFÉRENTIELS GLOBAUX (partagés entre toutes les organisations)
+// =============================================================================
+
+model Species {
+  id        String   @id @default(cuid())
+  name      String   @unique // "Poulet", "Pintade", "Dinde", "Caille"
+  code      String   @unique // "POULET", "PINTADE", "DINDE", "CAILLE"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  breeds  Breed[]
+  batches Batch[]
+}
+
+model Breed {
+  id        String   @id @default(cuid())
+  name      String   // "Cobb 500", "Ross 308", "ISA Brown", "Label Rouge"
+  code      String   @unique // "COBB500", "ROSS308", "ISA_BROWN"
+  speciesId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  species Species @relation(fields: [speciesId], references: [id])
+  batches Batch[]
+
+  @@index([speciesId])
+}
+
+model FeedType {
+  id        String   @id @default(cuid())
+  name      String   @unique // "Démarrage", "Croissance", "Finition", "Ponte"
+  code      String   @unique // "DEMARRAGE", "CROISSANCE", "FINITION", "PONTE"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  feedStocks    FeedStock[]
+  feedMovements FeedMovement[]
+}
+
+// Motifs de mortalité : globaux (organizationId null) ou custom par organisation
+model MortalityReason {
+  id             String   @id @default(cuid())
+  name           String   // "Maladie", "Accident", "Prédation", "Stress thermique", "Non précisé"
+  code           String   // "MALADIE", "ACCIDENT", "NON_PRECISE"
+  organizationId String?  // null = référentiel global partagé
+  isDefault      Boolean  @default(false) // true pour "Non précisé" — motif par défaut terrain
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization     Organization?     @relation(fields: [organizationId], references: [id])
+  mortalityRecords MortalityRecord[]
+
+  @@unique([code, organizationId])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// AUTHENTIFICATION (NextAuth v5 Prisma Adapter)
+// =============================================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// =============================================================================
+// UTILISATEURS
+// =============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  organizations UserOrganization[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+}
+
+// =============================================================================
+// ORGANISATIONS (tenant racine — isolation totale garantie par le code)
+// =============================================================================
+
+model Organization {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  currency  String    @default("XOF")
+  locale    String    @default("fr-SN")
+  timezone  String    @default("Africa/Dakar")
+  logoUrl   String?
+  phone     String?
+  address   String?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  users             UserOrganization[]
+  farms             Farm[]
+  customers         Customer[]
+  suppliers         Supplier[]
+  sales             Sale[]
+  purchases         Purchase[]
+  expenses          Expense[]
+  invoices          Invoice[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  mortalityReasons  MortalityReason[]
+  expenseCategories ExpenseCategory[]
+
+  @@index([slug])
+}
+
+// Lien User <-> Organization avec rôle et permissions fines par ferme
+model UserOrganization {
+  id              String   @id @default(cuid())
+  userId          String
+  organizationId  String
+  role            UserRole @default(VIEWER)
+  // Tableau JSON : [{farmId: string, canRead: bool, canWrite: bool, canDelete: bool}]
+  farmPermissions Json     @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// =============================================================================
+// FERMES ET BÂTIMENTS
+// =============================================================================
+
+model Farm {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  code           String?   // identifiant court ex: "DKR-01", "THIS-02"
+  address        String?
+  latitude       Float?
+  longitude      Float?
+  totalCapacity  Int?      // capacité totale en nombre de sujets
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  buildings      Building[]
+  feedStocks     FeedStock[]
+  medicineStocks MedicineStock[]
+  employees      Employee[]
+
+  @@index([organizationId])
+}
+
+model Building {
+  id              String       @id @default(cuid())
+  organizationId  String
+  farmId          String
+  name            String
+  code            String?      // "BAT-A", "P1"
+  type            BuildingType @default(POULAILLER_FERME)
+  capacity        Int          // nombre de sujets maximum
+  surfaceM2       Float?
+  ventilationType String?      // "Naturelle", "Forcée", "Tunnel"
+  deletedAt       DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  farm    Farm    @relation(fields: [farmId], references: [id])
+  batches Batch[]
+
+  @@index([farmId])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// LOTS D'ÉLEVAGE (cœur du système)
+// =============================================================================
+
+model Batch {
+  id             String      @id @default(cuid())
+  organizationId String
+  buildingId     String
+  number         String      // "SF-2024-001" — unique par organisation
+  type           BatchType
+  status         BatchStatus @default(ACTIVE)
+
+  // Espèce et race
+  speciesId String
+  breedId   String?
+
+  // Données d'entrée du lot
+  entryDate    DateTime // date d'arrivée des sujets
+  entryCount   Int      // effectif initial (jamais modifié après création)
+  entryAgeDay  Int      @default(0) // âge en jours à l'entrée (0 = poussins du jour)
+  entryWeightG Int?     // poids moyen à l'entrée en grammes
+
+  // Achat des poussins / sujets
+  supplierId    String?
+  unitCostFcfa  Int     @default(0) // coût par sujet en FCFA
+  totalCostFcfa Int     @default(0) // coût total achat poussins en FCFA
+
+  // Clôture du lot
+  closedAt    DateTime?
+  closeReason String?
+
+  notes     String?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  building           Building              @relation(fields: [buildingId], references: [id])
+  species            Species               @relation(fields: [speciesId], references: [id])
+  breed              Breed?                @relation(fields: [breedId], references: [id])
+  supplier           Supplier?             @relation(fields: [supplierId], references: [id])
+  dailyRecords       DailyRecord[]
+  eggRecords         EggProductionRecord[]
+  weightRecords      WeightRecord[]
+  treatmentRecords   TreatmentRecord[]
+  vaccinationRecords VaccinationRecord[]
+  expenses           Expense[]
+  saleItems          SaleItem[]
+
+  // Le numéro SF-YYYY-NNN est unique au sein d'une organisation
+  @@unique([number, organizationId])
+  @@index([organizationId])
+  @@index([buildingId])
+  @@index([status])
+}
+
+// =============================================================================
+// SAISIE JOURNALIÈRE (écran prioritaire terrain — < 30 secondes)
+// =============================================================================
+
+model DailyRecord {
+  id             String   @id @default(cuid())
+  organizationId String
+  batchId        String
+  date           DateTime @db.Date
+
+  // Champs principaux — obligatoires pour la saisie rapide terrain
+  mortality   Int   @default(0) // nombre de morts du jour
+  feedKg      Float            // aliment distribué en kg (Float : 12.5 kg possible)
+  waterLiters Float?           // eau consommée en litres
+
+  // Champs secondaires — optionnels, accessibles via "Ajouter détails"
+  temperatureMin Float?  // température min. °C
+  temperatureMax Float?  // température max. °C
+  humidity       Float?  // humidité relative %
+  avgWeightG     Int?    // poids moyen échantillon en grammes
+
+  observations String?
+
+  recordedById String?   // userId de la personne qui a saisi
+  lockedAt     DateTime? // verrouillé automatiquement après J+1 minuit
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batch            Batch             @relation(fields: [batchId], references: [id])
+  mortalityRecords MortalityRecord[]
+
+  // Contrainte métier : 1 seule saisie par lot et par jour
+  @@unique([batchId, date])
+  @@index([batchId])
+  @@index([organizationId])
+  @@index([date])
+}
+
+// Détail des mortalités par motif (optionnel — motif "Non précisé" si non renseigné)
+// Alerte MOTIF_MORTALITE_MANQUANT déclenchée après 3 jours consécutifs sans motif
+model MortalityRecord {
+  id                String   @id @default(cuid())
+  dailyRecordId     String
+  mortalityReasonId String?  // null → motif "Non précisé" appliqué par défaut
+  count             Int
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  dailyRecord     DailyRecord      @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+  mortalityReason MortalityReason? @relation(fields: [mortalityReasonId], references: [id])
+
+  @@index([dailyRecordId])
+}
+
+// =============================================================================
+// PRODUCTION D'ŒUFS (lots pondeuses uniquement)
+// =============================================================================
+
+model EggProductionRecord {
+  id             String   @id @default(cuid())
+  organizationId String
+  batchId        String
+  date           DateTime @db.Date
+
+  totalEggs    Int @default(0) // total ramassé dans la journée
+  sellableEggs Int @default(0) // commercialisables (classe A)
+  brokenEggs   Int @default(0) // cassés
+  dirtyEggs    Int @default(0) // sales
+  smallEggs    Int @default(0) // petits / déclassés (classe B/C)
+
+  passageCount Int     @default(1) // nombre de passages de ramassage dans la journée
+  observations String?
+  recordedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batch Batch @relation(fields: [batchId], references: [id])
+
+  @@unique([batchId, date])
+  @@index([batchId])
+  @@index([organizationId])
+  @@index([date])
+}
+
+// =============================================================================
+// PESÉES (suivi croissance — lots chair principalement)
+// =============================================================================
+
+model WeightRecord {
+  id             String   @id @default(cuid())
+  organizationId String
+  batchId        String
+  date           DateTime @db.Date
+  batchAgeDay    Int      // âge du lot en jours au moment de la pesée
+  sampleCount    Int      // nombre de sujets pesés dans l'échantillon
+  avgWeightG     Int      // poids moyen en grammes
+  minWeightG     Int?     // poids minimum de l'échantillon
+  maxWeightG     Int?     // poids maximum de l'échantillon
+  notes          String?
+  recordedById   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  batch Batch @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// SANTÉ ANIMALE
+// =============================================================================
+
+// Modèle de plan vaccinal réutilisable (template applicable à un type de lot)
+model VaccinationPlan {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String    // "Plan standard poulet de chair Cobb 500"
+  batchType      BatchType
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  items VaccinationPlanItem[]
+
+  @@index([organizationId])
+}
+
+// Étape d'un plan vaccinal (J7, J14, J21...)
+model VaccinationPlanItem {
+  id                String   @id @default(cuid())
+  vaccinationPlanId String
+  dayOfAge          Int      // jour d'âge cible (7 = J7)
+  vaccineName       String   // "Newcastle HB1", "Gumboro D78", "Marek CVI988"
+  route             String?  // "Orale", "Injection SC", "Spray", "Oculaire"
+  dose              String?  // "1 goutte/sujet", "0.2 ml/sujet"
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  plan VaccinationPlan @relation(fields: [vaccinationPlanId], references: [id], onDelete: Cascade)
+
+  @@index([vaccinationPlanId])
+}
+
+// Vaccination effectivement réalisée sur un lot
+model VaccinationRecord {
+  id              String   @id @default(cuid())
+  organizationId  String
+  batchId         String
+  date            DateTime @db.Date
+  batchAgeDay     Int      // âge du lot en jours à la date de vaccination
+  vaccineName     String
+  route           String?
+  dose            String?
+  countVaccinated Int      // nombre de sujets vaccinés
+  medicineStockId String?  // stock médicament utilisé (pour décrémenter le stock)
+  notes           String?
+  recordedById    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  batch         Batch          @relation(fields: [batchId], references: [id])
+  medicineStock MedicineStock? @relation(fields: [medicineStockId], references: [id])
+
+  @@index([batchId])
+  @@index([organizationId])
+}
+
+// Traitement médicamenteux administré à un lot
+model TreatmentRecord {
+  id              String    @id @default(cuid())
+  organizationId  String
+  batchId         String
+  startDate       DateTime  @db.Date
+  endDate         DateTime? @db.Date
+  medicineName    String
+  dose            String?
+  durationDays    Int?
+  countTreated    Int?      // nombre de sujets traités (null = tout le lot)
+  medicineStockId String?
+  indication      String?   // motif du traitement ex: "Suspicion bronchite infectieuse"
+  notes           String?
+  recordedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  batch         Batch          @relation(fields: [batchId], references: [id])
+  medicineStock MedicineStock? @relation(fields: [medicineStockId], references: [id])
+
+  @@index([batchId])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// STOCK ALIMENTS
+// =============================================================================
+
+model FeedStock {
+  id               String   @id @default(cuid())
+  organizationId   String
+  farmId           String
+  feedTypeId       String
+  name             String   // nom commercial ex: "Aliment démarrage Avicoop 2024"
+  supplierName     String?
+  quantityKg       Float    @default(0) // stock actuel en kg
+  unitPriceFcfa    Int      @default(0) // prix d'achat unitaire FCFA/kg
+  alertThresholdKg Float    @default(0) // seuil alerte stock bas en kg
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  farm      Farm           @relation(fields: [farmId], references: [id])
+  feedType  FeedType       @relation(fields: [feedTypeId], references: [id])
+  movements FeedMovement[]
+
+  @@index([farmId])
+  @@index([organizationId])
+}
+
+model FeedMovement {
+  id             String           @id @default(cuid())
+  organizationId String
+  feedStockId    String
+  feedTypeId     String
+  type           FeedMovementType
+  quantityKg     Float
+  unitPriceFcfa  Int?             // prix unitaire FCFA/kg (renseigné pour les entrées)
+  totalFcfa      Int?             // montant total du mouvement en FCFA
+  batchId        String?          // si sortie consommée par un lot spécifique
+  reference      String?          // numéro BL / facture fournisseur
+  notes          String?
+  recordedById   String?
+  date           DateTime         @db.Date
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  feedStock FeedStock @relation(fields: [feedStockId], references: [id])
+  feedType  FeedType  @relation(fields: [feedTypeId], references: [id])
+
+  @@index([feedStockId])
+  @@index([organizationId])
+  @@index([date])
+}
+
+// =============================================================================
+// STOCK MÉDICAMENTS ET VACCINS
+// =============================================================================
+
+model MedicineStock {
+  id             String    @id @default(cuid())
+  organizationId String
+  farmId         String
+  name           String    // "Newcastle HB1 - Sanovet", "Doxycycline 50%"
+  category       String?   // "VACCIN", "ANTIBIOTIQUE", "ANTIPARASITAIRE", "VITAMINE"
+  unit           String    // "flacon", "kg", "litre", "dose", "sachet"
+  quantityOnHand Float     @default(0) // stock actuel dans l'unité définie
+  unitPriceFcfa  Int       @default(0) // prix unitaire FCFA
+  expiryDate     DateTime? // date de péremption
+  alertThreshold Float     @default(0) // seuil alerte stock bas
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  farm               Farm                @relation(fields: [farmId], references: [id])
+  vaccinationRecords VaccinationRecord[]
+  treatmentRecords   TreatmentRecord[]
+  movements          MedicineMovement[]
+
+  @@index([farmId])
+  @@index([organizationId])
+}
+
+model MedicineMovement {
+  id              String               @id @default(cuid())
+  organizationId  String
+  medicineStockId String
+  type            MedicineMovementType
+  quantity        Float
+  unitPriceFcfa   Int?
+  totalFcfa       Int?
+  batchId         String?
+  reference       String?
+  notes           String?
+  recordedById    String?
+  date            DateTime             @db.Date
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  medicineStock MedicineStock @relation(fields: [medicineStockId], references: [id])
+
+  @@index([medicineStockId])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// CLIENTS ET FOURNISSEURS
+// =============================================================================
+
+model Customer {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  phone          String?
+  email          String?
+  address        String?
+  type           String?  // "PROFESSIONNEL", "REVENDEUR", "PARTICULIER"
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  sales        Sale[]
+  invoices     Invoice[]
+
+  @@index([organizationId])
+}
+
+model Supplier {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  phone          String?
+  email          String?
+  address        String?
+  type           String?  // "POUSSIN", "ALIMENT", "MEDICAMENT", "AUTRE"
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  batches      Batch[]
+  purchases    Purchase[]
+
+  @@index([organizationId])
+}
+
+// =============================================================================
+// VENTES (poulets vifs, œufs, fientes — MVP)
+// =============================================================================
+
+model Sale {
+  id             String          @id @default(cuid())
+  organizationId String
+  customerId     String?
+  invoiceId      String?         @unique
+  saleDate       DateTime        @db.Date
+  productType    SaleProductType
+  totalFcfa      Int             @default(0) // = SUM(items.totalFcfa), calculé
+  paidFcfa       Int             @default(0)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id])
+  customer     Customer?       @relation(fields: [customerId], references: [id])
+  invoice      Invoice?        @relation(fields: [invoiceId], references: [id])
+  items        SaleItem[]
+  payments     Payment[]
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([saleDate])
+}
+
+model SaleItem {
+  id            String   @id @default(cuid())
+  saleId        String
+  batchId       String?  // lot source de la vente (poulets ou œufs)
+  description   String
+  quantity      Float    // quantité en kg, pièces ou plateaux
+  unit          String   // "KG", "PIECE", "PLATEAU", "CAISSE"
+  unitPriceFcfa Int      // prix unitaire en FCFA
+  totalFcfa     Int      // = ROUND(quantity * unitPriceFcfa) — toujours Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sale  Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  batch Batch? @relation(fields: [batchId], references: [id])
+
+  @@index([saleId])
+  @@index([batchId])
+}
+
+// =============================================================================
+// ACHATS
+// =============================================================================
+
+model Purchase {
+  id             String   @id @default(cuid())
+  organizationId String
+  supplierId     String?
+  invoiceId      String?  @unique
+  purchaseDate   DateTime @db.Date
+  reference      String?  // numéro facture fournisseur
+  totalFcfa      Int      @default(0)
+  paidFcfa       Int      @default(0)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id])
+  supplier     Supplier?      @relation(fields: [supplierId], references: [id])
+  invoice      Invoice?       @relation(fields: [invoiceId], references: [id])
+  items        PurchaseItem[]
+  payments     Payment[]
+
+  @@index([organizationId])
+  @@index([supplierId])
+}
+
+model PurchaseItem {
+  id            String   @id @default(cuid())
+  purchaseId    String
+  description   String
+  quantity      Float
+  unit          String
+  unitPriceFcfa Int
+  totalFcfa     Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseId])
+}
+
+// =============================================================================
+// DÉPENSES
+// =============================================================================
+
+// Catégories système (isSystem=true, organizationId=null) + custom par organisation
+model ExpenseCategory {
+  id             String   @id @default(cuid())
+  organizationId String?  // null = catégorie système partagée par toutes les orgs
+  name           String   // "Aliment", "Médicaments", "Main d'œuvre", "Énergie"
+  code           String   // "ALIMENT", "MEDICAMENT", "MAIN_OEUVRE", "ENERGIE", "AUTRE"
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  expenses     Expense[]
+
+  @@unique([code, organizationId])
+  @@index([organizationId])
+}
+
+model Expense {
+  id             String   @id @default(cuid())
+  organizationId String
+  batchId        String?  // charge directe liée à un lot (mortalité, aliment, médic...)
+  farmId         String?  // charge indirecte liée à une ferme (loyer, énergie...)
+  categoryId     String?
+  date           DateTime @db.Date
+  description    String
+  amountFcfa     Int      // montant en FCFA — toujours Int, jamais Float
+  supplierId     String?
+  purchaseId     String?
+  reference      String?
+  notes          String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id])
+  batch        Batch?           @relation(fields: [batchId], references: [id])
+  category     ExpenseCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([organizationId])
+  @@index([batchId])
+  @@index([date])
+}
+
+// =============================================================================
+// FACTURATION ET PAIEMENTS
+// =============================================================================
+
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String
+  type           InvoiceType   // VENTE ou ACHAT
+  number         String        // "INV-2024-001" — unique par organisation
+  customerId     String?       // pour les factures de vente (VENTE)
+  supplierId     String?       // pour les factures d'achat (ACHAT)
+  issueDate      DateTime      @db.Date
+  dueDate        DateTime?     @db.Date
+  totalFcfa      Int
+  paidFcfa       Int           @default(0)
+  status         InvoiceStatus @default(EMISE)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer?    @relation(fields: [customerId], references: [id])
+  sale         Sale?
+  purchase     Purchase?
+  payments     Payment[]
+
+  @@unique([number, organizationId])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  organizationId String
+  invoiceId      String?
+  saleId         String?
+  purchaseId     String?
+  amountFcfa     Int           // montant payé en FCFA — toujours Int
+  paymentDate    DateTime      @db.Date
+  method         PaymentMethod @default(ESPECES)
+  reference      String?       // numéro transaction mobile money, chèque, virement
+  notes          String?
+  createdById    String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  invoice  Invoice?  @relation(fields: [invoiceId], references: [id])
+  sale     Sale?     @relation(fields: [saleId], references: [id])
+  purchase Purchase? @relation(fields: [purchaseId], references: [id])
+
+  @@index([invoiceId])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// RESSOURCES HUMAINES (base MVP — modèle de données uniquement)
+// =============================================================================
+
+model Employee {
+  id                String    @id @default(cuid())
+  organizationId    String
+  farmId            String
+  firstName         String
+  lastName          String
+  phone             String?
+  role              String?   // "Technicien d'élevage", "Agent de saisie", "Gardien"
+  hireDate          DateTime? @db.Date
+  monthlySalaryFcfa Int?      // salaire mensuel en FCFA
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  farm Farm @relation(fields: [farmId], references: [id])
+
+  @@index([farmId])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// NOTIFICATIONS (alertes in-app)
+// =============================================================================
+
+model Notification {
+  id             String             @id @default(cuid())
+  organizationId String
+  userId         String
+  type           NotificationType
+  status         NotificationStatus @default(NON_LU)
+  title          String
+  message        String
+  resourceType   String?            // "BATCH", "FEED_STOCK", "VACCINATION_RECORD"
+  resourceId     String?            // id de la ressource concernée
+  metadata       Json?              // données contextuelles additionnelles
+  readAt         DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+}
+
+// =============================================================================
+// AUDIT LOGS (traçabilité complète — immuable)
+// =============================================================================
+
+model AuditLog {
+  id             String      @id @default(cuid())
+  organizationId String
+  userId         String
+  action         AuditAction
+  resourceType   String      // "BATCH", "DAILY_RECORD", "SALE", "EXPENSE"
+  resourceId     String
+  before         Json?       // snapshot de l'état avant modification
+  after          Json?       // snapshot de l'état après modification
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime    @default(now())
+
+  // Pas de updatedAt : les logs d'audit sont immuables
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+}

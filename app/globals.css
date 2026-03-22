@@ -1,26 +1,75 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Thème SunuFarm — variables CSS + Tailwind v4 @theme
+   Couleurs définies ici = disponibles comme utilities Tailwind (bg-primary, etc.)
+   --------------------------------------------------------------------------- */
+
+@theme {
+  /* Police */
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+
+  /* Couleur principale : vert SunuFarm (#16a34a = green-600) */
+  --color-primary:       #16a34a;
+  --color-primary-dark:  #15803d;
+  --color-primary-light: #dcfce7;
+
+  /* Couleur secondaire : orange (#ea580c = orange-600) */
+  --color-secondary:     #ea580c;
+
+  /* Couleur danger : rouge (#dc2626 = red-600) */
+  --color-danger:        #dc2626;
+
+  /* Couleur info : bleu (#2563eb = blue-600) */
+  --color-info:          #2563eb;
+
+  /* Border radius global SunuFarm (cartes, champs, boutons) */
+  --radius:              0.75rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Variables CSS globales
+   --------------------------------------------------------------------------- */
+
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #111827;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   Scrollbar fine (desktop) — cosmétique uniquement
+   --------------------------------------------------------------------------- */
+
+@media (pointer: fine) {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+  }
 }
