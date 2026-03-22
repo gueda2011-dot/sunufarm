@@ -1,61 +1,385 @@
+"use client"
+
 /**
- * SunuFarm — Section santé du détail d'un lot
+ * SunuFarm — Section santé du détail d'un lot (Client Component)
  *
- * Affiche les 10 dernières vaccinations et les 10 derniers traitements.
- * Composant de présentation pur — pas de fetch, données passées en props.
+ * Affiche l'historique vaccinations + traitements et permet d'en créer
+ * directement depuis la page de détail du lot.
  *
- * Vaccinations : Date | Jour âge | Vaccin | Voie | Sujets vaccinés
- * Traitements  : Date | Médicament | Indication | Durée | Sujets traités
+ * Permissions : le bouton de création est affiché selon le userRole.
+ *   CREATE_VACCINATION / CREATE_TREATMENT → OWNER, MANAGER, VET, SUPER_ADMIN
  */
 
-import { formatDate } from "@/src/lib/formatters"
+import { useState, useTransition } from "react"
+import { formatDate }              from "@/src/lib/formatters"
+import { createVaccination, createTreatment } from "@/src/actions/health"
 import type {
   VaccinationSummary,
   TreatmentSummary,
-} from "@/src/actions/health"
+}                                  from "@/src/actions/health"
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 interface HealthSectionProps {
-  vaccinations: VaccinationSummary[]
-  treatments:   TreatmentSummary[]
-  batchId:      string
+  vaccinations:   VaccinationSummary[]
+  treatments:     TreatmentSummary[]
+  batchId:        string
+  organizationId: string
+  userRole:       string
+  entryDate:      Date
+  entryCount:     number
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function HealthSection({
-  vaccinations,
-  treatments,
-}: HealthSectionProps) {
-  const hasHealth = vaccinations.length > 0 || treatments.length > 0
+type Panel = "vaccination" | "treatment" | null
 
-  if (!hasHealth) {
-    return (
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-          Santé
-        </h2>
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-400">
-          Aucune vaccination ni traitement enregistré.
-        </div>
-      </div>
-    )
+export function HealthSection({
+  vaccinations:   initialVaccinations,
+  treatments:     initialTreatments,
+  batchId,
+  organizationId,
+  userRole,
+  entryDate,
+  entryCount,
+}: HealthSectionProps) {
+  const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER", "VET"].includes(userRole)
+
+  const [vaccinations, setVaccinations] = useState(initialVaccinations)
+  const [treatments,   setTreatments]   = useState(initialTreatments)
+  const [panel,        setPanel]        = useState<Panel>(null)
+  const [error,        setError]        = useState<string | null>(null)
+  const [isPending,    startTransition]  = useTransition()
+
+  const today = new Date().toISOString().slice(0, 10)
+
+  // ---------------------------------------------------------------------------
+  // Création vaccination
+  // ---------------------------------------------------------------------------
+
+  function handleCreateVaccination(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setError(null)
+    const fd = new FormData(e.currentTarget)
+
+    startTransition(async () => {
+      const result = await createVaccination({
+        organizationId,
+        batchId,
+        date:            new Date(fd.get("date") as string),
+        vaccineName:     fd.get("vaccineName") as string,
+        route:           (fd.get("route") as string) || undefined,
+        dose:            (fd.get("dose") as string) || undefined,
+        countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
+        notes:           (fd.get("notes") as string) || undefined,
+      })
+
+      if (!result.success) { setError(result.error); return }
+
+      // Optimistic prepend
+      const newVax: VaccinationSummary = {
+        id:              result.data.id,
+        organizationId,
+        batchId,
+        date:            new Date(fd.get("date") as string),
+        batchAgeDay:     result.data.batchAgeDay,
+        vaccineName:     fd.get("vaccineName") as string,
+        route:           (fd.get("route") as string) || null,
+        dose:            (fd.get("dose") as string) || null,
+        countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
+        medicineStockId: null,
+        notes:           (fd.get("notes") as string) || null,
+        recordedById:    null,
+        createdAt:       new Date(),
+        updatedAt:       new Date(),
+      }
+      setVaccinations((prev) => [newVax, ...prev])
+      setPanel(null)
+      ;(e.target as HTMLFormElement).reset()
+    })
   }
+
+  // ---------------------------------------------------------------------------
+  // Création traitement
+  // ---------------------------------------------------------------------------
+
+  function handleCreateTreatment(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setError(null)
+    const fd = new FormData(e.currentTarget)
+
+    const durationRaw = fd.get("durationDays") as string
+    const countRaw    = fd.get("countTreated")  as string
+
+    startTransition(async () => {
+      const result = await createTreatment({
+        organizationId,
+        batchId,
+        startDate:    new Date(fd.get("startDate") as string),
+        medicineName: fd.get("medicineName") as string,
+        dose:         (fd.get("dose") as string) || undefined,
+        durationDays: durationRaw ? parseInt(durationRaw, 10) : undefined,
+        countTreated: countRaw    ? parseInt(countRaw, 10)    : undefined,
+        indication:   (fd.get("indication") as string) || undefined,
+        notes:        (fd.get("notes") as string) || undefined,
+      })
+
+      if (!result.success) { setError(result.error); return }
+
+      const newTreatment: TreatmentSummary = {
+        id:              result.data.id,
+        organizationId,
+        batchId,
+        startDate:       new Date(fd.get("startDate") as string),
+        endDate:         null,
+        medicineName:    fd.get("medicineName") as string,
+        dose:            (fd.get("dose") as string) || null,
+        durationDays:    durationRaw ? parseInt(durationRaw, 10) : null,
+        countTreated:    countRaw    ? parseInt(countRaw, 10)    : null,
+        medicineStockId: null,
+        indication:      (fd.get("indication") as string) || null,
+        notes:           (fd.get("notes") as string) || null,
+        recordedById:    null,
+        createdAt:       new Date(),
+        updatedAt:       new Date(),
+      }
+      setTreatments((prev) => [newTreatment, ...prev])
+      setPanel(null)
+      ;(e.target as HTMLFormElement).reset()
+    })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
     <div className="space-y-4">
 
-      {/* ── Titre section ────────────────────────────────────────────── */}
-      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-        Santé
-      </h2>
+      {/* ── Titre + boutons ──────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+          Santé
+        </h2>
+        {canCreate && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setPanel(panel === "vaccination" ? null : "vaccination"); setError(null) }}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              {panel === "vaccination" ? "Annuler" : "+ Vaccination"}
+            </button>
+            <button
+              onClick={() => { setPanel(panel === "treatment" ? null : "treatment"); setError(null) }}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              {panel === "treatment" ? "Annuler" : "+ Traitement"}
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* ── Vaccinations ─────────────────────────────────────────────── */}
+      {/* ── Erreur ───────────────────────────────────────────────────────── */}
+      {error && (
+        <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
+      )}
+
+      {/* ── Formulaire vaccination ───────────────────────────────────────── */}
+      {panel === "vaccination" && (
+        <form
+          onSubmit={handleCreateVaccination}
+          className="rounded-xl border border-green-200 bg-green-50 p-4 space-y-3"
+        >
+          <p className="text-sm font-semibold text-green-800">Nouvelle vaccination</p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Date <span className="text-red-500">*</span>
+              </label>
+              <input
+                name="date"
+                type="date"
+                required
+                defaultValue={today}
+                min={entryDate.toISOString().slice(0, 10)}
+                max={today}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Vaccin <span className="text-red-500">*</span>
+              </label>
+              <input
+                name="vaccineName"
+                required
+                placeholder="Newcastle, Gumboro..."
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Sujets vaccinés <span className="text-red-500">*</span>
+              </label>
+              <input
+                name="countVaccinated"
+                type="number"
+                required
+                min="1"
+                max={entryCount}
+                defaultValue={entryCount}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Voie</label>
+              <select
+                name="route"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">—</option>
+                <option value="Oculaire">Oculaire</option>
+                <option value="Eau de boisson">Eau de boisson</option>
+                <option value="Spray">Spray</option>
+                <option value="Injection">Injection</option>
+                <option value="Nasale">Nasale</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Dose</label>
+              <input
+                name="dose"
+                placeholder="1 dose/sujet"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Notes</label>
+            <input
+              name="notes"
+              placeholder="Observations..."
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isPending}
+            className="w-full rounded-xl bg-green-600 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+          >
+            {isPending ? "Enregistrement…" : "Enregistrer la vaccination"}
+          </button>
+        </form>
+      )}
+
+      {/* ── Formulaire traitement ────────────────────────────────────────── */}
+      {panel === "treatment" && (
+        <form
+          onSubmit={handleCreateTreatment}
+          className="rounded-xl border border-orange-200 bg-orange-50 p-4 space-y-3"
+        >
+          <p className="text-sm font-semibold text-orange-800">Nouveau traitement</p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Date début <span className="text-red-500">*</span>
+              </label>
+              <input
+                name="startDate"
+                type="date"
+                required
+                defaultValue={today}
+                min={entryDate.toISOString().slice(0, 10)}
+                max={today}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Médicament <span className="text-red-500">*</span>
+              </label>
+              <input
+                name="medicineName"
+                required
+                placeholder="Amoxicilline, Tylosine..."
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Durée (jours)</label>
+              <input
+                name="durationDays"
+                type="number"
+                min="1"
+                max="30"
+                placeholder="5"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Sujets traités</label>
+              <input
+                name="countTreated"
+                type="number"
+                min="1"
+                max={entryCount}
+                placeholder={String(entryCount)}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Dose</label>
+              <input
+                name="dose"
+                placeholder="1g/litre"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Indication (motif)</label>
+            <input
+              name="indication"
+              placeholder="Bronchite, coryza, prévention..."
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Notes</label>
+            <input
+              name="notes"
+              placeholder="Observations..."
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isPending}
+            className="w-full rounded-xl bg-orange-500 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+          >
+            {isPending ? "Enregistrement…" : "Enregistrer le traitement"}
+          </button>
+        </form>
+      )}
+
+      {/* ── Historique vaccinations ──────────────────────────────────────── */}
       {vaccinations.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-xs font-medium text-gray-500">
@@ -74,22 +398,13 @@ export function HealthSection({
                 </thead>
                 <tbody>
                   {vaccinations.map((v, i) => (
-                    <tr
-                      key={v.id}
-                      className={i < vaccinations.length - 1 ? "border-b border-gray-50" : ""}
-                    >
-                      <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
-                        {formatDate(v.date)}
-                      </td>
+                    <tr key={v.id} className={i < vaccinations.length - 1 ? "border-b border-gray-50" : ""}>
+                      <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{formatDate(v.date)}</td>
                       <td className="px-4 py-2.5 text-gray-800">
                         <div className="font-medium">{v.vaccineName}</div>
-                        {v.route && (
-                          <div className="text-xs text-gray-400">{v.route}</div>
-                        )}
+                        {v.route && <div className="text-xs text-gray-400">{v.route}</div>}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums whitespace-nowrap">
-                        J. {v.batchAgeDay}
-                      </td>
+                      <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums whitespace-nowrap">J. {v.batchAgeDay}</td>
                       <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums whitespace-nowrap">
                         {v.countVaccinated.toLocaleString("fr-SN")}
                       </td>
@@ -102,7 +417,7 @@ export function HealthSection({
         </div>
       )}
 
-      {/* ── Traitements ──────────────────────────────────────────────── */}
+      {/* ── Historique traitements ───────────────────────────────────────── */}
       {treatments.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-xs font-medium text-gray-500">
@@ -121,19 +436,12 @@ export function HealthSection({
                 </thead>
                 <tbody>
                   {treatments.map((t, i) => (
-                    <tr
-                      key={t.id}
-                      className={i < treatments.length - 1 ? "border-b border-gray-50" : ""}
-                    >
-                      <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
-                        {formatDate(t.startDate)}
-                      </td>
+                    <tr key={t.id} className={i < treatments.length - 1 ? "border-b border-gray-50" : ""}>
+                      <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{formatDate(t.startDate)}</td>
                       <td className="px-4 py-2.5 text-gray-800">
                         <div className="font-medium">{t.medicineName}</div>
                         {t.indication && (
-                          <div className="text-xs text-gray-400 truncate max-w-[160px]">
-                            {t.indication}
-                          </div>
+                          <div className="text-xs text-gray-400 truncate max-w-[160px]">{t.indication}</div>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums whitespace-nowrap">
@@ -150,6 +458,14 @@ export function HealthSection({
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── État vide ───────────────────────────────────────────────────── */}
+      {vaccinations.length === 0 && treatments.length === 0 && panel === null && (
+        <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-400">
+          Aucune vaccination ni traitement enregistré.
+          {canCreate && " Utilisez les boutons ci-dessus pour commencer."}
         </div>
       )}
     </div>
