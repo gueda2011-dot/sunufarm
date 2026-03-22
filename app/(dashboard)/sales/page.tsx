@@ -38,7 +38,7 @@ export default async function SalesPage() {
         </p>
       </div>
 
-      <SalesPageClient initialSales={sales} />
+<SalesPageClient sales={sales} />
     </div>
   )
 }
