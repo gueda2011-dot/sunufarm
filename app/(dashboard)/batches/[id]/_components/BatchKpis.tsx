@@ -1,25 +1,17 @@
 /**
- * SunuFarm — KPI cards du détail d'un lot
+ * SunuFarm — KPI opérationnels du détail d'un lot
  *
- * KPI affichés (données réellement disponibles) :
- *   - Effectif vivant (approximation : entryCount - totalMortality)
+ * Limité aux indicateurs de production :
+ *   - Effectif vivant (entryCount − mortalité cumulée)
  *   - Mortalité cumulée + taux
- *   - Dernière saisie (date)
- *   - Coût d'achat (totalCostFcfa)
- *   - Coût unitaire (unitCostFcfa)
- *   - Dépenses opérationnelles (totalExpensesFcfa)
- *   - Charges totales (totalChargesFcfa)
- *   - Nombre de lignes de vente (saleItemsCount) avec lien
+ *   - Dernière saisie
+ *   - Taux de survie
  *
- * KPI absents (non disponibles sans agrégation dédiée) :
- *   - Revenus totaux par lot (getSales ne filtre pas par batchId)
- *   - Rentabilité nette (dépend des revenus)
+ * Les KPI financiers (revenus, charges, marge) sont dans ProfitabilityCard,
+ * calculés via l'action getBatchProfitability.
  */
 
-import Link                       from "next/link"
 import {
-  formatMoneyFCFA,
-  formatMoneyFCFACompact,
   formatNumber,
   formatPercent,
   formatDate,
@@ -62,17 +54,11 @@ function KpiCard({
 // ---------------------------------------------------------------------------
 
 interface BatchKpisProps {
-  liveCount:          number
-  totalMortality:     number
-  mortalityRate:      number
-  lastRecordDate:     Date | null
-  isActive:           boolean
-  totalCostFcfa:      number
-  unitCostFcfa:       number
-  totalExpensesFcfa:  number
-  totalChargesFcfa:   number
-  saleItemsCount:     number
-  batchId:            string
+  liveCount:      number
+  totalMortality: number
+  mortalityRate:  number
+  lastRecordDate: Date | null
+  isActive:       boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -85,12 +71,6 @@ export function BatchKpis({
   mortalityRate,
   lastRecordDate,
   isActive,
-  totalCostFcfa,
-  unitCostFcfa,
-  totalExpensesFcfa,
-  totalChargesFcfa,
-  saleItemsCount,
-  batchId,
 }: BatchKpisProps) {
   const mortalityAccent =
     mortalityRate > 5  ? "red" :
@@ -129,52 +109,10 @@ export function BatchKpis({
           accent={isActive && !lastRecordDate ? "orange" : undefined}
         />
         <KpiCard
-          label="Lignes de vente"
-          value={
-            saleItemsCount > 0 ? (
-              <Link
-                href={`/sales?batchId=${batchId}`}
-                className="text-blue-600 hover:underline"
-              >
-                {saleItemsCount} ligne{saleItemsCount > 1 ? "s" : ""}
-              </Link>
-            ) : (
-              <span className="text-gray-400">Aucune</span>
-            )
-          }
-          sub="Revenus par lot non disponibles au MVP"
+          label="Taux survie"
+          value={`${formatPercent(100 - mortalityRate)}`}
+          accent={mortalityRate > 5 ? "red" : mortalityRate > 2 ? "orange" : "green"}
         />
-      </div>
-
-      {/* ── Rang 3 : finances ─────────────────────────────────────────── */}
-      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide pt-1">
-        Finances
-      </h2>
-
-      <div className="grid grid-cols-2 gap-3">
-        <KpiCard
-          label="Coût d'achat"
-          value={formatMoneyFCFACompact(totalCostFcfa)}
-          sub={unitCostFcfa > 0 ? `${formatMoneyFCFA(unitCostFcfa)} / sujet` : undefined}
-        />
-        <KpiCard
-          label="Dépenses opérat."
-          value={formatMoneyFCFACompact(totalExpensesFcfa)}
-          sub={totalExpensesFcfa === 0 ? "Aucune dépense saisie" : undefined}
-        />
-      </div>
-
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 flex items-center justify-between">
-        <div>
-          <div className="text-xs text-gray-400 mb-0.5">Charges totales</div>
-          <div className="text-xl font-bold text-gray-900 tabular-nums">
-            {formatMoneyFCFACompact(totalChargesFcfa)}
-          </div>
-          <div className="text-xs text-gray-400 mt-0.5">
-            Achat + dépenses opérationnelles
-          </div>
-        </div>
-        <div className="text-2xl" aria-hidden>💰</div>
       </div>
     </div>
   )

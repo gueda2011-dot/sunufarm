@@ -1,8 +1,6 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import Link from "next/link"
-
 import type {
   FeedMovementSummary,
   FeedStockSummary,
@@ -339,14 +337,6 @@ export function StockPageClient({
                         </div>
                       </div>
 
-                      <div className="shrink-0">
-                        <Link
-                          href={`/finances`}
-                          className="inline-flex rounded-xl bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-200"
-                        >
-                          Voir finances
-                        </Link>
-                      </div>
                     </div>
                   )
                 })}

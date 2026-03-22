@@ -7,11 +7,16 @@ import type { SaleSummary } from "@/src/actions/sales"
 import {
   formatDate,
   formatMoneyFCFA,
-  formatNumber,
 } from "@/src/lib/formatters"
 
 type Props = {
   sales: SaleSummary[]
+}
+
+const PRODUCT_TYPE_LABELS: Record<string, string> = {
+  POULET_VIF: "Poulet vif",
+  OEUF:       "Œuf",
+  FIENTE:     "Fiente",
 }
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -136,7 +141,7 @@ export function SalesPageClient({ sales }: Props) {
                       </h3>
 
                       <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700">
-                        {sale.productType}
+                        {PRODUCT_TYPE_LABELS[sale.productType] ?? sale.productType}
                       </span>
                     </div>
 

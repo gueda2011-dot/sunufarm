@@ -41,7 +41,7 @@ export function CreateSaleForm({ organizationId }: Props) {
     ])
   }
 
-  const updateItem = (index: number, field: keyof Item, value: any) => {
+  const updateItem = (index: number, field: keyof Item, value: Item[keyof Item]) => {
     const updated = [...items]
     updated[index] = { ...updated[index], [field]: value }
     setItems(updated)
@@ -51,7 +51,7 @@ export function CreateSaleForm({ organizationId }: Props) {
     setItems(items.filter((_, i) => i !== index))
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setLoading(true)
 

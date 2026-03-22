@@ -10,6 +10,7 @@ import type { Metadata }      from "next"
 import { auth }               from "@/src/auth"
 import prisma                 from "@/src/lib/prisma"
 import { getExpenses }        from "@/src/actions/expenses"
+import { getSales }           from "@/src/actions/sales"
 import { ExpenseForm }        from "./_components/ExpenseForm"
 import { ExpenseList }        from "./_components/ExpenseList"
 import { ExpenseSummaryCards } from "./_components/ExpenseSummaryCards"
@@ -29,10 +30,17 @@ export default async function FinancesPage() {
 
   const { organizationId } = membership
 
-  const expensesResult = await getExpenses({ organizationId, limit: 50 })
+  const [expensesResult, salesResult] = await Promise.all([
+    getExpenses({ organizationId, limit: 50 }),
+    getSales({ organizationId, limit: 100 }),
+  ])
+
   const expenses = expensesResult.success ? expensesResult.data : []
+  const sales    = salesResult.success    ? salesResult.data    : []
 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amountFcfa, 0)
+  const totalSales    = sales.reduce((sum, s) => sum + s.totalFcfa, 0)
+  const netResult     = totalSales - totalExpenses
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -48,8 +56,8 @@ export default async function FinancesPage() {
       {/* ── KPI cards ────────────────────────────────────────────────────── */}
       <ExpenseSummaryCards
         totalExpenses={totalExpenses}
-        totalSales={0}
-        netResult={-totalExpenses}
+        totalSales={totalSales}
+        netResult={netResult}
       />
 
       {/* ── Formulaire + liste ───────────────────────────────────────────── */}

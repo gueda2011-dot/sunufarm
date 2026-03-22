@@ -6,24 +6,26 @@
  * Pas de logique de calcul dans les enfants.
  *
  * Limites honnêtes documentées :
- *   - Revenus par lot : getSales ne filtre pas par batchId (lien affiché, total absent)
  *   - Effectif vivant : approximation entryCount - totalMortality (réformes non gérées au MVP)
  *   - totalMortality : agrégé depuis les 100 derniers records (suffisant pour MVP)
+ *   - Rentabilité : getBatchProfitability agrège SaleItem, Expense et DailyRecord en parallèle
  */
 
-import { notFound, redirect }          from "next/navigation"
-import type { Metadata }               from "next"
-import { auth }                        from "@/src/auth"
-import prisma                          from "@/src/lib/prisma"
-import { getBatch }                    from "@/src/actions/batches"
-import { getDailyRecords }             from "@/src/actions/daily-records"
-import { getExpenses }                 from "@/src/actions/expenses"
+import { notFound, redirect }             from "next/navigation"
+import type { Metadata }                  from "next"
+import { auth }                           from "@/src/auth"
+import prisma                             from "@/src/lib/prisma"
+import { getBatch }                       from "@/src/actions/batches"
+import { getDailyRecords }                from "@/src/actions/daily-records"
+import { getExpenses }                    from "@/src/actions/expenses"
 import { getVaccinations, getTreatments } from "@/src/actions/health"
-import { BatchHeader }                 from "./_components/BatchHeader"
-import { BatchKpis }                   from "./_components/BatchKpis"
-import { RecentDailyRecords }          from "./_components/RecentDailyRecords"
-import { HealthSection }               from "./_components/HealthSection"
-import { RecentExpenses }              from "./_components/RecentExpenses"
+import { getBatchProfitability }          from "@/src/actions/profitability"
+import { BatchHeader }                    from "./_components/BatchHeader"
+import { BatchKpis }                      from "./_components/BatchKpis"
+import { ProfitabilityCard }              from "./_components/ProfitabilityCard"
+import { RecentDailyRecords }             from "./_components/RecentDailyRecords"
+import { HealthSection }                  from "./_components/HealthSection"
+import { RecentExpenses }                 from "./_components/RecentExpenses"
 
 export const metadata: Metadata = { title: "Détail du lot" }
 
@@ -55,21 +57,24 @@ export default async function BatchDetailPage({
     expensesResult,
     vaccinationsResult,
     treatmentsResult,
+    profitabilityResult,
   ] = await Promise.all([
     getBatch({ organizationId, batchId: id }),
     getDailyRecords({ organizationId, batchId: id, limit: 100 }),
     getExpenses({ organizationId, batchId: id, limit: 100 }),
     getVaccinations({ organizationId, batchId: id, limit: 10 }),
     getTreatments({ organizationId, batchId: id, limit: 10 }),
+    getBatchProfitability({ organizationId, batchId: id }),
   ])
 
   if (!batchResult.success) notFound()
 
-  const batch        = batchResult.data
-  const records      = recordsResult.success      ? recordsResult.data      : []
-  const expenses     = expensesResult.success     ? expensesResult.data     : []
-  const vaccinations = vaccinationsResult.success ? vaccinationsResult.data : []
-  const treatments   = treatmentsResult.success   ? treatmentsResult.data   : []
+  const batch         = batchResult.data
+  const records       = recordsResult.success       ? recordsResult.data       : []
+  const expenses      = expensesResult.success      ? expensesResult.data      : []
+  const vaccinations  = vaccinationsResult.success  ? vaccinationsResult.data  : []
+  const treatments    = treatmentsResult.success    ? treatmentsResult.data    : []
+  const profitability = profitabilityResult.success ? profitabilityResult.data : null
 
   // ── Agrégations opérationnelles (calculées une fois, propagées en props) ─
   const totalMortality = records.reduce((s, r) => s + r.mortality, 0)
@@ -100,10 +105,6 @@ export default async function BatchDetailPage({
     Math.floor((endMs - new Date(batch.entryDate).getTime()) / 86_400_000),
   )
 
-  // ── Agrégations financières ───────────────────────────────────────────────
-  const totalExpensesFcfa = expenses.reduce((s, e) => s + e.amountFcfa, 0)
-  const totalChargesFcfa  = batch.totalCostFcfa + totalExpensesFcfa
-
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <BatchHeader
@@ -119,13 +120,11 @@ export default async function BatchDetailPage({
         mortalityRate={mortalityRate}
         lastRecordDate={lastRecordDate}
         isActive={batch.status === "ACTIVE"}
-        totalCostFcfa={batch.totalCostFcfa}
-        unitCostFcfa={batch.unitCostFcfa}
-        totalExpensesFcfa={totalExpensesFcfa}
-        totalChargesFcfa={totalChargesFcfa}
-        saleItemsCount={batch._count.saleItems}
-        batchId={batch.id}
       />
+
+      {profitability && (
+        <ProfitabilityCard profitability={profitability} />
+      )}
 
       <RecentDailyRecords
         records={records.slice(0, 7)}

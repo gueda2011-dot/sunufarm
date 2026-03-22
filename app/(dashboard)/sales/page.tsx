@@ -31,14 +31,7 @@ export default async function SalesPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-gray-900">Ventes</h1>
-        <p className="mt-0.5 text-sm text-gray-500">
-          Suivi du chiffre d’affaires, des encaissements et des ventes par produit.
-        </p>
-      </div>
-
-<SalesPageClient sales={sales} />
+      <SalesPageClient sales={sales} />
     </div>
   )
 }

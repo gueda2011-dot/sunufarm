@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useTransition }  from "react"
-import { useRouter }                 from "next/navigation"
+import { useState, useTransition } from "react"
+import { useRouter }               from "next/navigation"
 import { createExpense }             from "@/src/actions/expenses"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
 import { Input }                     from "@/src/components/ui/input"
@@ -15,14 +15,8 @@ interface ExpenseFormProps {
 export function ExpenseForm({ organizationId }: ExpenseFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-
-  const [description, setDescription] = useState("")
-  const [amountFcfa,  setAmountFcfa]  = useState("")
-  const [date,        setDate]        = useState("")
-  const [reference,   setReference]   = useState("")
-  const [notes,       setNotes]       = useState("")
-  const [error,       setError]       = useState("")
-  const [success,     setSuccess]     = useState("")
+  const [error,   setError]   = useState("")
+  const [success, setSuccess] = useState("")
 
   function handleSubmit(formData: FormData) {
     setError("")
@@ -43,11 +37,6 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
         return
       }
 
-      setDescription("")
-      setAmountFcfa("")
-      setDate("")
-      setReference("")
-      setNotes("")
       setSuccess("Dépense enregistrée.")
       router.refresh()
     })
@@ -68,8 +57,6 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
               id="description"
               name="description"
               placeholder="Ex : Achat d'aliment"
-              value={description}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
             />
           </div>
 
@@ -82,8 +69,6 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
               min="1"
               step="1"
               placeholder="50000"
-              value={amountFcfa}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmountFcfa(e.target.value)}
             />
           </div>
 
@@ -93,8 +78,6 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
               id="date"
               name="date"
               type="date"
-              value={date}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDate(e.target.value)}
             />
           </div>
 
@@ -104,8 +87,6 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
               id="reference"
               name="reference"
               placeholder="Facture, BL, reçu..."
-              value={reference}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReference(e.target.value)}
             />
           </div>
 
@@ -116,8 +97,6 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
               name="notes"
               className="min-h-[90px] w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent"
               placeholder="Détails complémentaires"
-              value={notes}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(e.target.value)}
             />
           </div>
 
