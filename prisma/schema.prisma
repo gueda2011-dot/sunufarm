@@ -9,12 +9,11 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "./generated"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("SUNUFARM_DATABASE_URL")
 }
 
 // =============================================================================

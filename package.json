@@ -8,6 +8,9 @@
     "start": "next start",
     "lint": "eslint"
   },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@prisma/adapter-pg": "^7.5.0",
@@ -20,7 +23,7 @@
     "next": "16.2.0",
     "next-auth": "^5.0.0-beta.30",
     "pg": "^8.20.0",
-    "prisma": "^6.19.2",
+    "prisma": "^7.5.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.71.2",
