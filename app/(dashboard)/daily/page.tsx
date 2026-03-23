@@ -12,7 +12,7 @@
 
 import { redirect }          from "next/navigation"
 import type { Metadata }     from "next"
-import { auth }              from "@/src/auth"
+import { getSession }        from "@/src/lib/auth"
 import prisma                from "@/src/lib/prisma"
 import { getBatches }        from "@/src/actions/batches"
 import { DailyEntryClient }  from "./_components/DailyEntryClient"
@@ -26,12 +26,17 @@ export default async function DailyPage({
 }: {
   searchParams: Promise<{ batchId?: string }>
 }) {
-  const session = await auth()
+  const session = await getSession()
   if (!session?.user?.id) redirect("/login")
 
   // Même logique que le dashboard layout — première organisation alphabétiquement
   const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
+    where:   {
+      userId: session.effectiveUserId,
+      ...(session.isImpersonating && session.impersonatedOrganizationId
+        ? { organizationId: session.impersonatedOrganizationId }
+        : {}),
+    },
     select:  { organizationId: true, role: true },
     orderBy: { organization: { name: "asc" } },
   })
