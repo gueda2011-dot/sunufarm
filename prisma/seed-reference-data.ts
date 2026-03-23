@@ -90,6 +90,21 @@ async function upsertStrains() {
   }
 }
 
+async function upsertSpecies() {
+  const species = [
+    { name: "Poulet", code: "POULET" },
+    { name: "Pintade", code: "PINTADE" },
+  ]
+
+  for (const item of species) {
+    await prisma.species.upsert({
+      where: { code: item.code },
+      update: { name: item.name },
+      create: item,
+    })
+  }
+}
+
 async function upsertTemplate(args: {
   name: string
   productionType: VaccinationPlanTemplateProductionType
@@ -130,6 +145,7 @@ async function upsertTemplate(args: {
 }
 
 async function main() {
+  await upsertSpecies()
   await upsertStrains()
 
   await upsertTemplate({

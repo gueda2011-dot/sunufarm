@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { auth } from "@/src/auth"
 import { getFarms } from "@/src/actions/farms"
 import prisma from "@/src/lib/prisma"
+import { isSelectablePoultrySpeciesCode } from "@/src/lib/poultry-reference"
 import { isMissingTableError } from "@/src/lib/prisma-schema-guard"
 import { CreateBatchForm } from "./_components/CreateBatchForm"
 
@@ -23,7 +24,7 @@ export default async function NewBatchPage() {
   const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(role)
   if (!canCreate) redirect("/batches")
 
-  const [farmsResult, species, suppliers] = await Promise.all([
+  const [farmsResult, speciesResult, suppliers] = await Promise.all([
     getFarms({ organizationId }),
     prisma.species.findMany({ orderBy: { name: "asc" } }),
     prisma.supplier.findMany({
@@ -32,6 +33,10 @@ export default async function NewBatchPage() {
       select: { id: true, name: true },
     }),
   ])
+
+  const species = speciesResult.filter((item) =>
+    isSelectablePoultrySpeciesCode(item.code),
+  )
 
   let poultryStrains: Array<{
     id: string

@@ -7,6 +7,7 @@ import {
 
 const CHICKEN_SPECIES_CODES = new Set(["POULET", "PONDEUSE", "CHICKEN"])
 const GUINEA_FOWL_SPECIES_CODES = new Set(["PINTADE", "GUINEA_FOWL"])
+const SELECTABLE_POULTRY_SPECIES_CODES = new Set(["POULET", "PINTADE"])
 
 export function inferPoultrySpeciesFromSpeciesCode(
   code: string | null | undefined,
@@ -17,6 +18,13 @@ export function inferPoultrySpeciesFromSpeciesCode(
   if (CHICKEN_SPECIES_CODES.has(normalized)) return PoultrySpecies.CHICKEN
   if (GUINEA_FOWL_SPECIES_CODES.has(normalized)) return PoultrySpecies.GUINEA_FOWL
   return null
+}
+
+export function isSelectablePoultrySpeciesCode(
+  code: string | null | undefined,
+) {
+  if (!code) return false
+  return SELECTABLE_POULTRY_SPECIES_CODES.has(code.trim().toUpperCase())
 }
 
 export function getCompatibleProductionTypesForBatchType(

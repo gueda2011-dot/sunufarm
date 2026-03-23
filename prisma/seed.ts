@@ -121,9 +121,8 @@ async function main() {
   console.log("📚 Référentiels globaux...")
 
   // Espèces
-  const [poulet, pondeuse, pintade] = await Promise.all([
+  const [poulet, pintade] = await Promise.all([
     prisma.species.create({ data: { name: "Poulet", code: "POULET" } }),
-    prisma.species.create({ data: { name: "Pondeuse", code: "PONDEUSE" } }),
     prisma.species.create({ data: { name: "Pintade", code: "PINTADE" } }),
   ])
 
@@ -131,8 +130,8 @@ async function main() {
   const [cobb500, ross308, isaBrown, lohmann] = await Promise.all([
     prisma.breed.create({ data: { name: "Cobb 500",       code: "COBB500",  speciesId: poulet.id } }),
     prisma.breed.create({ data: { name: "Ross 308",       code: "ROSS308",  speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "ISA Brown",      code: "ISA_BROWN", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Lohmann Brown",  code: "LOHMANN",  speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "ISA Brown",      code: "ISA_BROWN", speciesId: poulet.id } }),
+    prisma.breed.create({ data: { name: "Lohmann Brown",  code: "LOHMANN",  speciesId: poulet.id } }),
   ])
 
   const [
@@ -801,7 +800,7 @@ async function main() {
       number:         "SF-2026-002",
       type:           BatchType.PONDEUSE,
         status:         BatchStatus.ACTIVE,
-        speciesId:      pondeuse.id,
+        speciesId:      poulet.id,
         breedId:        isaBrown.id,
         poultryStrainId: strainIsaBrown.id,
         entryDate:      dt(entryDate3),
@@ -942,7 +941,7 @@ async function main() {
       number:         "SF-2026-001",   // volontairement identique à org 1 — test isolation
         type:           BatchType.PONDEUSE,
         status:         BatchStatus.ACTIVE,
-        speciesId:      pondeuse.id,
+        speciesId:      poulet.id,
         breedId:        lohmann.id,
         poultryStrainId: strainLohmannBrown.id,
         entryDate:      dt(entryDate4),
