@@ -4,7 +4,7 @@
 
 import { redirect }      from "next/navigation"
 import type { Metadata } from "next"
-import { auth }          from "@/src/auth"
+import { getSession }    from "@/src/lib/auth"
 import prisma            from "@/src/lib/prisma"
 import { getPurchases, getSuppliers } from "@/src/actions/purchases"
 import { getFeedStocks, getMedicineStocks } from "@/src/actions/stock"
@@ -13,11 +13,16 @@ import { PurchasesPageClient }        from "./_components/PurchasesPageClient"
 export const metadata: Metadata = { title: "Achats" }
 
 export default async function PurchasesPage() {
-  const session = await auth()
+  const session = await getSession()
   if (!session?.user?.id) redirect("/login")
 
   const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
+    where:   {
+      userId: session.effectiveUserId,
+      ...(session.isImpersonating && session.impersonatedOrganizationId
+        ? { organizationId: session.impersonatedOrganizationId }
+        : {}),
+    },
     select:  { organizationId: true, role: true },
     orderBy: { organization: { name: "asc" } },
   })

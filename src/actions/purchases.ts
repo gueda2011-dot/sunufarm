@@ -19,8 +19,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -505,9 +504,6 @@ export async function getPurchases(
   data: unknown,
 ): Promise<ActionResult<PurchaseSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getPurchasesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Donnees invalides" }
@@ -515,11 +511,8 @@ export async function getPurchases(
 
     const { organizationId, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
     const purchases = await prisma.purchase.findMany({
       where: { organizationId },
@@ -569,9 +562,6 @@ export async function createPurchase(
   data: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createPurchaseSchema.safeParse(data)
     if (!parsed.success) {
       return {
@@ -590,13 +580,12 @@ export async function createPurchase(
       stockImpact,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_PURCHASE")) {
       return { success: false, error: "Permission refusee" }
     }
 
@@ -628,7 +617,7 @@ export async function createPurchase(
         notes: purchaseNotes,
         totalFcfa: totalFromItems(itemsWithTotal),
         paidFcfa: 0,
-        createdById: sessionResult.data.user.id,
+        createdById: effectiveUserId,
         items: {
           create: itemsWithTotal,
         },
@@ -655,8 +644,11 @@ export async function createPurchase(
     }
 
     await createAuditLog({
-      userId: sessionResult.data.user.id,
+      userId: effectiveUserId,
       organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action: AuditAction.CREATE,
       resourceType: "Purchase",
       resourceId: purchase.id,
@@ -681,9 +673,6 @@ export async function updatePurchase(
   data: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updatePurchaseSchema.safeParse(data)
     if (!parsed.success) {
       return {
@@ -703,13 +692,12 @@ export async function updatePurchase(
       stockImpact,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_PURCHASE")) {
       return { success: false, error: "Permission refusee" }
     }
 
@@ -778,8 +766,11 @@ export async function updatePurchase(
       })
 
       await createAuditLog({
-        userId: sessionResult.data.user.id,
+        userId: effectiveUserId,
         organizationId,
+        actorUserId: session.actorUserId,
+        effectiveUserId: session.effectiveUserId,
+        impersonationSessionId: session.impersonationSessionId,
         action: AuditAction.UPDATE,
         resourceType: "Purchase",
         resourceId: purchaseId,
@@ -938,8 +929,11 @@ export async function updatePurchase(
     }
 
     await createAuditLog({
-      userId: sessionResult.data.user.id,
+      userId: effectiveUserId,
       organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action: AuditAction.UPDATE,
       resourceType: "Purchase",
       resourceId: purchaseId,
@@ -975,9 +969,6 @@ export async function deletePurchase(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = deletePurchaseSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Donnees invalides" }
@@ -985,13 +976,12 @@ export async function deletePurchase(
 
     const { organizationId, purchaseId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_PURCHASE")) {
       return { success: false, error: "Permission refusee" }
     }
 
@@ -1037,8 +1027,11 @@ export async function deletePurchase(
     await prisma.purchase.delete({ where: { id: purchaseId } })
 
     await createAuditLog({
-      userId: sessionResult.data.user.id,
+      userId: effectiveUserId,
       organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action: AuditAction.DELETE,
       resourceType: "Purchase",
       resourceId: purchaseId,
@@ -1059,19 +1052,13 @@ export async function getSuppliers(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string; type: string | null }[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = z.object({ organizationId: requiredIdSchema }).safeParse(data)
     if (!parsed.success) return { success: false, error: "Donnees invalides" }
 
     const { organizationId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
     const suppliers = await prisma.supplier.findMany({
       where: { organizationId },
