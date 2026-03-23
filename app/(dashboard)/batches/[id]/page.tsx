@@ -21,6 +21,7 @@ import { getExpenses }                    from "@/src/actions/expenses"
 import { getVaccinationPlans, getVaccinations, getTreatments } from "@/src/actions/health"
 import { getMedicineStocks }              from "@/src/actions/stock"
 import { getBatchProfitability }          from "@/src/actions/profitability"
+import { ensurePoultryReferenceData }     from "@/src/lib/poultry-reference-data"
 import { getTemplateProductionTypeForBatchType } from "@/src/lib/poultry-reference"
 import { isMissingSchemaFeatureError }    from "@/src/lib/prisma-schema-guard"
 import { batchAgeDay, diffDays }          from "@/src/lib/utils"
@@ -57,6 +58,7 @@ export default async function BatchDetailPage({
 
   const { organizationId, role } = membership
   const now = new Date()
+  await ensurePoultryReferenceData()
 
   // ── Fetch parallèle ──────────────────────────────────────────────────────
   // getBatch doit réussir pour afficher la page.

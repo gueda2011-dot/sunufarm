@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import type { Metadata } from "next"
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
+import { ensurePoultryReferenceData } from "@/src/lib/poultry-reference-data"
 import { isMissingTableError } from "@/src/lib/prisma-schema-guard"
 import { StrainsPageClient } from "./_components/StrainsPageClient"
 
@@ -17,6 +18,8 @@ export default async function SettingsStrainsPage() {
     orderBy: { organization: { name: "asc" } },
   })
   if (!membership) redirect("/login?error=no-org")
+
+  await ensurePoultryReferenceData()
 
   let strains: Array<{
     id: string

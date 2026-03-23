@@ -91,6 +91,7 @@ import {
   buildVaccinationPlanNameFromTemplate,
   getTemplateProductionTypeForBatchType,
 } from "@/src/lib/poultry-reference"
+import { ensurePoultryReferenceData } from "@/src/lib/poultry-reference-data"
 import { isMissingSchemaFeatureError } from "@/src/lib/prisma-schema-guard"
 import {
   buildBatchNotesWithVaccinationPlan,
@@ -1035,6 +1036,8 @@ export async function assignVaccinationPlanTemplateToBatch(
 
     const { organizationId, batchId, templateId } = parsed.data
     const actorId = sessionResult.data.user.id
+
+    await ensurePoultryReferenceData()
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult

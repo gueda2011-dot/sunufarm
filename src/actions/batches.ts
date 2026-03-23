@@ -51,6 +51,7 @@ import {
 } from "@/src/lib/validators"
 import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
 import { buildBatchNotesWithVaccinationPlan } from "@/src/lib/vaccination-planning"
+import { ensurePoultryReferenceData } from "@/src/lib/poultry-reference-data"
 import { isMissingSchemaFeatureError } from "@/src/lib/prisma-schema-guard"
 import {
   buildVaccinationPlanItemsFromTemplate,
@@ -663,6 +664,8 @@ export async function createBatch(
       ...batchData
     } = parsed.data
     const actorId = sessionResult.data.user.id
+
+    await ensurePoultryReferenceData()
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
