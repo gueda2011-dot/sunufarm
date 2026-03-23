@@ -1,107 +1,78 @@
 /**
- * SunuFarm — Helper de création des logs d'audit
+ * SunuFarm - Helper de creation des logs d'audit
  *
- * Règle fondamentale : une erreur d'audit ne doit JAMAIS faire échouer
- * une Server Action. createAuditLog() est fire-and-forget safe — elle catch
- * toutes les erreurs et les logue sans les propager.
- *
- * Utilisation dans une Server Action :
- *
- *   await createAuditLog({
- *     userId:         session.user.id,
- *     organizationId: parsed.data.organizationId,
- *     action:         AuditAction.CREATE,
- *     resourceType:   "BATCH",
- *     resourceId:     batch.id,
- *     after:          batch,
- *   })
- *
- * Convention resourceType : UPPER_SNAKE_CASE, correspondant au nom du modèle Prisma.
- *   "BATCH" | "FARM" | "BUILDING" | "DAILY_RECORD" | "SALE" | "EXPENSE" | ...
- *
- * Convention before / after :
- *   CREATE → after uniquement (pas de before)
- *   UPDATE → before et after (snapshot avant et après)
- *   DELETE → before uniquement (snapshot avant suppression)
- *   LOGIN / LOGOUT / EXPORT → ni before ni after (ou after avec des métadonnées contextuelles)
+ * Regle fondamentale : une erreur d'audit ne doit jamais faire echouer
+ * une Server Action. createAuditLog() reste safe et ne propage pas
+ * les erreurs Prisma.
  */
 
 import prisma from "@/src/lib/prisma"
 import { AuditAction } from "@/src/generated/prisma/client"
 
-// Re-export pour que les Server Actions n'aient qu'un seul import à gérer
+// Re-export pour que les Server Actions n'aient qu'un seul import a gerer
 export { AuditAction }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface CreateAuditLogInput {
-  /** ID de l'utilisateur qui effectue l'action (session.user.id) */
+  /** ID de l'utilisateur qui effectue l'action */
   userId: string
-  /** ID de l'organisation concernée — requis pour l'isolation multi-tenant */
+  /** ID de l'organisation concernee */
   organizationId: string
-  /** Type d'action auditée */
+  /** ID de l'acteur reel - optionnel, fallback sur userId */
+  actorUserId?: string
+  /** ID de l'utilisateur effectif - optionnel, fallback sur userId */
+  effectiveUserId?: string
+  /** ID de la session d'impersonation - optionnel */
+  impersonationSessionId?: string | null
+  /** Type d'action auditee */
   action: AuditAction
-  /**
-   * Type de la ressource en UPPER_SNAKE_CASE.
-   * Correspond au nom du modèle Prisma : "BATCH", "FARM", "SALE", "EXPENSE"...
-   */
+  /** Type de la ressource en UPPER_SNAKE_CASE */
   resourceType: string
-  /** ID (CUID) de la ressource concernée */
+  /** ID de la ressource concernee */
   resourceId: string
-  /**
-   * Snapshot de l'état avant modification.
-   * Requis pour UPDATE et DELETE, absent pour CREATE.
-   * Passer l'objet Prisma directement — il sera sérialisé tel quel.
-   */
+  /** Snapshot de l'etat avant modification */
   before?: unknown
-  /**
-   * Snapshot de l'état après modification.
-   * Requis pour CREATE et UPDATE, absent pour DELETE.
-   */
+  /** Snapshot de l'etat apres modification */
   after?: unknown
-  /** Adresse IP du client — optionnelle, à extraire via headers() si nécessaire */
+  /** Adresse IP du client - optionnelle */
   ipAddress?: string
-  /** User-Agent du navigateur — optionnel */
+  /** User-Agent du navigateur - optionnel */
   userAgent?: string
 }
 
-// ---------------------------------------------------------------------------
-// Helper principal
-// ---------------------------------------------------------------------------
-
 /**
- * Crée un enregistrement AuditLog.
+ * Cree un enregistrement AuditLog.
  *
  * Ne lance jamais d'exception.
- * En cas d'échec Prisma, l'erreur est loguée sur stderr mais ne remonte pas.
- * Cela garantit qu'un problème d'audit ne fait pas échouer l'action métier.
- *
- * TODO (V2) : remplacer console.error par un logger structuré (pino, winston).
+ * En cas d'echec Prisma, l'erreur est loguee sur stderr mais ne remonte pas.
  */
 export async function createAuditLog(input: CreateAuditLogInput): Promise<void> {
   try {
     await prisma.auditLog.create({
       data: {
-        userId:         input.userId,
+        userId: input.userId,
         organizationId: input.organizationId,
-        action:         input.action,
-        resourceType:   input.resourceType,
-        resourceId:     input.resourceId,
-        before:         input.before  ?? undefined,
-        after:          input.after   ?? undefined,
-        ipAddress:      input.ipAddress,
-        userAgent:      input.userAgent,
+        actorUserId: input.actorUserId ?? input.userId,
+        effectiveUserId: input.effectiveUserId ?? input.userId,
+        impersonationSessionId: input.impersonationSessionId ?? null,
+        action: input.action,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        before: input.before ?? undefined,
+        after: input.after ?? undefined,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
       },
     })
   } catch (error) {
-    // L'audit est secondaire — on logue mais on ne bloque jamais l'action métier
-    console.error("[AuditLog] Échec de création du log d'audit", {
-      action:       input.action,
+    // L'audit est secondaire : on logue mais on ne bloque jamais l'action metier.
+    console.error("[AuditLog] Echec de creation du log d'audit", {
+      action: input.action,
       resourceType: input.resourceType,
-      resourceId:   input.resourceId,
-      userId:       input.userId,
+      resourceId: input.resourceId,
+      userId: input.userId,
+      actorUserId: input.actorUserId ?? input.userId,
+      effectiveUserId: input.effectiveUserId ?? input.userId,
+      impersonationSessionId: input.impersonationSessionId ?? null,
       error,
     })
   }
