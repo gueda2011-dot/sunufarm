@@ -817,8 +817,17 @@ export async function createBatch(
     })
 
     return { success: true, data: batch }
-  } catch {
-    return { success: false, error: "Impossible de créer le lot" }
+  } catch (error) {
+    console.error("[createBatch] unexpected error", error)
+
+    if (error instanceof Error && error.message) {
+      return {
+        success: false,
+        error: `Impossible de creer le lot. ${error.message}`,
+      }
+    }
+
+    return { success: false, error: "Impossible de creer le lot" }
   }
 }
 

@@ -24,7 +24,18 @@ export function isMissingSchemaFeatureError(
     prismaError.meta?.column,
   ].filter((value): value is string => Boolean(value))
 
-  return candidates.some((candidate) => featureNames.includes(candidate))
+  return candidates.some((candidate) => {
+    const normalizedCandidate = candidate.toLowerCase()
+
+    return featureNames.some((featureName) => {
+      const normalizedFeatureName = featureName.toLowerCase()
+      return (
+        normalizedCandidate === normalizedFeatureName ||
+        normalizedCandidate.endsWith(`.${normalizedFeatureName}`) ||
+        normalizedCandidate.includes(normalizedFeatureName)
+      )
+    })
+  })
 }
 
 export const isMissingTableError = isMissingSchemaFeatureError
