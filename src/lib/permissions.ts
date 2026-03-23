@@ -5,7 +5,10 @@
  * Conçu pour être simple, lisible, et remplaçable par un système plus fin en V2.
  */
 
-import { UserRole } from "@/src/generated/prisma/client"
+import type {
+  PlatformRole as PrismaPlatformRole,
+  UserRole,
+} from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Hiérarchie des rôles
@@ -90,6 +93,30 @@ export type Action = keyof typeof ACTION_ALLOWED_ROLES
 export function canPerformAction(userRole: UserRole, action: Action): boolean {
   const allowed = ACTION_ALLOWED_ROLES[action] as readonly string[]
   return allowed.includes(userRole)
+}
+
+// ---------------------------------------------------------------------------
+// Permissions plateforme
+//
+// Separees des permissions tenant pour eviter tout bypass implicite du
+// multi-tenant. A utiliser avec requirePlatformSuperAdmin().
+// ---------------------------------------------------------------------------
+
+const PLATFORM_ACTION_ALLOWED_ROLES = {
+  VIEW_ADMIN: ["SUPER_ADMIN"],
+  VIEW_ALL_ORGANIZATIONS: ["SUPER_ADMIN"],
+  MANAGE_PLATFORM_USERS: ["SUPER_ADMIN"],
+  IMPERSONATE_USER: ["SUPER_ADMIN"],
+} as const satisfies Record<string, readonly PrismaPlatformRole[]>
+
+export type PlatformAction = keyof typeof PLATFORM_ACTION_ALLOWED_ROLES
+
+export function canPerformPlatformAction(
+  platformRole: PrismaPlatformRole,
+  action: PlatformAction,
+): boolean {
+  const allowed = PLATFORM_ACTION_ALLOWED_ROLES[action] as readonly string[]
+  return allowed.includes(platformRole)
 }
 
 // ---------------------------------------------------------------------------
