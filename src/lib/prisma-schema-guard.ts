@@ -2,18 +2,29 @@ type PrismaLikeError = {
   code?: string
   meta?: {
     modelName?: string
+    column?: string
   }
 }
 
-export function isMissingTableError(
+export function isMissingSchemaFeatureError(
   error: unknown,
-  modelNames?: string[],
+  featureNames?: string[],
 ): boolean {
   if (typeof error !== "object" || error === null) return false
 
   const prismaError = error as PrismaLikeError
-  if (prismaError.code !== "P2021") return false
+  if (prismaError.code !== "P2021" && prismaError.code !== "P2022") {
+    return false
+  }
 
-  if (!modelNames || modelNames.length === 0) return true
-  return modelNames.includes(prismaError.meta?.modelName ?? "")
+  if (!featureNames || featureNames.length === 0) return true
+
+  const candidates = [
+    prismaError.meta?.modelName,
+    prismaError.meta?.column,
+  ].filter((value): value is string => Boolean(value))
+
+  return candidates.some((candidate) => featureNames.includes(candidate))
 }
+
+export const isMissingTableError = isMissingSchemaFeatureError
