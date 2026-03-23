@@ -37,6 +37,23 @@ enum BatchType {
   REPRODUCTEUR
 }
 
+enum PoultryProductionType {
+  BROILER
+  LAYER
+  LOCAL
+  DUAL
+}
+
+enum PoultrySpecies {
+  CHICKEN
+  GUINEA_FOWL
+}
+
+enum VaccinationPlanTemplateProductionType {
+  BROILER
+  LAYER
+}
+
 enum BatchStatus {
   ACTIVE
   CLOSED
@@ -143,6 +160,19 @@ model Breed {
   batches Batch[]
 
   @@index([speciesId])
+}
+
+model PoultryStrain {
+  id             String                @id @default(cuid())
+  name           String                @unique
+  productionType PoultryProductionType
+  species        PoultrySpecies
+  isActive       Boolean               @default(true)
+  notes          String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  batches Batch[]
 }
 
 model FeedType {
@@ -351,8 +381,9 @@ model Batch {
   status         BatchStatus @default(ACTIVE)
 
   // Espèce et race
-  speciesId String
-  breedId   String?
+  speciesId       String
+  breedId         String?
+  poultryStrainId String?
 
   // Données d'entrée du lot
   entryDate    DateTime // date d'arrivée des sujets
@@ -377,6 +408,7 @@ model Batch {
   building           Building              @relation(fields: [buildingId], references: [id])
   species            Species               @relation(fields: [speciesId], references: [id])
   breed              Breed?                @relation(fields: [breedId], references: [id])
+  poultryStrain      PoultryStrain?        @relation(fields: [poultryStrainId], references: [id])
   supplier           Supplier?             @relation(fields: [supplierId], references: [id])
   dailyRecords       DailyRecord[]
   eggRecords         EggProductionRecord[]
@@ -391,6 +423,7 @@ model Batch {
   @@index([organizationId])
   @@index([buildingId])
   @@index([status])
+  @@index([poultryStrainId])
 }
 
 // =============================================================================
@@ -510,6 +543,33 @@ model WeightRecord {
 // =============================================================================
 
 // Modèle de plan vaccinal réutilisable (template applicable à un type de lot)
+model VaccinationPlanTemplate {
+  id             String                                @id @default(cuid())
+  name           String                                @unique
+  productionType VaccinationPlanTemplateProductionType
+  isActive       Boolean                               @default(true)
+  createdAt      DateTime                              @default(now())
+  updatedAt      DateTime                              @updatedAt
+
+  items VaccinationPlanTemplateItem[]
+}
+
+model VaccinationPlanTemplateItem {
+  id                String                  @id @default(cuid())
+  planTemplateId    String
+  dayOfAge          Int
+  vaccineName       String
+  disease           String?
+  notes             String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  planTemplate VaccinationPlanTemplate @relation(fields: [planTemplateId], references: [id], onDelete: Cascade)
+
+  @@index([planTemplateId])
+}
+
+// Modèle de plan vaccinal réutilisable (instance organisationnelle)
 model VaccinationPlan {
   id             String    @id @default(cuid())
   organizationId String

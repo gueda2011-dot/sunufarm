@@ -50,6 +50,14 @@ import {
   optionalDateSchema,
 } from "@/src/lib/validators"
 import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
+import { buildBatchNotesWithVaccinationPlan } from "@/src/lib/vaccination-planning"
+import {
+  buildVaccinationPlanItemNotesFromTemplate,
+  buildVaccinationPlanNameFromTemplate,
+  getTemplateProductionTypeForBatchType,
+  inferPoultrySpeciesFromSpeciesCode,
+  isStrainCompatibleWithBatchType,
+} from "@/src/lib/poultry-reference"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -76,6 +84,8 @@ const createBatchSchema = z.object({
   type:           z.nativeEnum(BatchType),
   speciesId:      requiredIdSchema,
   breedId:        optionalIdSchema,
+  poultryStrainId: optionalIdSchema,
+  vaccinationPlanTemplateId: optionalIdSchema,
   entryDate:      dateSchema,
   entryCount:     positiveIntSchema,
   entryAgeDay:    nonNegativeIntSchema.default(0),
@@ -91,6 +101,7 @@ const updateBatchSchema = z.object({
   batchId:        requiredIdSchema,
   // Champs modifiables uniquement — entryCount, entryDate, type, speciesId sont immuables
   breedId:        optionalIdSchema,
+  poultryStrainId: z.string().cuid().nullable().optional(),
   supplierId:     optionalIdSchema,
   entryWeightG:   positiveIntSchema.optional(),
   unitCostFcfa:   amountFcfaSchema.optional(),
@@ -136,6 +147,10 @@ export interface BatchSummary {
   totalCostFcfa:  number
   closedAt:       Date | null
   createdAt:      Date
+  poultryStrain: {
+    id: string
+    name: string
+  } | null
   building: {
     id:     string
     name:   string
@@ -205,6 +220,12 @@ const batchSummarySelect = {
   totalCostFcfa:  true,
   closedAt:       true,
   createdAt:      true,
+  poultryStrain: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
   building: { select: buildingWithFarmSelect },
   _count: {
     select: { dailyRecords: true },
@@ -245,7 +266,9 @@ async function findActiveBatch(batchId: string, organizationId: string) {
     select: {
       id:          true,
       status:      true,
+      type:        true,
       buildingId:  true,
+      speciesId:   true,
       building: { select: { farmId: true } },
     },
   })
@@ -298,6 +321,110 @@ async function generateBatchNumber(
     : 1
 
   return `${prefix}${String(nextSeq).padStart(3, "0")}`
+}
+
+async function validatePoultryStrainForBatch(args: {
+  poultryStrainId: string | null
+  speciesId: string
+  batchType: BatchType
+}) {
+  const { poultryStrainId, speciesId, batchType } = args
+
+  if (!poultryStrainId) {
+    return { success: true as const, data: null }
+  }
+
+  const [species, strain] = await Promise.all([
+    prisma.species.findUnique({
+      where: { id: speciesId },
+      select: { id: true, code: true, name: true },
+    }),
+    prisma.poultryStrain.findFirst({
+      where: { id: poultryStrainId, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        species: true,
+        productionType: true,
+      },
+    }),
+  ])
+
+  if (!species) {
+    return { success: false as const, error: "Espece introuvable" }
+  }
+
+  if (!strain) {
+    return { success: false as const, error: "Souche avicole introuvable ou inactive" }
+  }
+
+  const inferredSpecies = inferPoultrySpeciesFromSpeciesCode(species.code)
+  if (!inferredSpecies || inferredSpecies !== strain.species) {
+    return {
+      success: false as const,
+      error: "La souche selectionnee n'est pas compatible avec l'espece du lot",
+    }
+  }
+
+  if (!isStrainCompatibleWithBatchType(strain.productionType, batchType)) {
+    return {
+      success: false as const,
+      error: "La souche selectionnee n'est pas compatible avec le type de lot",
+    }
+  }
+
+  return { success: true as const, data: strain }
+}
+
+async function validateVaccinationPlanTemplateForBatch(args: {
+  vaccinationPlanTemplateId: string | null
+  batchType: BatchType
+}) {
+  const { vaccinationPlanTemplateId, batchType } = args
+
+  if (!vaccinationPlanTemplateId) {
+    return { success: true as const, data: null }
+  }
+
+  const expectedProductionType = getTemplateProductionTypeForBatchType(batchType)
+  if (!expectedProductionType) {
+    return {
+      success: false as const,
+      error:
+        "Aucun template vaccinal par defaut n'est prevu pour ce type de lot",
+    }
+  }
+
+  const template = await prisma.vaccinationPlanTemplate.findFirst({
+    where: {
+      id: vaccinationPlanTemplateId,
+      isActive: true,
+      productionType: expectedProductionType,
+    },
+    select: {
+      id: true,
+      name: true,
+      productionType: true,
+      items: {
+        orderBy: { dayOfAge: "asc" },
+        select: {
+          dayOfAge: true,
+          vaccineName: true,
+          disease: true,
+          notes: true,
+        },
+      },
+    },
+  })
+
+  if (!template) {
+    return {
+      success: false as const,
+      error: "Template vaccinal introuvable ou incompatible avec ce lot",
+    }
+  }
+
+  return { success: true as const, data: template }
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +567,13 @@ export async function createBatch(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, buildingId, ...batchData } = parsed.data
+    const {
+      organizationId,
+      buildingId,
+      poultryStrainId,
+      vaccinationPlanTemplateId,
+      ...batchData
+    } = parsed.data
     const actorId = sessionResult.data.user.id
 
     const membershipResult = await requireMembership(actorId, organizationId)
@@ -465,11 +598,76 @@ export async function createBatch(
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
     }
 
+    const [strainValidation, templateValidation] = await Promise.all([
+      validatePoultryStrainForBatch({
+        poultryStrainId: poultryStrainId ?? null,
+        speciesId: batchData.speciesId,
+        batchType: batchData.type,
+      }),
+      validateVaccinationPlanTemplateForBatch({
+        vaccinationPlanTemplateId: vaccinationPlanTemplateId ?? null,
+        batchType: batchData.type,
+      }),
+    ])
+
+    if (!strainValidation.success) {
+      return { success: false, error: strainValidation.error }
+    }
+
+    if (!templateValidation.success) {
+      return { success: false, error: templateValidation.error }
+    }
+
+    const selectedTemplate = templateValidation.data
+
     // Génération du numéro + création dans une seule transaction
     const batch = await prisma.$transaction(async (tx) => {
       const number = await generateBatchNumber(tx, organizationId)
-      return tx.batch.create({
-        data:   { organizationId, buildingId, number, ...batchData },
+      const createdBatch = await tx.batch.create({
+        data:   {
+          organizationId,
+          buildingId,
+          number,
+          poultryStrainId: poultryStrainId ?? null,
+          ...batchData,
+        },
+        select: batchDetailSelect,
+      })
+
+      if (!selectedTemplate) {
+        return createdBatch
+      }
+
+      const generatedPlan = await tx.vaccinationPlan.create({
+        data: {
+          organizationId,
+          name: buildVaccinationPlanNameFromTemplate(
+            selectedTemplate.name,
+            number,
+          ),
+          batchType: batchData.type,
+          items: {
+            create: selectedTemplate.items.map((item) => ({
+              dayOfAge: item.dayOfAge,
+              vaccineName: item.vaccineName,
+              notes: buildVaccinationPlanItemNotesFromTemplate({
+                disease: item.disease,
+                notes: item.notes,
+              }),
+            })),
+          },
+        },
+        select: { id: true },
+      })
+
+      return tx.batch.update({
+        where: { id: createdBatch.id },
+        data: {
+          notes: buildBatchNotesWithVaccinationPlan(
+            { planId: generatedPlan.id },
+            createdBatch.notes,
+          ),
+        },
         select: batchDetailSelect,
       })
     })
@@ -480,7 +678,13 @@ export async function createBatch(
       action:         AuditAction.CREATE,
       resourceType:   "BATCH",
       resourceId:     batch.id,
-      after:          { number: batch.number, buildingId, ...batchData },
+      after:          {
+        number: batch.number,
+        buildingId,
+        poultryStrainId: poultryStrainId ?? null,
+        vaccinationPlanTemplateId: vaccinationPlanTemplateId ?? null,
+        ...batchData,
+      },
     })
 
     return { success: true, data: batch }
@@ -537,6 +741,18 @@ export async function updateBatch(
 
     if (!canAccessFarm(role, farmPermissions, existing.building.farmId, "canWrite")) {
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
+    }
+
+    if (updates.poultryStrainId !== undefined) {
+      const strainValidation = await validatePoultryStrainForBatch({
+        poultryStrainId: updates.poultryStrainId,
+        speciesId: existing.speciesId,
+        batchType: existing.type,
+      })
+
+      if (!strainValidation.success) {
+        return { success: false, error: strainValidation.error }
+      }
     }
 
     const batch = await prisma.batch.update({

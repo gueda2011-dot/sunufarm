@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useTransition } from "react"
+import { useEffect, useMemo, useTransition } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useForm, useWatch, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -9,21 +9,33 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
-import { Button } from "@/src/components/ui/button"
-import { Input } from "@/src/components/ui/input"
-import { Label } from "@/src/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
+import type {
+  PoultryProductionType,
+  PoultrySpecies,
+  VaccinationPlanTemplateProductionType,
+} from "@/src/generated/prisma/client"
 import { getBuildings } from "@/src/actions/buildings"
 import { createBatch } from "@/src/actions/batches"
 import type { FarmSummary } from "@/src/actions/farms"
+import { Button } from "@/src/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
+import { Input } from "@/src/components/ui/input"
+import { Label } from "@/src/components/ui/label"
 import { formatMoneyFCFA } from "@/src/lib/formatters"
+import {
+  getTemplateProductionTypeForBatchType,
+  inferPoultrySpeciesFromSpeciesCode,
+  isStrainCompatibleWithBatchType,
+} from "@/src/lib/poultry-reference"
 
 const schema = z.object({
   farmId: z.string().min(1, "Ferme requise"),
-  buildingId: z.string().min(1, "Bâtiment requis"),
+  buildingId: z.string().min(1, "Batiment requis"),
   type: z.enum(["CHAIR", "PONDEUSE", "REPRODUCTEUR"]),
-  speciesId: z.string().min(1, "Espèce requise"),
-  entryDate: z.string().min(1, "Date d'entrée requise"),
+  speciesId: z.string().min(1, "Espece requise"),
+  poultryStrainId: z.string().optional(),
+  vaccinationPlanTemplateId: z.string().optional(),
+  entryDate: z.string().min(1, "Date d'entree requise"),
   entryCount: z.coerce.number().int().positive("Effectif requis"),
   entryAgeDay: z.coerce.number().int().nonnegative(),
   entryWeightG: z.union([z.literal(""), z.coerce.number().int().positive()]).optional(),
@@ -42,10 +54,37 @@ const BATCH_TYPE_LABELS: Record<string, string> = {
   REPRODUCTEUR: "Reproducteur",
 }
 
+const STRAIN_PRODUCTION_TYPE_LABELS: Record<PoultryProductionType, string> = {
+  BROILER: "Chair",
+  LAYER: "Ponte",
+  LOCAL: "Locale",
+  DUAL: "Mixte",
+}
+
+const TEMPLATE_PRODUCTION_TYPE_LABELS: Record<
+  VaccinationPlanTemplateProductionType,
+  string
+> = {
+  BROILER: "Chair",
+  LAYER: "Pondeuse",
+}
+
 interface Props {
   organizationId: string
   initialFarms: FarmSummary[]
   species: { id: string; name: string; code: string }[]
+  poultryStrains: {
+    id: string
+    name: string
+    productionType: PoultryProductionType
+    species: PoultrySpecies
+    notes: string | null
+  }[]
+  vaccinationPlanTemplates: {
+    id: string
+    name: string
+    productionType: VaccinationPlanTemplateProductionType
+  }[]
   suppliers: { id: string; name: string }[]
 }
 
@@ -53,6 +92,8 @@ export function CreateBatchForm({
   organizationId,
   initialFarms,
   species,
+  poultryStrains,
+  vaccinationPlanTemplates,
   suppliers,
 }: Props) {
   const router = useRouter()
@@ -71,6 +112,8 @@ export function CreateBatchForm({
       buildingId: "",
       type: "CHAIR",
       speciesId: "",
+      poultryStrainId: "",
+      vaccinationPlanTemplateId: "",
       entryDate: new Date().toISOString().split("T")[0],
       entryCount: "" as unknown as number,
       entryAgeDay: 0,
@@ -83,6 +126,13 @@ export function CreateBatchForm({
   })
 
   const farmId = useWatch({ control, name: "farmId" })
+  const batchType = useWatch({ control, name: "type" })
+  const speciesId = useWatch({ control, name: "speciesId" })
+  const poultryStrainId = useWatch({ control, name: "poultryStrainId" })
+  const vaccinationPlanTemplateId = useWatch({
+    control,
+    name: "vaccinationPlanTemplateId",
+  })
   const entryCount = useWatch({ control, name: "entryCount" })
   const unitCost = useWatch({ control, name: "unitCostFcfa" })
 
@@ -96,6 +146,31 @@ export function CreateBatchForm({
     enabled: !!farmId,
     staleTime: 60_000,
   })
+
+  const selectedSpecies = useMemo(
+    () => species.find((item) => item.id === speciesId) ?? null,
+    [species, speciesId],
+  )
+
+  const compatibleStrains = useMemo(() => {
+    const inferredSpecies = inferPoultrySpeciesFromSpeciesCode(selectedSpecies?.code)
+    if (!inferredSpecies) return []
+
+    return poultryStrains.filter(
+      (strain) =>
+        strain.species === inferredSpecies &&
+        isStrainCompatibleWithBatchType(strain.productionType, batchType),
+    )
+  }, [batchType, poultryStrains, selectedSpecies?.code])
+
+  const compatibleTemplates = useMemo(() => {
+    const expectedProductionType = getTemplateProductionTypeForBatchType(batchType)
+    if (!expectedProductionType) return []
+
+    return vaccinationPlanTemplates.filter(
+      (template) => template.productionType === expectedProductionType,
+    )
+  }, [batchType, vaccinationPlanTemplates])
 
   useEffect(() => {
     const count = Number(entryCount || 0)
@@ -114,7 +189,25 @@ export function CreateBatchForm({
     } else {
       setValue("buildingId", "")
     }
-  }, [farmId, visibleBuildings, setValue])
+  }, [farmId, setValue, visibleBuildings])
+
+  useEffect(() => {
+    if (
+      poultryStrainId &&
+      !compatibleStrains.some((strain) => strain.id === poultryStrainId)
+    ) {
+      setValue("poultryStrainId", "")
+    }
+  }, [compatibleStrains, poultryStrainId, setValue])
+
+  useEffect(() => {
+    if (
+      vaccinationPlanTemplateId &&
+      !compatibleTemplates.some((template) => template.id === vaccinationPlanTemplateId)
+    ) {
+      setValue("vaccinationPlanTemplateId", "")
+    }
+  }, [compatibleTemplates, setValue, vaccinationPlanTemplateId])
 
   const onSubmit: SubmitHandler<SubmitValues> = async (data) => {
     startTransition(async () => {
@@ -123,6 +216,8 @@ export function CreateBatchForm({
         buildingId: data.buildingId,
         type: data.type,
         speciesId: data.speciesId,
+        poultryStrainId: data.poultryStrainId || undefined,
+        vaccinationPlanTemplateId: data.vaccinationPlanTemplateId || undefined,
         entryDate: new Date(data.entryDate),
         entryCount: data.entryCount,
         entryAgeDay: data.entryAgeDay,
@@ -137,7 +232,7 @@ export function CreateBatchForm({
       })
 
       if (res.success) {
-        toast.success(`Lot ${res.data.number} créé`)
+        toast.success(`Lot ${res.data.number} cree`)
         router.push(`/batches/${res.data.id}`)
       } else {
         toast.error(res.error)
@@ -157,7 +252,7 @@ export function CreateBatchForm({
         <div>
           <h1 className="text-xl font-bold text-gray-900">Nouveau lot</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            Enregistrer l&apos;entrée d&apos;un nouveau lot d&apos;élevage.
+            Enregistrer l&apos;entree d&apos;un nouveau lot d&apos;elevage.
           </p>
         </div>
       </div>
@@ -177,10 +272,10 @@ export function CreateBatchForm({
                 className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 {...register("farmId")}
               >
-                <option value="">Sélectionner une ferme</option>
-                {initialFarms.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
+                <option value="">Selectionner une ferme</option>
+                {initialFarms.map((farm) => (
+                  <option key={farm.id} value={farm.id}>
+                    {farm.name}
                   </option>
                 ))}
               </select>
@@ -191,7 +286,7 @@ export function CreateBatchForm({
 
             <div>
               <Label htmlFor="buildingId" required>
-                Bâtiment
+                Batiment
               </Label>
               <select
                 id="buildingId"
@@ -204,14 +299,14 @@ export function CreateBatchForm({
                     ? "Chargement..."
                     : farmId
                       ? visibleBuildings.length === 0
-                        ? "Aucun bâtiment"
-                        : "Sélectionner un bâtiment"
-                      : "Sélectionner d'abord une ferme"}
+                        ? "Aucun batiment"
+                        : "Selectionner un batiment"
+                      : "Selectionner d'abord une ferme"}
                 </option>
-                {visibleBuildings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} — {b.capacity.toLocaleString("fr-SN")} sujets
-                    {b._count.batches > 0 ? ` (${b._count.batches} lot actif)` : ""}
+                {visibleBuildings.map((building) => (
+                  <option key={building.id} value={building.id}>
+                    {building.name} - {building.capacity.toLocaleString("fr-SN")} sujets
+                    {building._count.batches > 0 ? ` (${building._count.batches} lot actif)` : ""}
                   </option>
                 ))}
               </select>
@@ -224,10 +319,10 @@ export function CreateBatchForm({
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Type d&apos;élevage</CardTitle>
+            <CardTitle className="text-base">Type d&apos;elevage</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="type" required>
                   Type
@@ -237,9 +332,9 @@ export function CreateBatchForm({
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                   {...register("type")}
                 >
-                  {Object.entries(BATCH_TYPE_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {l}
+                  {Object.entries(BATCH_TYPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
                     </option>
                   ))}
                 </select>
@@ -247,17 +342,17 @@ export function CreateBatchForm({
 
               <div>
                 <Label htmlFor="speciesId" required>
-                  Espèce
+                  Espece
                 </Label>
                 <select
                   id="speciesId"
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                   {...register("speciesId")}
                 >
-                  <option value="">Sélectionner</option>
-                  {species.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
+                  <option value="">Selectionner</option>
+                  {species.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
                     </option>
                   ))}
                 </select>
@@ -266,18 +361,75 @@ export function CreateBatchForm({
                 )}
               </div>
             </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="poultryStrainId">Souche avicole</Label>
+                <select
+                  id="poultryStrainId"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  disabled={!selectedSpecies}
+                  {...register("poultryStrainId")}
+                >
+                  <option value="">
+                    {!selectedSpecies
+                      ? "Selectionner d'abord une espece"
+                      : compatibleStrains.length === 0
+                        ? "Aucune souche compatible"
+                        : "Selectionner une souche"}
+                  </option>
+                  {compatibleStrains.map((strain) => (
+                    <option key={strain.id} value={strain.id}>
+                      {strain.name} - {STRAIN_PRODUCTION_TYPE_LABELS[strain.productionType]}
+                    </option>
+                  ))}
+                </select>
+                {poultryStrainId && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {compatibleStrains.find((strain) => strain.id === poultryStrainId)?.notes ??
+                      "Souche selectionnee pour le suivi de lot."}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="vaccinationPlanTemplateId">
+                  Plan vaccinal modele
+                </Label>
+                <select
+                  id="vaccinationPlanTemplateId"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  disabled={compatibleTemplates.length === 0}
+                  {...register("vaccinationPlanTemplateId")}
+                >
+                  <option value="">
+                    {compatibleTemplates.length === 0
+                      ? "Aucun modele pour ce type de lot"
+                      : "Selectionner un modele"}
+                  </option>
+                  {compatibleTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name} - {TEMPLATE_PRODUCTION_TYPE_LABELS[template.productionType]}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Si un modele est choisi, un plan vaccinal sera genere automatiquement pour le lot.
+                </p>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Entrée du lot</CardTitle>
+            <CardTitle className="text-base">Entree du lot</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="entryDate" required>
-                  Date d&apos;entrée
+                  Date d&apos;entree
                 </Label>
                 <Input
                   id="entryDate"
@@ -301,7 +453,7 @@ export function CreateBatchForm({
               </div>
 
               <div>
-                <Label htmlFor="entryAgeDay">Âge à l&apos;entrée (jours)</Label>
+                <Label htmlFor="entryAgeDay">Age a l&apos;entree (jours)</Label>
                 <Input
                   id="entryAgeDay"
                   type="number"
@@ -311,7 +463,7 @@ export function CreateBatchForm({
               </div>
 
               <div>
-                <Label htmlFor="entryWeightG">Poids moyen à l&apos;entrée (g)</Label>
+                <Label htmlFor="entryWeightG">Poids moyen a l&apos;entree (g)</Label>
                 <Input
                   id="entryWeightG"
                   type="number"
@@ -336,15 +488,15 @@ export function CreateBatchForm({
                 {...register("supplierId")}
               >
                 <option value="">Sans fournisseur</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="unitCostFcfa">Prix unitaire (FCFA)</Label>
                 <Input
@@ -356,16 +508,16 @@ export function CreateBatchForm({
               </div>
 
               <div>
-                <Label htmlFor="totalCostFcfa">Coût total (FCFA)</Label>
+                <Label htmlFor="totalCostFcfa">Cout total (FCFA)</Label>
                 <Input
                   id="totalCostFcfa"
                   type="number"
-                  placeholder="175 000"
+                  placeholder="175000"
                   {...register("totalCostFcfa")}
                 />
                 {Number(entryCount || 0) > 0 && Number(unitCost || 0) > 0 && (
                   <p className="mt-1 text-xs text-green-600">
-                    Calculé : {formatMoneyFCFA(Math.round(Number(entryCount) * Number(unitCost)))}
+                    Calcule : {formatMoneyFCFA(Math.round(Number(entryCount) * Number(unitCost)))}
                   </p>
                 )}
               </div>
@@ -385,7 +537,7 @@ export function CreateBatchForm({
         </Card>
 
         <Button type="submit" variant="primary" loading={isPending} className="w-full">
-          Créer le lot
+          Creer le lot
         </Button>
       </form>
     </div>

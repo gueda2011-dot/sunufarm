@@ -15,6 +15,7 @@ import {
   formatDate,
   formatNumber,
 }                          from "@/src/lib/formatters"
+import { stripBatchVaccinationPlanFromNotes } from "@/src/lib/vaccination-planning"
 import type { BatchDetail } from "@/src/actions/batches"
 import { CloseBatchForm }  from "./CloseBatchForm"
 
@@ -67,6 +68,7 @@ export function BatchHeader({
   const statusCfg  = STATUS_CONFIG[batch.status] ?? STATUS_CONFIG.CLOSED
   const typeLabel  = TYPE_LABELS[batch.type] ?? batch.type
   const canManage  = MANAGER_OR_ABOVE.includes(userRole as (typeof MANAGER_OR_ABOVE)[number])
+  const displayNotes = stripBatchVaccinationPlanFromNotes(batch.notes)
 
   return (
     <div className="space-y-3">
@@ -97,6 +99,11 @@ export function BatchHeader({
               {batch.number}
             </h1>
             <p className="text-sm text-gray-500 mt-0.5">{typeLabel}</p>
+            {batch.poultryStrain && (
+              <p className="text-sm text-gray-500">
+                Souche : <span className="font-medium text-gray-700">{batch.poultryStrain.name}</span>
+              </p>
+            )}
           </div>
           <span
             className={cn(
@@ -154,9 +161,9 @@ export function BatchHeader({
         )}
 
         {/* Notes */}
-        {batch.notes && (
+        {displayNotes && (
           <p className="text-sm text-gray-500 pt-2 border-t border-gray-100">
-            {batch.notes}
+            {displayNotes}
           </p>
         )}
 

@@ -18,8 +18,11 @@ import {
   BuildingType,
   FeedMovementType,
   MedicineMovementType,
+  PoultryProductionType,
+  PoultrySpecies,
   SaleProductType,
   UserRole,
+  VaccinationPlanTemplateProductionType,
 } from "../src/generated/prisma"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
@@ -41,6 +44,14 @@ function addDays(date: Date, days: number): Date {
 /** Date minuit UTC — pour les champs @db.Date */
 function dt(date: Date): Date {
   return new Date(date.toISOString().split("T")[0] + "T00:00:00.000Z")
+}
+
+function withBatchPlanTag(planId: string | null, notes?: string | null) {
+  const tag = planId
+    ? `[BATCH_VACCINATION_PLAN:${planId}]`
+    : "[BATCH_VACCINATION_PLAN:OFF]"
+  const trimmed = notes?.trim()
+  return trimmed ? `${tag}\n${trimmed}` : tag
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +82,10 @@ async function clearAll() {
   await prisma.feedStock.deleteMany()
   await prisma.vaccinationPlanItem.deleteMany()
   await prisma.vaccinationPlan.deleteMany()
+  await prisma.vaccinationPlanTemplateItem.deleteMany()
+  await prisma.vaccinationPlanTemplate.deleteMany()
   await prisma.batch.deleteMany()
+  await prisma.poultryStrain.deleteMany()
   await prisma.employee.deleteMany()
   await prisma.building.deleteMany()
   await prisma.farm.deleteMany()
@@ -107,7 +121,7 @@ async function main() {
   console.log("📚 Référentiels globaux...")
 
   // Espèces
-  const [poulet, pondeuse] = await Promise.all([
+  const [poulet, pondeuse, pintade] = await Promise.all([
     prisma.species.create({ data: { name: "Poulet", code: "POULET" } }),
     prisma.species.create({ data: { name: "Pondeuse", code: "PONDEUSE" } }),
     prisma.species.create({ data: { name: "Pintade", code: "PINTADE" } }),
@@ -120,6 +134,144 @@ async function main() {
     prisma.breed.create({ data: { name: "ISA Brown",      code: "ISA_BROWN", speciesId: pondeuse.id } }),
     prisma.breed.create({ data: { name: "Lohmann Brown",  code: "LOHMANN",  speciesId: pondeuse.id } }),
   ])
+
+  const [
+    strainCobb500,
+    strainRoss308,
+    strainHubbard,
+    strainSasso,
+    strainIsaBrown,
+    strainLohmannBrown,
+    strainHyLineBrown,
+    strainSenegalLocal,
+    strainCrossbredLocal,
+    strainGuineaFowl,
+  ] = await Promise.all([
+    prisma.poultryStrain.create({
+      data: {
+        name: "Cobb 500",
+        productionType: PoultryProductionType.BROILER,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Ross 308",
+        productionType: PoultryProductionType.BROILER,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Hubbard",
+        productionType: PoultryProductionType.BROILER,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Sasso",
+        productionType: PoultryProductionType.BROILER,
+        species: PoultrySpecies.CHICKEN,
+        notes: "Souche rustique adaptee aux elevages semi-intensifs.",
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "ISA Brown",
+        productionType: PoultryProductionType.LAYER,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Lohmann Brown",
+        productionType: PoultryProductionType.LAYER,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Hy-Line Brown",
+        productionType: PoultryProductionType.LAYER,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Poule locale senegalaise",
+        productionType: PoultryProductionType.LOCAL,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Croisee locale amelioree",
+        productionType: PoultryProductionType.DUAL,
+        species: PoultrySpecies.CHICKEN,
+      },
+    }),
+    prisma.poultryStrain.create({
+      data: {
+        name: "Pintade locale",
+        productionType: PoultryProductionType.LOCAL,
+        species: PoultrySpecies.GUINEA_FOWL,
+      },
+    }),
+  ])
+
+  const [broilerTemplate, layerTemplate] = await Promise.all([
+    prisma.vaccinationPlanTemplate.create({
+      data: {
+        name: "Chair standard Senegal",
+        productionType: VaccinationPlanTemplateProductionType.BROILER,
+        items: {
+          create: [
+            { dayOfAge: 1, vaccineName: "Marek", disease: "Maladie de Marek" },
+            { dayOfAge: 6, vaccineName: "Newcastle + Bronchite infectieuse", disease: "Newcastle / Bronchite infectieuse", notes: "Fenetre J5-J7" },
+            { dayOfAge: 12, vaccineName: "Gumboro", disease: "Gumboro", notes: "Fenetre J10-J14" },
+            { dayOfAge: 20, vaccineName: "Newcastle rappel", disease: "Newcastle", notes: "Fenetre J18-J21" },
+            { dayOfAge: 21, vaccineName: "Gumboro rappel", disease: "Gumboro", notes: "Fenetre J18-J24" },
+          ],
+        },
+      },
+      include: {
+        items: {
+          orderBy: { dayOfAge: "asc" },
+        },
+      },
+    }),
+    prisma.vaccinationPlanTemplate.create({
+      data: {
+        name: "Pondeuse standard Senegal",
+        productionType: VaccinationPlanTemplateProductionType.LAYER,
+        items: {
+          create: [
+            { dayOfAge: 1, vaccineName: "Marek", disease: "Maladie de Marek" },
+            { dayOfAge: 6, vaccineName: "Newcastle + Bronchite infectieuse", disease: "Newcastle / Bronchite infectieuse", notes: "Fenetre J5-J7" },
+            { dayOfAge: 12, vaccineName: "Gumboro", disease: "Gumboro", notes: "Fenetre J10-J14" },
+            { dayOfAge: 24, vaccineName: "Rappel ND / Gumboro", disease: "Newcastle / Gumboro", notes: "Fenetre J21-J28" },
+            { dayOfAge: 49, vaccineName: "Variole", disease: "Variole aviaire", notes: "Fenetre S6-S8" },
+            { dayOfAge: 63, vaccineName: "ND + IB rappel", disease: "Newcastle / Bronchite infectieuse", notes: "Fenetre S8-S10" },
+            { dayOfAge: 77, vaccineName: "Encephalomyelite", disease: "Encephalomyelite aviaire", notes: "Fenetre S10-S12" },
+            { dayOfAge: 112, vaccineName: "Vaccins pre-ponte", disease: "Preparation pre-ponte", notes: "Fenetre S14-S18" },
+          ],
+        },
+      },
+      include: {
+        items: {
+          orderBy: { dayOfAge: "asc" },
+        },
+      },
+    }),
+  ])
+  void strainHubbard
+  void strainSasso
+  void strainHyLineBrown
+  void strainSenegalLocal
+  void strainCrossbredLocal
+  void strainGuineaFowl
+  void pintade
 
   // Types d'aliment
   const [, , feedCroissance] = await Promise.all([
@@ -399,10 +551,11 @@ async function main() {
       buildingId:     bat1A.id,
       number:         "SF-2026-001",
       type:           BatchType.CHAIR,
-      status:         BatchStatus.ACTIVE,
-      speciesId:      poulet.id,
-      breedId:        cobb500.id,
-      entryDate:      dt(entryDate1),
+        status:         BatchStatus.ACTIVE,
+        speciesId:      poulet.id,
+        breedId:        cobb500.id,
+        poultryStrainId: strainCobb500.id,
+        entryDate:      dt(entryDate1),
       entryCount:     2000,
       entryAgeDay:    1,
       entryWeightG:   42,
@@ -414,6 +567,28 @@ async function main() {
   })
 
   // 30 saisies journalières lot 1
+  const batch1VaccinationPlan = await prisma.vaccinationPlan.create({
+    data: {
+      organizationId: org1.id,
+      name:           `Chair standard Senegal - ${batch1.number}`,
+      batchType:      BatchType.CHAIR,
+      items: {
+        create: broilerTemplate.items.map((item) => ({
+          dayOfAge: item.dayOfAge,
+          vaccineName: item.vaccineName,
+          notes: item.notes,
+        })),
+      },
+    },
+  })
+
+  await prisma.batch.update({
+    where: { id: batch1.id },
+    data: {
+      notes: withBatchPlanTag(batch1VaccinationPlan.id, batch1.notes),
+    },
+  })
+
   let mortCumul1 = 0
   for (let j = 0; j < 30; j++) {
     const ageDay  = j + 1
@@ -483,10 +658,11 @@ async function main() {
       buildingId:     bat1B.id,
       number:         "SF-2025-018",
       type:           BatchType.CHAIR,
-      status:         BatchStatus.SOLD,
-      speciesId:      poulet.id,
-      breedId:        ross308.id,
-      entryDate:      dt(entryDate2),
+        status:         BatchStatus.SOLD,
+        speciesId:      poulet.id,
+        breedId:        ross308.id,
+        poultryStrainId: strainRoss308.id,
+        entryDate:      dt(entryDate2),
       entryCount:     1500,
       entryAgeDay:    1,
       entryWeightG:   44,
@@ -624,10 +800,11 @@ async function main() {
       buildingId:     bat1C.id,
       number:         "SF-2026-002",
       type:           BatchType.PONDEUSE,
-      status:         BatchStatus.ACTIVE,
-      speciesId:      pondeuse.id,
-      breedId:        isaBrown.id,
-      entryDate:      dt(entryDate3),
+        status:         BatchStatus.ACTIVE,
+        speciesId:      pondeuse.id,
+        breedId:        isaBrown.id,
+        poultryStrainId: strainIsaBrown.id,
+        entryDate:      dt(entryDate3),
       entryCount:     800,
       entryAgeDay:    18,
       entryWeightG:   1_650,
@@ -638,6 +815,28 @@ async function main() {
   })
 
   // Saisies + production œufs lot 3 (15 derniers jours — ponte démarrée)
+  const batch3VaccinationPlan = await prisma.vaccinationPlan.create({
+    data: {
+      organizationId: org1.id,
+      name:           `Pondeuse standard Senegal - ${batch3.number}`,
+      batchType:      BatchType.PONDEUSE,
+      items: {
+        create: layerTemplate.items.map((item) => ({
+          dayOfAge: item.dayOfAge,
+          vaccineName: item.vaccineName,
+          notes: item.notes,
+        })),
+      },
+    },
+  })
+
+  await prisma.batch.update({
+    where: { id: batch3.id },
+    data: {
+      notes: withBatchPlanTag(batch3VaccinationPlan.id, batch3.notes),
+    },
+  })
+
   let mortCumul3 = 0
   for (let j = 0; j < 45; j++) {
     const dateJ    = dt(addDays(entryDate3, j))
@@ -741,11 +940,12 @@ async function main() {
       organizationId: org2.id,
       buildingId:     bat2A.id,
       number:         "SF-2026-001",   // volontairement identique à org 1 — test isolation
-      type:           BatchType.PONDEUSE,
-      status:         BatchStatus.ACTIVE,
-      speciesId:      pondeuse.id,
-      breedId:        lohmann.id,
-      entryDate:      dt(entryDate4),
+        type:           BatchType.PONDEUSE,
+        status:         BatchStatus.ACTIVE,
+        speciesId:      pondeuse.id,
+        breedId:        lohmann.id,
+        poultryStrainId: strainLohmannBrown.id,
+        entryDate:      dt(entryDate4),
       entryCount:     1200,
       entryAgeDay:    20,
       entryWeightG:   1_700,
