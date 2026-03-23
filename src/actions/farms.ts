@@ -36,7 +36,6 @@ import { createAuditLog, AuditAction } from "@/src/lib/audit"
 import {
   canPerformAction,
   canAccessFarm,
-  parseFarmPermissions,
 } from "@/src/lib/permissions"
 import { requiredIdSchema, positiveIntSchema } from "@/src/lib/validators"
 import { BatchStatus } from "@/src/generated/prisma/client"

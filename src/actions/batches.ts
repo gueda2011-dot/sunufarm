@@ -99,12 +99,6 @@ const updateBatchSchema = z.object({
 })
 
 // Statuts autorisés à la clôture — ACTIVE n'est pas une destination
-const CLOSE_STATUSES = [
-  BatchStatus.CLOSED,
-  BatchStatus.SOLD,
-  BatchStatus.SLAUGHTERED,
-] as const
-
 const closeBatchSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,

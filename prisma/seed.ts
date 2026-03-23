@@ -107,7 +107,7 @@ async function main() {
   console.log("📚 Référentiels globaux...")
 
   // Espèces
-  const [poulet, pondeuse, pintade] = await Promise.all([
+  const [poulet, pondeuse] = await Promise.all([
     prisma.species.create({ data: { name: "Poulet", code: "POULET" } }),
     prisma.species.create({ data: { name: "Pondeuse", code: "PONDEUSE" } }),
     prisma.species.create({ data: { name: "Pintade", code: "PINTADE" } }),
@@ -122,13 +122,13 @@ async function main() {
   ])
 
   // Types d'aliment
-  const [feedPreDemarrage, feedDemarrage, feedCroissance, feedFinition] = await Promise.all([
+  const [, , feedCroissance] = await Promise.all([
     prisma.feedType.create({ data: { name: "Pré-démarrage", code: "PREDEMARRAGE" } }),
     prisma.feedType.create({ data: { name: "Démarrage",     code: "DEMARRAGE"    } }),
     prisma.feedType.create({ data: { name: "Croissance",    code: "CROISSANCE"   } }),
     prisma.feedType.create({ data: { name: "Finition",      code: "FINITION"     } }),
   ])
-  const feedPonteType = await prisma.feedType.create({ data: { name: "Ponte", code: "PONTE" } })
+  await prisma.feedType.create({ data: { name: "Ponte", code: "PONTE" } })
 
   // Motifs de mortalité globaux
   await Promise.all([
@@ -346,7 +346,7 @@ async function main() {
     },
   })
 
-  const medStock2 = await prisma.medicineStock.create({
+  await prisma.medicineStock.create({
     data: {
       organizationId:  org1.id,
       farmId:          farm1.id,

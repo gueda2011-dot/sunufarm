@@ -7,6 +7,7 @@ import type { Metadata } from "next"
 import { auth }          from "@/src/auth"
 import prisma            from "@/src/lib/prisma"
 import { getPurchases, getSuppliers } from "@/src/actions/purchases"
+import { getFeedStocks, getMedicineStocks } from "@/src/actions/stock"
 import { PurchasesPageClient }        from "./_components/PurchasesPageClient"
 
 export const metadata: Metadata = { title: "Achats" }
@@ -24,18 +25,23 @@ export default async function PurchasesPage() {
 
   const { organizationId, role } = membership
 
-  const [purchasesResult, suppliersResult] = await Promise.all([
+  const [
+    purchasesResult,
+    suppliersResult,
+    feedStocksResult,
+    medicineStocksResult,
+  ] = await Promise.all([
     getPurchases({ organizationId, limit: 50 }),
     getSuppliers({ organizationId }),
+    getFeedStocks({ organizationId }),
+    getMedicineStocks({ organizationId }),
   ])
 
   const purchases  = purchasesResult.success  ? purchasesResult.data  : []
   const suppliers  = suppliersResult.success  ? suppliersResult.data  : []
-
-  // KPIs
-  const totalFcfa   = purchases.reduce((s, p) => s + p.totalFcfa,   0)
-  const paidFcfa    = purchases.reduce((s, p) => s + p.paidFcfa,    0)
-  const balanceFcfa = purchases.reduce((s, p) => s + p.balanceFcfa, 0)
+  const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
+  const medicineStocks =
+    medicineStocksResult.success ? medicineStocksResult.data : []
 
   return (
     <PurchasesPageClient
@@ -43,9 +49,8 @@ export default async function PurchasesPage() {
       userRole={role as string}
       purchases={purchases}
       suppliers={suppliers}
-      totalFcfa={totalFcfa}
-      paidFcfa={paidFcfa}
-      balanceFcfa={balanceFcfa}
+      feedStocks={feedStocks}
+      medicineStocks={medicineStocks}
     />
   )
 }

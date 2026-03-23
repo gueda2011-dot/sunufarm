@@ -65,7 +65,7 @@ export default async function ReportsPage({
       },
       select: {
         id:           true,
-        batchNumber:  true,
+        number:       true,
         status:       true,
         entryCount:   true,
         totalCostFcfa: true,

@@ -43,3 +43,22 @@ export function slugify(text: string): string {
     .replace(/[\s_]+/g, "-")
     .replace(/^-+|-+$/g, "")
 }
+
+// ---------------------------------------------------------------------------
+// Dates lot d'elevage
+// ---------------------------------------------------------------------------
+
+export function diffDays(from: Date | string, to: Date | string): number {
+  return Math.max(
+    0,
+    Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000),
+  )
+}
+
+export function batchAgeDay(
+  entryDate: Date | string,
+  entryAgeDay: number,
+  endDate: Date | string,
+): number {
+  return entryAgeDay + diffDays(entryDate, endDate)
+}

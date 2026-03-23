@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
-import { useForm, type SubmitHandler } from "react-hook-form"
+import { useEffect, useTransition } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { useForm, useWatch, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useRouter } from "next/navigation"
@@ -12,7 +13,7 @@ import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
 import { Label } from "@/src/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
-import { getBuildings, type BuildingSummary } from "@/src/actions/buildings"
+import { getBuildings } from "@/src/actions/buildings"
 import { createBatch } from "@/src/actions/batches"
 import type { FarmSummary } from "@/src/actions/farms"
 import { formatMoneyFCFA } from "@/src/lib/formatters"
@@ -56,16 +57,14 @@ export function CreateBatchForm({
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [buildings, setBuildings] = useState<BuildingSummary[]>([])
-  const [loadingBldgs, setLoadingBldgs] = useState(false)
 
   const {
+    control,
     register,
     handleSubmit,
-    watch,
     setValue,
     formState: { errors },
-  } = useForm<FormValues, any, SubmitValues>({
+  } = useForm<FormValues, undefined, SubmitValues>({
     resolver: zodResolver(schema),
     defaultValues: {
       farmId: "",
@@ -83,9 +82,20 @@ export function CreateBatchForm({
     },
   })
 
-  const farmId = watch("farmId")
-  const entryCount = watch("entryCount")
-  const unitCost = watch("unitCostFcfa")
+  const farmId = useWatch({ control, name: "farmId" })
+  const entryCount = useWatch({ control, name: "entryCount" })
+  const unitCost = useWatch({ control, name: "unitCostFcfa" })
+
+  const { data: visibleBuildings = [], isFetching: loadingBldgs } = useQuery({
+    queryKey: ["buildings", organizationId, farmId],
+    queryFn: async () => {
+      if (!farmId) return []
+      const res = await getBuildings({ organizationId, farmId })
+      return res.success ? res.data : []
+    },
+    enabled: !!farmId,
+    staleTime: 60_000,
+  })
 
   useEffect(() => {
     const count = Number(entryCount || 0)
@@ -98,21 +108,13 @@ export function CreateBatchForm({
 
   useEffect(() => {
     if (!farmId) {
-      setBuildings([])
       setValue("buildingId", "")
-      return
+    } else if (visibleBuildings.length === 1) {
+      setValue("buildingId", visibleBuildings[0].id)
+    } else {
+      setValue("buildingId", "")
     }
-
-    setLoadingBldgs(true)
-    getBuildings({ organizationId, farmId }).then((res) => {
-      if (res.success) {
-        setBuildings(res.data)
-        if (res.data.length === 1) setValue("buildingId", res.data[0].id)
-        else setValue("buildingId", "")
-      }
-      setLoadingBldgs(false)
-    })
-  }, [farmId, organizationId, setValue])
+  }, [farmId, visibleBuildings, setValue])
 
   const onSubmit: SubmitHandler<SubmitValues> = async (data) => {
     startTransition(async () => {
@@ -201,12 +203,12 @@ export function CreateBatchForm({
                   {loadingBldgs
                     ? "Chargement..."
                     : farmId
-                      ? buildings.length === 0
+                      ? visibleBuildings.length === 0
                         ? "Aucun bâtiment"
                         : "Sélectionner un bâtiment"
                       : "Sélectionner d'abord une ferme"}
                 </option>
-                {buildings.map((b) => (
+                {visibleBuildings.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} — {b.capacity.toLocaleString("fr-SN")} sujets
                     {b._count.batches > 0 ? ` (${b._count.batches} lot actif)` : ""}

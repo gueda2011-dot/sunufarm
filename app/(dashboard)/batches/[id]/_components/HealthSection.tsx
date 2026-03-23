@@ -12,11 +12,16 @@
 
 import { useState, useTransition } from "react"
 import { formatDate }              from "@/src/lib/formatters"
-import { createVaccination, createTreatment } from "@/src/actions/health"
+import {
+  createVaccination,
+  createTreatment,
+  updateVaccination,
+} from "@/src/actions/health"
 import type {
   VaccinationSummary,
   TreatmentSummary,
 }                                  from "@/src/actions/health"
+import { stripVaccinationStockImpactFromNotes } from "@/src/lib/health-stock-impact"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -30,6 +35,12 @@ interface HealthSectionProps {
   userRole:       string
   entryDate:      Date
   entryCount:     number
+  medicineStocks: Array<{
+    id: string
+    name: string
+    unit: string
+    quantityOnHand: number
+  }>
 }
 
 // ---------------------------------------------------------------------------
@@ -46,16 +57,25 @@ export function HealthSection({
   userRole,
   entryDate,
   entryCount,
+  medicineStocks,
 }: HealthSectionProps) {
   const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER", "VET"].includes(userRole)
 
   const [vaccinations, setVaccinations] = useState(initialVaccinations)
   const [treatments,   setTreatments]   = useState(initialTreatments)
   const [panel,        setPanel]        = useState<Panel>(null)
+  const [editingVaccinationId, setEditingVaccinationId] = useState<string | null>(null)
   const [error,        setError]        = useState<string | null>(null)
   const [isPending,    startTransition]  = useTransition()
 
   const today = new Date().toISOString().slice(0, 10)
+  const editingVaccination =
+    vaccinations.find((vaccination) => vaccination.id === editingVaccinationId) ?? null
+
+  function resetVaccinationPanel() {
+    setPanel(null)
+    setEditingVaccinationId(null)
+  }
 
   // ---------------------------------------------------------------------------
   // Création vaccination
@@ -65,6 +85,10 @@ export function HealthSection({
     e.preventDefault()
     setError(null)
     const fd = new FormData(e.currentTarget)
+    const impactStock = fd.get("impactStock") === "on"
+    const medicineStockId = (fd.get("medicineStockId") as string) || undefined
+    const consumedQuantityRaw = fd.get("consumedQuantity") as string
+    const consumedUnit = (fd.get("consumedUnit") as string) || undefined
 
     startTransition(async () => {
       const result = await createVaccination({
@@ -75,30 +99,21 @@ export function HealthSection({
         route:           (fd.get("route") as string) || undefined,
         dose:            (fd.get("dose") as string) || undefined,
         countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
+        medicineStockId,
         notes:           (fd.get("notes") as string) || undefined,
+        stockImpact: {
+          enabled: impactStock,
+          consumedQuantity: impactStock && consumedQuantityRaw
+            ? parseFloat(consumedQuantityRaw)
+            : undefined,
+          consumedUnit: impactStock ? consumedUnit : undefined,
+        },
       })
 
       if (!result.success) { setError(result.error); return }
 
-      // Optimistic prepend
-      const newVax: VaccinationSummary = {
-        id:              result.data.id,
-        organizationId,
-        batchId,
-        date:            new Date(fd.get("date") as string),
-        batchAgeDay:     result.data.batchAgeDay,
-        vaccineName:     fd.get("vaccineName") as string,
-        route:           (fd.get("route") as string) || null,
-        dose:            (fd.get("dose") as string) || null,
-        countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
-        medicineStockId: null,
-        notes:           (fd.get("notes") as string) || null,
-        recordedById:    null,
-        createdAt:       new Date(),
-        updatedAt:       new Date(),
-      }
-      setVaccinations((prev) => [newVax, ...prev])
-      setPanel(null)
+      setVaccinations((prev) => [result.data, ...prev])
+      resetVaccinationPanel()
       ;(e.target as HTMLFormElement).reset()
     })
   }
@@ -153,6 +168,50 @@ export function HealthSection({
     })
   }
 
+  function handleUpdateVaccination(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!editingVaccination) return
+
+    setError(null)
+    const fd = new FormData(e.currentTarget)
+    const impactStock = fd.get("impactStock") === "on"
+    const medicineStockIdRaw = fd.get("medicineStockId") as string
+    const consumedQuantityRaw = fd.get("consumedQuantity") as string
+    const consumedUnit = (fd.get("consumedUnit") as string) || undefined
+
+    startTransition(async () => {
+      const result = await updateVaccination({
+        organizationId,
+        vaccinationId: editingVaccination.id,
+        vaccineName: (fd.get("vaccineName") as string) || undefined,
+        route: (fd.get("route") as string) || undefined,
+        dose: (fd.get("dose") as string) || undefined,
+        countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
+        medicineStockId: medicineStockIdRaw ? medicineStockIdRaw : null,
+        notes: (fd.get("notes") as string) || undefined,
+        stockImpact: {
+          enabled: impactStock,
+          consumedQuantity: impactStock && consumedQuantityRaw
+            ? parseFloat(consumedQuantityRaw)
+            : undefined,
+          consumedUnit: impactStock ? consumedUnit : undefined,
+        },
+      })
+
+      if (!result.success) {
+        setError(result.error)
+        return
+      }
+
+      setVaccinations((prev) =>
+        prev.map((vaccination) =>
+          vaccination.id === result.data.id ? result.data : vaccination,
+        ),
+      )
+      resetVaccinationPanel()
+    })
+  }
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -168,10 +227,14 @@ export function HealthSection({
         {canCreate && (
           <div className="flex gap-2">
             <button
-              onClick={() => { setPanel(panel === "vaccination" ? null : "vaccination"); setError(null) }}
+              onClick={() => {
+                setEditingVaccinationId(null)
+                setPanel(panel === "vaccination" ? null : "vaccination")
+                setError(null)
+              }}
               className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
             >
-              {panel === "vaccination" ? "Annuler" : "+ Vaccination"}
+              {panel === "vaccination" && !editingVaccinationId ? "Annuler" : "+ Vaccination"}
             </button>
             <button
               onClick={() => { setPanel(panel === "treatment" ? null : "treatment"); setError(null) }}
@@ -191,10 +254,12 @@ export function HealthSection({
       {/* ── Formulaire vaccination ───────────────────────────────────────── */}
       {panel === "vaccination" && (
         <form
-          onSubmit={handleCreateVaccination}
+          onSubmit={editingVaccination ? handleUpdateVaccination : handleCreateVaccination}
           className="rounded-xl border border-green-200 bg-green-50 p-4 space-y-3"
         >
-          <p className="text-sm font-semibold text-green-800">Nouvelle vaccination</p>
+          <p className="text-sm font-semibold text-green-800">
+            {editingVaccination ? "Modifier la vaccination" : "Nouvelle vaccination"}
+          </p>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -205,9 +270,14 @@ export function HealthSection({
                 name="date"
                 type="date"
                 required
-                defaultValue={today}
+                defaultValue={
+                  editingVaccination
+                    ? new Date(editingVaccination.date).toISOString().slice(0, 10)
+                    : today
+                }
                 min={entryDate.toISOString().slice(0, 10)}
                 max={today}
+                disabled={Boolean(editingVaccination)}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
@@ -219,6 +289,7 @@ export function HealthSection({
                 name="vaccineName"
                 required
                 placeholder="Newcastle, Gumboro..."
+                defaultValue={editingVaccination?.vaccineName ?? ""}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
@@ -235,7 +306,7 @@ export function HealthSection({
                 required
                 min="1"
                 max={entryCount}
-                defaultValue={entryCount}
+                defaultValue={editingVaccination?.countVaccinated ?? entryCount}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
@@ -243,6 +314,7 @@ export function HealthSection({
               <label className="block text-xs text-gray-500 mb-1">Voie</label>
               <select
                 name="route"
+                defaultValue={editingVaccination?.route ?? ""}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               >
                 <option value="">—</option>
@@ -258,9 +330,77 @@ export function HealthSection({
               <input
                 name="dose"
                 placeholder="1 dose/sujet"
+                defaultValue={editingVaccination?.dose ?? ""}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
+          </div>
+
+          <div className="rounded-lg border border-white/80 bg-white/70 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-900">Impacte le stock</p>
+                <p className="text-xs text-gray-500">
+                  Cree une sortie stock source SANTE seulement si la consommation
+                  est explicite.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  name="impactStock"
+                  type="checkbox"
+                  defaultChecked={editingVaccination?.stockImpact.enabled ?? false}
+                />
+                Oui
+              </label>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Stock medicament
+                </label>
+                <select
+                  name="medicineStockId"
+                  defaultValue={editingVaccination?.medicineStockId ?? ""}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">Selectionner un stock</option>
+                  {medicineStocks.map((stock) => (
+                    <option key={stock.id} value={stock.id}>
+                      {stock.name} ({stock.quantityOnHand} {stock.unit} dispo)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Quantite consommee
+                </label>
+                <input
+                  name="consumedQuantity"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  defaultValue={editingVaccination?.stockImpact.consumedQuantity ?? ""}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Unite stock</label>
+                <input
+                  name="consumedUnit"
+                  defaultValue={editingVaccination?.stockImpact.consumedUnit ?? ""}
+                  placeholder="dose, flacon, litre..."
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+            </div>
+
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Le stock choisi doit appartenir a la meme ferme que ce lot. La
+              quantite consommee doit etre explicite et dans l unite du stock.
+            </p>
           </div>
 
           <div>
@@ -268,6 +408,11 @@ export function HealthSection({
             <input
               name="notes"
               placeholder="Observations..."
+              defaultValue={
+                editingVaccination
+                  ? stripVaccinationStockImpactFromNotes(editingVaccination.notes) ?? ""
+                  : ""
+              }
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             />
           </div>
@@ -277,7 +422,11 @@ export function HealthSection({
             disabled={isPending}
             className="w-full rounded-xl bg-green-600 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
           >
-            {isPending ? "Enregistrement…" : "Enregistrer la vaccination"}
+            {isPending
+              ? "Enregistrement..."
+              : editingVaccination
+                ? "Enregistrer les modifications"
+                : "Enregistrer la vaccination"}
           </button>
         </form>
       )}
@@ -402,11 +551,36 @@ export function HealthSection({
                       <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{formatDate(v.date)}</td>
                       <td className="px-4 py-2.5 text-gray-800">
                         <div className="font-medium">{v.vaccineName}</div>
-                        {v.route && <div className="text-xs text-gray-400">{v.route}</div>}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {v.route && <div className="text-xs text-gray-400">{v.route}</div>}
+                          <span className={`rounded-full px-2 py-0.5 text-xs ${
+                            v.stockImpact.enabled
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-gray-100 text-gray-500"
+                          }`}>
+                            {v.stockImpact.enabled
+                              ? `Stock: ${v.stockImpact.consumedQuantity} ${v.stockImpact.consumedUnit}`
+                              : "Sans impact stock"}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums whitespace-nowrap">J. {v.batchAgeDay}</td>
                       <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums whitespace-nowrap">
-                        {v.countVaccinated.toLocaleString("fr-SN")}
+                        <div>{v.countVaccinated.toLocaleString("fr-SN")}</div>
+                        {canCreate ? (
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => {
+                              setEditingVaccinationId(v.id)
+                              setPanel("vaccination")
+                              setError(null)
+                            }}
+                            className="mt-1 text-xs text-blue-600 hover:underline disabled:opacity-40"
+                          >
+                            Modifier
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   ))}

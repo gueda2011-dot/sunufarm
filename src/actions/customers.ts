@@ -168,7 +168,7 @@ export async function createCustomer(
 
     const parsed = createCustomerSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: parsed.error.errors[0]?.message ?? "Données invalides" }
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
     }
 
     const { organizationId, ...fields } = parsed.data
@@ -224,7 +224,7 @@ export async function updateCustomer(
 
     const parsed = updateCustomerSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: parsed.error.errors[0]?.message ?? "Données invalides" }
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
     }
 
     const { organizationId, customerId, ...fields } = parsed.data

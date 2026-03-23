@@ -174,6 +174,21 @@ export function SalesPageClient({ sales }: Props) {
                         </span>
                       </div>
                     </div>
+
+                    <div className="mt-3">
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-medium",
+                          sale.stockImpact.enabled
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-gray-100 text-gray-600",
+                        )}
+                      >
+                        {sale.stockImpact.enabled
+                          ? "Impact stock FIENTE (transitoire)"
+                          : "Sans impact stock"}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="shrink-0">

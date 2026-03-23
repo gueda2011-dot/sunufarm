@@ -5,7 +5,7 @@
  *
  * - Visible uniquement en desktop (lg+), fixée sur la gauche
  * - usePathname() pour mettre en évidence le lien actif
- * - Tous les liens MVP répertoriés (les pages non encore créées renvoient 404)
+ * - Tous les liens visibles doivent pointer vers une page existante
  * - Logo + nom organisation en haut
  */
 

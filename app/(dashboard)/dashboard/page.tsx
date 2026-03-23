@@ -25,6 +25,7 @@ import { auth }                from "@/src/auth"
 import prisma                  from "@/src/lib/prisma"
 import { getBatches }          from "@/src/actions/batches"
 import { getExpenses }         from "@/src/actions/expenses"
+import { batchAgeDay, diffDays } from "@/src/lib/utils"
 import { AlertBanner }         from "../_components/AlertBanner"
 import { DashboardKpis }       from "../_components/DashboardKpis"
 import { ActiveBatchList }     from "../_components/ActiveBatchList"
@@ -44,11 +45,12 @@ export default async function DashboardPage() {
   if (!membership) redirect("/login?error=no-org")
 
   const { organizationId } = membership
+  const now = new Date()
 
   // ── Fetch parallèle ────────────────────────────────────────────────────
   // Les 2 requêtes Prisma directes sont nécessaires car les Server Actions
   // existantes ne couvrent pas ces agrégations multi-lots.
-  const threshold48h = new Date(Date.now() - 2 * 86_400_000)
+  const threshold48h = new Date(now.getTime() - 2 * 86_400_000)
 
   const [
     batchesResult,
@@ -99,16 +101,14 @@ export default async function DashboardPage() {
   const recentIds = new Set(recentRecordBatchIds.map((r) => r.batchId))
 
   const batchesNeedingSaisie = activeBatches.filter((b) => {
-    const daysSinceEntry = Math.floor(
-      (Date.now() - new Date(b.entryDate).getTime()) / 86_400_000,
-    )
+    const daysSinceEntry = diffDays(b.entryDate, now)
     return daysSinceEntry > 1 && !recentIds.has(b.id)
   })
 
   // ── Tri des lots : âge décroissant (plus vieux = plus critique en premier) ─
   const sortedBatches = [...activeBatches].sort((a, b) => {
-    const ageA = a.entryAgeDay + Math.floor((Date.now() - new Date(a.entryDate).getTime()) / 86_400_000)
-    const ageB = b.entryAgeDay + Math.floor((Date.now() - new Date(b.entryDate).getTime()) / 86_400_000)
+    const ageA = batchAgeDay(a.entryDate, a.entryAgeDay, now)
+    const ageB = batchAgeDay(b.entryDate, b.entryAgeDay, now)
     return ageB - ageA
   })
 

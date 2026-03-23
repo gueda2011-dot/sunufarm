@@ -6,6 +6,7 @@ import prisma from "@/src/lib/prisma"
 import {
   getFeedMovements,
   getFeedStocks,
+  getMedicineMovements,
   getMedicineStocks,
 } from "@/src/actions/stock"
 import { StockPageClient } from "./_components/StockPageClient"
@@ -31,16 +32,24 @@ export default async function StockPage() {
 
   const { organizationId } = membership
 
-  const [feedStocksResult, feedMovementsResult, medicineStocksResult] =
+  const [
+    feedStocksResult,
+    feedMovementsResult,
+    medicineStocksResult,
+    medicineMovementsResult,
+  ] =
     await Promise.all([
       getFeedStocks({ organizationId }),
       getFeedMovements({ organizationId, limit: 20 }),
       getMedicineStocks({ organizationId }),
+      getMedicineMovements({ organizationId, limit: 20 }),
     ])
 
   const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
   const feedMovements = feedMovementsResult.success ? feedMovementsResult.data : []
   const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
+  const medicineMovements =
+    medicineMovementsResult.success ? medicineMovementsResult.data : []
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -52,9 +61,11 @@ export default async function StockPage() {
       </div>
 
       <StockPageClient
+        organizationId={organizationId}
         initialFeedStocks={feedStocks}
         initialFeedMovements={feedMovements}
         initialMedicineStocks={medicineStocks}
+        initialMedicineMovements={medicineMovements}
       />
     </div>
   )

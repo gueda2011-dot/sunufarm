@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
+import { getFeedStocks } from "@/src/actions/stock"
 import { CreateSaleForm } from "./_components/CreateSaleForm"
 
 export const metadata: Metadata = { title: "Nouvelle vente" }
@@ -19,6 +20,12 @@ export default async function NewSalePage() {
 
   if (!membership) redirect("/login?error=no-org")
 
+  const feedStocksResult = await getFeedStocks({
+    organizationId: membership.organizationId,
+  })
+
+  const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
+
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <div>
@@ -30,7 +37,10 @@ export default async function NewSalePage() {
         </p>
       </div>
 
-      <CreateSaleForm organizationId={membership.organizationId} />
+      <CreateSaleForm
+        organizationId={membership.organizationId}
+        feedStocks={feedStocks}
+      />
     </div>
   )
 }
