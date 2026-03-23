@@ -35,6 +35,13 @@ const CUSTOMER_TYPE_COLORS: Record<string, string> = {
   PARTICULIER:   "bg-gray-100 text-gray-600",
 }
 
+function getOptionalFormValue(formData: FormData, key: string) {
+  const value = formData.get(key)
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
 // ---------------------------------------------------------------------------
 // KPI card
 // ---------------------------------------------------------------------------
@@ -129,12 +136,16 @@ export function CustomersPageClient({
     startTransition(async () => {
       const result = await createCustomer({
         organizationId,
-        name:    fd.get("name")    as string,
-        phone:   fd.get("phone")   as string,
-        email:   fd.get("email")   as string,
-        address: fd.get("address") as string,
-        type:    fd.get("type")    as string || undefined,
-        notes:   fd.get("notes")   as string,
+        name: getOptionalFormValue(fd, "name") ?? "",
+        phone: getOptionalFormValue(fd, "phone"),
+        email: getOptionalFormValue(fd, "email"),
+        address: getOptionalFormValue(fd, "address"),
+        type: getOptionalFormValue(fd, "type") as
+          | "PROFESSIONNEL"
+          | "REVENDEUR"
+          | "PARTICULIER"
+          | undefined,
+        notes: getOptionalFormValue(fd, "notes"),
       })
 
       if (!result.success) {
@@ -146,11 +157,11 @@ export function CustomersPageClient({
       const newCustomer: CustomerSummary = {
         id:          result.data.id,
         name:        result.data.name,
-        phone:       (fd.get("phone") as string) || null,
-        email:       (fd.get("email") as string) || null,
-        address:     (fd.get("address") as string) || null,
-        type:        (fd.get("type") as string) || null,
-        notes:       (fd.get("notes") as string) || null,
+        phone:       getOptionalFormValue(fd, "phone") ?? null,
+        email:       getOptionalFormValue(fd, "email") ?? null,
+        address:     getOptionalFormValue(fd, "address") ?? null,
+        type:        getOptionalFormValue(fd, "type") ?? null,
+        notes:       getOptionalFormValue(fd, "notes") ?? null,
         createdAt:   new Date(),
         salesCount:  0,
         totalFcfa:   0,

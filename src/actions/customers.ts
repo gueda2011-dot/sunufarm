@@ -1,91 +1,81 @@
-/**
- * SunuFarm — Server Actions : gestion des clients
- *
- * CRUD complet sur le modèle Customer avec agrégation des ventes.
- *
- * getCustomers : retourne la liste des clients avec le nombre de ventes,
- *   le chiffre d'affaires total et le montant encaissé (pour le calcul
- *   des créances).
- *
- * Suppression : hard delete uniquement si le client n'a aucune vente liée.
- *   Si des ventes existent → refus pour préserver l'historique financier.
- *
- * Permissions :
- *   Lecture   → tous les membres de l'organisation
- *   Mutations → OWNER, MANAGER, ACCOUNTANT
- */
-
 "use server"
 
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
   requireMembership,
+  requireSession,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
 import { canPerformAction } from "@/src/lib/permissions"
 import { requiredIdSchema } from "@/src/lib/validators"
 
-// ---------------------------------------------------------------------------
-// Types retournés
-// ---------------------------------------------------------------------------
-
 export interface CustomerSummary {
-  id:             string
-  name:           string
-  phone:          string | null
-  email:          string | null
-  address:        string | null
-  type:           string | null
-  notes:          string | null
-  createdAt:      Date
-  salesCount:     number
-  totalFcfa:      number   // CA total toutes ventes
-  paidFcfa:       number   // encaissé total
-  balanceFcfa:    number   // créance = totalFcfa - paidFcfa
+  id: string
+  name: string
+  phone: string | null
+  email: string | null
+  address: string | null
+  type: string | null
+  notes: string | null
+  createdAt: Date
+  salesCount: number
+  totalFcfa: number
+  paidFcfa: number
+  balanceFcfa: number
 }
-
-// ---------------------------------------------------------------------------
-// Schémas Zod
-// ---------------------------------------------------------------------------
 
 const listSchema = z.object({
   organizationId: requiredIdSchema,
-  search:         z.string().optional(),
-  type:           z.string().optional(),
+  search: z.string().optional(),
+  type: z.string().optional(),
 })
 
 const createCustomerSchema = z.object({
   organizationId: requiredIdSchema,
-  name:    z.string().min(1, "Le nom est requis").max(150),
-  phone:   z.string().max(30).optional().or(z.literal("")),
-  email:   z.string().email("Email invalide").max(150).optional().or(z.literal("")),
+  name: z.string().min(1, "Le nom est requis").max(150),
+  phone: z.string().max(30).optional().or(z.literal("")),
+  email: z.string().email("Email invalide").max(150).optional().or(z.literal("")),
   address: z.string().max(300).optional().or(z.literal("")),
-  type:    z.enum(["PROFESSIONNEL", "REVENDEUR", "PARTICULIER"]).optional(),
-  notes:   z.string().max(1000).optional().or(z.literal("")),
+  type: z.enum(["PROFESSIONNEL", "REVENDEUR", "PARTICULIER"]).optional(),
+  notes: z.string().max(1000).optional().or(z.literal("")),
 })
 
 const updateCustomerSchema = z.object({
   organizationId: requiredIdSchema,
-  customerId:     requiredIdSchema,
-  name:    z.string().min(1, "Le nom est requis").max(150).optional(),
-  phone:   z.string().max(30).optional().or(z.literal("")),
-  email:   z.string().email("Email invalide").max(150).optional().or(z.literal("")),
+  customerId: requiredIdSchema,
+  name: z.string().min(1, "Le nom est requis").max(150).optional(),
+  phone: z.string().max(30).optional().or(z.literal("")),
+  email: z.string().email("Email invalide").max(150).optional().or(z.literal("")),
   address: z.string().max(300).optional().or(z.literal("")),
-  type:    z.enum(["PROFESSIONNEL", "REVENDEUR", "PARTICULIER"]).optional(),
-  notes:   z.string().max(1000).optional().or(z.literal("")),
+  type: z.enum(["PROFESSIONNEL", "REVENDEUR", "PARTICULIER"]).optional(),
+  notes: z.string().max(1000).optional().or(z.literal("")),
 })
 
 const deleteCustomerSchema = z.object({
   organizationId: requiredIdSchema,
-  customerId:     requiredIdSchema,
+  customerId: requiredIdSchema,
 })
 
-// ---------------------------------------------------------------------------
-// getCustomers
-// ---------------------------------------------------------------------------
+function formatCustomerValidationError(
+  issue: { path: PropertyKey[]; message: string } | undefined,
+) {
+  if (!issue) return "Donnees invalides"
+
+  const field = String(issue.path[0] ?? "")
+  const label =
+    field === "name" ? "Nom" :
+    field === "phone" ? "Telephone" :
+    field === "email" ? "Email" :
+    field === "address" ? "Adresse" :
+    field === "type" ? "Type de client" :
+    field === "notes" ? "Notes" :
+    field === "organizationId" ? "Organisation" :
+    null
+
+  return label ? `${label} : ${issue.message}` : issue.message
+}
 
 export async function getCustomers(
   data: unknown,
@@ -96,7 +86,7 @@ export async function getCustomers(
 
     const parsed = listSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
+      return { success: false, error: "Donnees invalides" }
     }
 
     const { organizationId, search, type } = parsed.data
@@ -110,39 +100,42 @@ export async function getCustomers(
     const customers = await prisma.customer.findMany({
       where: {
         organizationId,
-        ...(search ? {
-          OR: [
-            { name:  { contains: search, mode: "insensitive" } },
-            { phone: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-          ],
-        } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { phone: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
         ...(type ? { type } : {}),
       },
       include: {
         sales: {
           select: {
             totalFcfa: true,
-            paidFcfa:  true,
+            paidFcfa: true,
           },
         },
       },
       orderBy: { name: "asc" },
     })
 
-    const result: CustomerSummary[] = customers.map((c) => {
-      const totalFcfa   = c.sales.reduce((s, sale) => s + sale.totalFcfa, 0)
-      const paidFcfa    = c.sales.reduce((s, sale) => s + sale.paidFcfa,  0)
+    const result: CustomerSummary[] = customers.map((customer) => {
+      const totalFcfa = customer.sales.reduce((sum, sale) => sum + sale.totalFcfa, 0)
+      const paidFcfa = customer.sales.reduce((sum, sale) => sum + sale.paidFcfa, 0)
+
       return {
-        id:          c.id,
-        name:        c.name,
-        phone:       c.phone,
-        email:       c.email,
-        address:     c.address,
-        type:        c.type,
-        notes:       c.notes,
-        createdAt:   c.createdAt,
-        salesCount:  c.sales.length,
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        address: customer.address,
+        type: customer.type,
+        notes: customer.notes,
+        createdAt: customer.createdAt,
+        salesCount: customer.sales.length,
         totalFcfa,
         paidFcfa,
         balanceFcfa: totalFcfa - paidFcfa,
@@ -155,10 +148,6 @@ export async function getCustomers(
   }
 }
 
-// ---------------------------------------------------------------------------
-// createCustomer
-// ---------------------------------------------------------------------------
-
 export async function createCustomer(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string }>> {
@@ -168,7 +157,10 @@ export async function createCustomer(
 
     const parsed = createCustomerSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
+      return {
+        success: false,
+        error: formatCustomerValidationError(parsed.error.issues[0]),
+      }
     }
 
     const { organizationId, ...fields } = parsed.data
@@ -180,40 +172,36 @@ export async function createCustomer(
     if (!membershipResult.success) return membershipResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
+      return { success: false, error: "Permission refusee" }
     }
 
     const customer = await prisma.customer.create({
       data: {
         organizationId,
-        name:    fields.name,
-        phone:   fields.phone   || null,
-        email:   fields.email   || null,
+        name: fields.name,
+        phone: fields.phone || null,
+        email: fields.email || null,
         address: fields.address || null,
-        type:    fields.type    ?? null,
-        notes:   fields.notes   || null,
+        type: fields.type ?? null,
+        notes: fields.notes || null,
       },
       select: { id: true, name: true },
     })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId: sessionResult.data.user.id,
       organizationId,
-      action:         AuditAction.CREATE,
-      resourceType:   "Customer",
-      resourceId:     customer.id,
-      after:          customer,
+      action: AuditAction.CREATE,
+      resourceType: "Customer",
+      resourceId: customer.id,
+      after: customer,
     })
 
     return { success: true, data: customer }
   } catch {
-    return { success: false, error: "Impossible de créer le client" }
+    return { success: false, error: "Impossible de creer le client" }
   }
 }
-
-// ---------------------------------------------------------------------------
-// updateCustomer
-// ---------------------------------------------------------------------------
 
 export async function updateCustomer(
   data: unknown,
@@ -224,7 +212,10 @@ export async function updateCustomer(
 
     const parsed = updateCustomerSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
+      return {
+        success: false,
+        error: formatCustomerValidationError(parsed.error.issues[0]),
+      }
     }
 
     const { organizationId, customerId, ...fields } = parsed.data
@@ -236,7 +227,7 @@ export async function updateCustomer(
     if (!membershipResult.success) return membershipResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
+      return { success: false, error: "Permission refusee" }
     }
 
     const existing = await prisma.customer.findFirst({
@@ -250,23 +241,23 @@ export async function updateCustomer(
     const customer = await prisma.customer.update({
       where: { id: customerId },
       data: {
-        ...(fields.name    !== undefined ? { name:    fields.name }         : {}),
-        ...(fields.phone   !== undefined ? { phone:   fields.phone   || null } : {}),
-        ...(fields.email   !== undefined ? { email:   fields.email   || null } : {}),
+        ...(fields.name !== undefined ? { name: fields.name } : {}),
+        ...(fields.phone !== undefined ? { phone: fields.phone || null } : {}),
+        ...(fields.email !== undefined ? { email: fields.email || null } : {}),
         ...(fields.address !== undefined ? { address: fields.address || null } : {}),
-        ...(fields.type    !== undefined ? { type:    fields.type    ?? null }  : {}),
-        ...(fields.notes   !== undefined ? { notes:   fields.notes   || null }  : {}),
+        ...(fields.type !== undefined ? { type: fields.type ?? null } : {}),
+        ...(fields.notes !== undefined ? { notes: fields.notes || null } : {}),
       },
       select: { id: true, name: true },
     })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId: sessionResult.data.user.id,
       organizationId,
-      action:         AuditAction.UPDATE,
-      resourceType:   "Customer",
-      resourceId:     customer.id,
-      after:          customer,
+      action: AuditAction.UPDATE,
+      resourceType: "Customer",
+      resourceId: customer.id,
+      after: customer,
     })
 
     return { success: true, data: customer }
@@ -274,10 +265,6 @@ export async function updateCustomer(
     return { success: false, error: "Impossible de modifier le client" }
   }
 }
-
-// ---------------------------------------------------------------------------
-// deleteCustomer
-// ---------------------------------------------------------------------------
 
 export async function deleteCustomer(
   data: unknown,
@@ -288,7 +275,7 @@ export async function deleteCustomer(
 
     const parsed = deleteCustomerSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
+      return { success: false, error: "Donnees invalides" }
     }
 
     const { organizationId, customerId } = parsed.data
@@ -300,11 +287,11 @@ export async function deleteCustomer(
     if (!membershipResult.success) return membershipResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
+      return { success: false, error: "Permission refusee" }
     }
 
     const existing = await prisma.customer.findFirst({
-      where:  { id: customerId, organizationId },
+      where: { id: customerId, organizationId },
       select: { id: true, name: true, _count: { select: { sales: true } } },
     })
     if (!existing) {
@@ -314,19 +301,19 @@ export async function deleteCustomer(
     if (existing._count.sales > 0) {
       return {
         success: false,
-        error: `Ce client a ${existing._count.sales} vente(s) associée(s). Suppression impossible.`,
+        error: `Ce client a ${existing._count.sales} vente(s) associee(s). Suppression impossible.`,
       }
     }
 
     await prisma.customer.delete({ where: { id: customerId } })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId: sessionResult.data.user.id,
       organizationId,
-      action:         AuditAction.DELETE,
-      resourceType:   "Customer",
-      resourceId:     customerId,
-      before:         existing,
+      action: AuditAction.DELETE,
+      resourceType: "Customer",
+      resourceId: customerId,
+      before: existing,
     })
 
     return { success: true, data: undefined }
