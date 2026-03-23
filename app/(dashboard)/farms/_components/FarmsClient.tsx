@@ -83,7 +83,7 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
   const canEdit = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(userRole)
 
   // Formulaire ferme
-  const farmForm = useForm<FarmFormValues, any, FarmSubmitValues>({
+  const farmForm = useForm<FarmFormValues, undefined, FarmSubmitValues>({
     resolver: zodResolver(farmSchema),
     defaultValues: {
       name: "",
@@ -94,7 +94,7 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
   })
 
   // Formulaire bâtiment
-  const bldgForm = useForm<BuildingFormValues, any, BuildingSubmitValues>({
+  const bldgForm = useForm<BuildingFormValues, undefined, BuildingSubmitValues>({
     resolver: zodResolver(buildingSchema),
     defaultValues: {
       name: "",

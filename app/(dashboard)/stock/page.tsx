@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation"
 import type { Metadata } from "next"
 
-import { auth } from "@/src/auth"
+import { getSession } from "@/src/lib/auth"
 import prisma from "@/src/lib/prisma"
 import {
   getFeedMovements,
   getFeedStocks,
+  getMedicineMovements,
   getMedicineStocks,
 } from "@/src/actions/stock"
 import { StockPageClient } from "./_components/StockPageClient"
@@ -13,14 +14,19 @@ import { StockPageClient } from "./_components/StockPageClient"
 export const metadata: Metadata = { title: "Stock" }
 
 export default async function StockPage() {
-  const session = await auth()
+  const session = await getSession()
 
   if (!session?.user?.id) {
     redirect("/login")
   }
 
   const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
+    where: {
+      userId: session.effectiveUserId,
+      ...(session.isImpersonating && session.impersonatedOrganizationId
+        ? { organizationId: session.impersonatedOrganizationId }
+        : {}),
+    },
     select: { organizationId: true },
     orderBy: { organization: { name: "asc" } },
   })
@@ -31,16 +37,24 @@ export default async function StockPage() {
 
   const { organizationId } = membership
 
-  const [feedStocksResult, feedMovementsResult, medicineStocksResult] =
+  const [
+    feedStocksResult,
+    feedMovementsResult,
+    medicineStocksResult,
+    medicineMovementsResult,
+  ] =
     await Promise.all([
       getFeedStocks({ organizationId }),
       getFeedMovements({ organizationId, limit: 20 }),
       getMedicineStocks({ organizationId }),
+      getMedicineMovements({ organizationId, limit: 20 }),
     ])
 
   const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
   const feedMovements = feedMovementsResult.success ? feedMovementsResult.data : []
   const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
+  const medicineMovements =
+    medicineMovementsResult.success ? medicineMovementsResult.data : []
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -52,9 +66,11 @@ export default async function StockPage() {
       </div>
 
       <StockPageClient
+        organizationId={organizationId}
         initialFeedStocks={feedStocks}
         initialFeedMovements={feedMovements}
         initialMedicineStocks={medicineStocks}
+        initialMedicineMovements={medicineMovements}
       />
     </div>
   )

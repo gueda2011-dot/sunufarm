@@ -1,83 +1,142 @@
-# PROGRESS.md — SunuFarm
+# PROGRESS.md - SunuFarm
 
-> Mis à jour après chaque session de travail.
-> Dernière mise à jour : 2026-03-20
+> Mis a jour apres chaque session de travail.
+> Derniere mise a jour : 2026-03-22
 
 ---
 
-## État global
+## Etat global
 
-| Étape | Description | Statut |
+| Etape | Description | Statut |
 |---|---|---|
-| Étape 1 | Analyse fonctionnelle structurée | ✅ Validée |
-| Étape 2 | Architecture globale validée | ✅ Validée |
-| Étape 3 | Modélisation données validée | ✅ Validée |
-| Étape 4 | Roadmap MVP/V2/V3 | ✅ Validée |
-| Étape 5 | Arborescence complète du projet | ✅ Validée |
-| Étape 6 | Schéma Prisma complet | ✅ Généré |
-| Étape 7 | Seeds réalistes (données sénégalaises) | ⬜ À faire |
-| Étape 8 | formatters.ts, kpi.ts, permissions.ts, audit.ts, validators/ | ⬜ À faire |
-| Étape 9 | Modules backend (Server Actions) | ⬜ À faire |
-| Étape 10 | Pages et vues frontend | ⬜ À faire |
-| Étape 11 | Dashboards et KPI | ⬜ À faire |
-| Étape 12 | Rapports PDF et exports | ⬜ À faire |
-| Étape 13 | Refactoring, sécurité, optimisation | ⬜ À faire |
+| Etape 1 | Analyse fonctionnelle structuree | Validee |
+| Etape 2 | Architecture globale | Validee |
+| Etape 3 | Modelisation des donnees | Validee |
+| Etape 4 | Roadmap MVP/V2/V3 initiale | Validee |
+| Etape 5 | Arborescence du projet | En place |
+| Etape 6 | Schema Prisma multi-tenant | Genere et utilise |
+| Etape 7 | Seeds de demonstration realistes | Termine |
+| Etape 8 | Utilitaires partages (`formatters`, `permissions`, `audit`, `validators`, `utils`) | Termines |
+| Etape 9 | Modules backend (Server Actions) | Largement implementes |
+| Etape 10 | Pages et vues frontend | Largement implementees |
+| Etape 11 | Dashboards, KPI et rapports | MVP implemente |
+| Etape 12 | Exports PDF / Excel | A faire |
+| Etape 13 | Refactoring, securite, optimisation | En cours |
 
 ---
 
-## Décisions techniques prises
+## Positionnement produit
 
-| Décision | Valeur | Raison |
-|---|---|---|
-| Version Prisma réelle | 7.5 (pas 5) | Projet initialisé avec Prisma 7 |
-| Version Next.js réelle | 16.2 (pas 15) | Projet initialisé avec Next.js 16 |
-| Version Zod réelle | 4.x (pas 3.x) | Dépendance installée |
-| Generator Prisma | `prisma-client` | Syntaxe Prisma 7 |
-| Config datasource | `prisma.config.ts` | Pattern Prisma 7 |
-| Env var base de données | `SUNUFARM_DATABASE_URL` | Convention projet |
-| Permissions ferme | JSON dans `UserOrganization.farmPermissions` | MVP — table séparée en V2 |
-| Motif mortalité | Optionnel, défaut "Non précisé" | Décision terrain validée |
-| Types de ventes MVP | Poulets vifs, œufs, fientes uniquement | Décision produit validée |
+SunuFarm est confirme comme un ERP avicole.
 
----
+Le coeur fonctionnel actuel couvre surtout :
+- organisations et gestion multi-tenant
+- fermes et batiments
+- lots d'elevage
+- saisie journaliere
+- production d'oeufs
+- sante animale
+- stock aliment et medicaments
+- clients, ventes, achats, depenses
+- tableaux de bord et rapports mensuels
 
-## Session 1 — 2026-03-20
-
-**Travail effectué :**
-- Étapes 1-3 : analyse fonctionnelle, architecture et modélisation validées
-- Étapes 4-5 : roadmap et arborescence complètes présentées
-- Étape 6 : `prisma/schema.prisma` généré (37 modèles, 13 enums)
-- `prisma.config.ts` mis à jour pour `SUNUFARM_DATABASE_URL`
-- `PROGRESS.md` créé
-
-**Fichiers créés / modifiés :**
-- `prisma/schema.prisma` — schéma complet production-ready
-- `prisma.config.ts` — variable env corrigée
-
-**Prochaine session :**
-- Commencer par : `prisma db push` ou `prisma migrate dev` pour valider le schéma en base
-- Puis étape 7 : `prisma/seed.ts` avec données sénégalaises réalistes
-- Puis étape 8 : utilitaires (`formatters.ts`, `kpi.ts`, `permissions.ts`, `audit.ts`, `validators/`)
+Le projet ne vise pas une gestion agricole generaliste. Le domaine "cultures" n'est pas dans le perimetre actuel.
 
 ---
 
-## Schéma Prisma — Modèles générés
+## Stack technique reelle
 
-| Domaine | Modèles |
+| Sujet | Valeur |
 |---|---|
-| Référentiels globaux | Species, Breed, FeedType, MortalityReason |
-| Auth (NextAuth v5) | Account, Session, VerificationToken |
-| Utilisateurs | User, UserOrganization |
-| Organisation | Organization |
-| Infrastructure | Farm, Building |
-| Lots | Batch |
-| Saisie journalière | DailyRecord, MortalityRecord |
-| Production œufs | EggProductionRecord |
-| Pesées | WeightRecord |
-| Santé | VaccinationPlan, VaccinationPlanItem, VaccinationRecord, TreatmentRecord |
-| Stock aliments | FeedStock, FeedMovement |
-| Stock médic. | MedicineStock, MedicineMovement |
-| Commerce | Customer, Supplier, Sale, SaleItem, Purchase, PurchaseItem |
-| Finances | Expense, ExpenseCategory, Invoice, Payment |
-| RH | Employee |
-| Système | Notification, AuditLog |
+| Framework | Next.js 16.2 (App Router) |
+| React | 19.2.4 |
+| ORM | Prisma 7.5 |
+| Base de donnees | PostgreSQL |
+| Auth | NextAuth v5 beta (credentials + JWT) |
+| Validation | Zod 4 |
+| Data fetching client | TanStack React Query |
+| Formulaires | React Hook Form |
+| Styling | Tailwind CSS 4 |
+
+---
+
+## Modules actuellement disponibles
+
+### Authentification
+- page de connexion
+- route NextAuth
+- layout dashboard protege
+
+### Referential et structure
+- organisations
+- utilisateurs et roles
+- fermes
+- batiments
+
+### Production avicole
+- lots d'elevage
+- saisie journaliere
+- production d'oeufs
+- vaccinations
+- traitements
+
+### Commerce et finance
+- clients
+- ventes
+- achats
+- depenses
+- syntheses financieres
+
+### Stocks
+- stock aliment
+- mouvements aliment
+- stock medicaments
+- mouvements medicaments
+
+### Pilotage
+- tableau de bord
+- KPI operationnels
+- rapports mensuels
+
+---
+
+## Session 2026-03-22
+
+### Travail effectue
+
+- correction des erreurs TypeScript bloquantes
+- correction des vrais problemes ESLint cote application
+- remplacement des references Prisma invalides `batchNumber` par `number`
+- adaptation de certains retours Zod v4 (`issues` au lieu de `errors`)
+- suppression des usages signales de `Date.now()` dans le rendu
+- assainissement de plusieurs composants React Hook Form
+- mise a jour de la configuration ESLint pour ignorer les dossiers Prisma generes
+- regeneration des types Next avec `next typegen`
+- verification du projet avec `tsc` et `eslint`
+
+### Resultat des verifications
+
+- `npx next typegen` : OK
+- `npx tsc --noEmit --pretty false` : OK
+- `npm run lint` : OK
+
+---
+
+## Dette technique restante
+
+- finaliser la logique multi-organisation avec un vrai switcher d'organisation active
+- consolider les permissions fines par ferme dans toute l'UI
+- renforcer les tests automatises
+- industrialiser les exports et impressions
+- ajouter plus d'indicateurs de rentabilite par lot et par periode
+- nettoyer progressivement les commentaires historiques devenus obsoletes
+
+---
+
+## Prochaines priorites recommandees
+
+1. Stabiliser le pilotage multi-organisation.
+2. Enrichir la rentabilite par lot avec marges, encaissements et ecarts.
+3. Ajouter des alertes avicoles metier plus poussees.
+4. Implementer les exports PDF / Excel pour les rapports et historiques.
+5. Introduire une vraie strategie de tests sur les Server Actions critiques.

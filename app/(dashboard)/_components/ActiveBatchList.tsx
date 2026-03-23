@@ -9,7 +9,7 @@
  */
 
 import Link                   from "next/link"
-import { cn }                 from "@/src/lib/utils"
+import { cn, batchAgeDay, diffDays } from "@/src/lib/utils"
 import { formatNumber }       from "@/src/lib/formatters"
 import type { BatchSummary }  from "@/src/actions/batches"
 
@@ -17,19 +17,13 @@ import type { BatchSummary }  from "@/src/actions/batches"
 // Helpers (même logique que BatchCard — dupliqués ici pour garder les composants découplés)
 // ---------------------------------------------------------------------------
 
-function computeAgeDay(batch: BatchSummary): number {
-  const diffDays = Math.max(
-    0,
-    Math.floor((Date.now() - new Date(batch.entryDate).getTime()) / 86_400_000),
-  )
-  return batch.entryAgeDay + diffDays
+function computeAgeDay(batch: BatchSummary, now: Date): number {
+  return batchAgeDay(batch.entryDate, batch.entryAgeDay, now)
 }
 
-function hasNoSaisie(batch: BatchSummary): boolean {
+function hasNoSaisie(batch: BatchSummary, now: Date): boolean {
   if (batch._count.dailyRecords > 0) return false
-  const daysSinceEntry = Math.floor(
-    (Date.now() - new Date(batch.entryDate).getTime()) / 86_400_000,
-  )
+  const daysSinceEntry = diffDays(batch.entryDate, now)
   return daysSinceEntry > 1
 }
 
@@ -56,6 +50,8 @@ export function ActiveBatchList({
   batchesNeedingSaisieIds,
   totalActiveBatches,
 }: ActiveBatchListProps) {
+  const now = new Date()
+
   // ── État vide ─────────────────────────────────────────────────────────
   if (batches.length === 0) {
     return (
@@ -99,8 +95,8 @@ export function ActiveBatchList({
       {/* ── Cards ─────────────────────────────────────────────────────── */}
       <div className="space-y-2">
         {displayed.map((batch) => {
-          const ageDay      = computeAgeDay(batch)
-          const noSaisie    = batchesNeedingSaisieIds.has(batch.id) || hasNoSaisie(batch)
+          const ageDay      = computeAgeDay(batch, now)
+          const noSaisie    = batchesNeedingSaisieIds.has(batch.id) || hasNoSaisie(batch, now)
 
           return (
             <div

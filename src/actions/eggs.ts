@@ -31,11 +31,6 @@ const getEggRecordsSchema = z.object({
   limit:          z.number().int().min(1).max(100).default(30),
 })
 
-const getEggRecordSchema = z.object({
-  organizationId: requiredIdSchema,
-  recordId:       requiredIdSchema,
-})
-
 const createEggRecordSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,

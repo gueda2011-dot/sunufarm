@@ -5,7 +5,7 @@
  *
  * - Visible uniquement en desktop (lg+), fixée sur la gauche
  * - usePathname() pour mettre en évidence le lien actif
- * - Tous les liens MVP répertoriés (les pages non encore créées renvoient 404)
+ * - Tous les liens visibles doivent pointer vers une page existante
  * - Logo + nom organisation en haut
  */
 
@@ -40,6 +40,7 @@ const navItems = [
   { href: "/farms",     label: "Fermes & Bâtiments",icon: Warehouse },
   { href: "/stock",     label: "Stock",             icon: Package },
   { href: "/sales",     label: "Ventes",            icon: ShoppingCart },
+  { href: "/customers", label: "Clients",           icon: Users },
   { href: "/purchases", label: "Achats",            icon: ShoppingBag },
   { href: "/health",    label: "Santé animale",     icon: Syringe },
   { href: "/finances",  label: "Finances",          icon: DollarSign },

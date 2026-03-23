@@ -29,8 +29,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -50,6 +49,16 @@ import {
   optionalDateSchema,
 } from "@/src/lib/validators"
 import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
+import { buildBatchNotesWithVaccinationPlan } from "@/src/lib/vaccination-planning"
+import { ensurePoultryReferenceData } from "@/src/lib/poultry-reference-data"
+import { isMissingSchemaFeatureError } from "@/src/lib/prisma-schema-guard"
+import {
+  buildVaccinationPlanItemsFromTemplate,
+  buildVaccinationPlanNameFromTemplate,
+  getTemplateProductionTypeForBatchType,
+  inferPoultrySpeciesFromSpeciesCode,
+  isStrainCompatibleWithBatchType,
+} from "@/src/lib/poultry-reference"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -76,6 +85,8 @@ const createBatchSchema = z.object({
   type:           z.nativeEnum(BatchType),
   speciesId:      requiredIdSchema,
   breedId:        optionalIdSchema,
+  poultryStrainId: optionalIdSchema,
+  vaccinationPlanTemplateId: optionalIdSchema,
   entryDate:      dateSchema,
   entryCount:     positiveIntSchema,
   entryAgeDay:    nonNegativeIntSchema.default(0),
@@ -91,6 +102,7 @@ const updateBatchSchema = z.object({
   batchId:        requiredIdSchema,
   // Champs modifiables uniquement — entryCount, entryDate, type, speciesId sont immuables
   breedId:        optionalIdSchema,
+  poultryStrainId: z.string().cuid().nullable().optional(),
   supplierId:     optionalIdSchema,
   entryWeightG:   positiveIntSchema.optional(),
   unitCostFcfa:   amountFcfaSchema.optional(),
@@ -99,12 +111,6 @@ const updateBatchSchema = z.object({
 })
 
 // Statuts autorisés à la clôture — ACTIVE n'est pas une destination
-const CLOSE_STATUSES = [
-  BatchStatus.CLOSED,
-  BatchStatus.SOLD,
-  BatchStatus.SLAUGHTERED,
-] as const
-
 const closeBatchSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,
@@ -142,6 +148,10 @@ export interface BatchSummary {
   totalCostFcfa:  number
   closedAt:       Date | null
   createdAt:      Date
+  poultryStrain: {
+    id: string
+    name: string
+  } | null
   building: {
     id:     string
     name:   string
@@ -184,6 +194,24 @@ class BusinessRuleError extends Error {
   }
 }
 
+function isBatchReferenceSchemaUnavailable(error: unknown): boolean {
+  return isMissingSchemaFeatureError(error) || isMissingSchemaFeatureError(error, [
+    "PoultryStrain",
+    "VaccinationPlanTemplate",
+    "poultryStrain",
+    "poultryStrainId",
+  ])
+}
+
+function withLegacyPoultryStrain<T extends object>(
+  batch: T,
+): T & { poultryStrain: null } {
+  return {
+    ...batch,
+    poultryStrain: null,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sélections Prisma partagées
 // ---------------------------------------------------------------------------
@@ -198,6 +226,32 @@ const buildingWithFarmSelect = {
 } as const
 
 const batchSummarySelect = {
+  id:             true,
+  organizationId: true,
+  buildingId:     true,
+  number:         true,
+  type:           true,
+  status:         true,
+  entryDate:      true,
+  entryCount:     true,
+  entryAgeDay:    true,
+  unitCostFcfa:   true,
+  totalCostFcfa:  true,
+  closedAt:       true,
+  createdAt:      true,
+  poultryStrain: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  building: { select: buildingWithFarmSelect },
+  _count: {
+    select: { dailyRecords: true },
+  },
+} as const
+
+const batchSummarySelectLegacy = {
   id:             true,
   organizationId: true,
   buildingId:     true,
@@ -236,6 +290,25 @@ const batchDetailSelect = {
   },
 } as const
 
+const batchDetailSelectLegacy = {
+  ...batchSummarySelectLegacy,
+  breedId:      true,
+  supplierId:   true,
+  entryWeightG: true,
+  closeReason:  true,
+  notes:        true,
+  updatedAt:    true,
+  _count: {
+    select: {
+      dailyRecords:  true,
+      eggRecords:    true,
+      weightRecords: true,
+      expenses:      true,
+      saleItems:     true,
+    },
+  },
+} as const
+
 // ---------------------------------------------------------------------------
 // Helpers internes
 // ---------------------------------------------------------------------------
@@ -251,7 +324,9 @@ async function findActiveBatch(batchId: string, organizationId: string) {
     select: {
       id:          true,
       status:      true,
+      type:        true,
       buildingId:  true,
+      speciesId:   true,
       building: { select: { farmId: true } },
     },
   })
@@ -306,6 +381,110 @@ async function generateBatchNumber(
   return `${prefix}${String(nextSeq).padStart(3, "0")}`
 }
 
+async function validatePoultryStrainForBatch(args: {
+  poultryStrainId: string | null
+  speciesId: string
+  batchType: BatchType
+}) {
+  const { poultryStrainId, speciesId, batchType } = args
+
+  if (!poultryStrainId) {
+    return { success: true as const, data: null }
+  }
+
+  const [species, strain] = await Promise.all([
+    prisma.species.findUnique({
+      where: { id: speciesId },
+      select: { id: true, code: true, name: true },
+    }),
+    prisma.poultryStrain.findFirst({
+      where: { id: poultryStrainId, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        species: true,
+        productionType: true,
+      },
+    }),
+  ])
+
+  if (!species) {
+    return { success: false as const, error: "Espece introuvable" }
+  }
+
+  if (!strain) {
+    return { success: false as const, error: "Souche avicole introuvable ou inactive" }
+  }
+
+  const inferredSpecies = inferPoultrySpeciesFromSpeciesCode(species.code)
+  if (!inferredSpecies || inferredSpecies !== strain.species) {
+    return {
+      success: false as const,
+      error: "La souche selectionnee n'est pas compatible avec l'espece du lot",
+    }
+  }
+
+  if (!isStrainCompatibleWithBatchType(strain.productionType, batchType)) {
+    return {
+      success: false as const,
+      error: "La souche selectionnee n'est pas compatible avec le type de lot",
+    }
+  }
+
+  return { success: true as const, data: strain }
+}
+
+async function validateVaccinationPlanTemplateForBatch(args: {
+  vaccinationPlanTemplateId: string | null
+  batchType: BatchType
+}) {
+  const { vaccinationPlanTemplateId, batchType } = args
+
+  if (!vaccinationPlanTemplateId) {
+    return { success: true as const, data: null }
+  }
+
+  const expectedProductionType = getTemplateProductionTypeForBatchType(batchType)
+  if (!expectedProductionType) {
+    return {
+      success: false as const,
+      error:
+        "Aucun template vaccinal par defaut n'est prevu pour ce type de lot",
+    }
+  }
+
+  const template = await prisma.vaccinationPlanTemplate.findFirst({
+    where: {
+      id: vaccinationPlanTemplateId,
+      isActive: true,
+      productionType: expectedProductionType,
+    },
+    select: {
+      id: true,
+      name: true,
+      productionType: true,
+      items: {
+        orderBy: { dayOfAge: "asc" },
+        select: {
+          dayOfAge: true,
+          vaccineName: true,
+          disease: true,
+          notes: true,
+        },
+      },
+    },
+  })
+
+  if (!template) {
+    return {
+      success: false as const,
+      error: "Template vaccinal introuvable ou incompatible avec ce lot",
+    }
+  }
+
+  return { success: true as const, data: template }
+}
+
 // ---------------------------------------------------------------------------
 // 1. getBatches
 // ---------------------------------------------------------------------------
@@ -321,9 +500,6 @@ export async function getBatches(
   data: unknown,
 ): Promise<ActionResult<BatchSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -332,13 +508,10 @@ export async function getBatches(
     const { organizationId, status, type, farmId, buildingId, cursor, limit } =
       parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     // Résoudre les fermes accessibles pour ce rôle
     const accessibleFarmIds = getAccessibleFarmIds(role, farmPermissions, "canRead")
@@ -348,28 +521,54 @@ export async function getBatches(
       return { success: true, data: [] }
     }
 
-    const batches = await prisma.batch.findMany({
-      where: {
-        organizationId,
-        deletedAt: null,
-        ...(status     ? { status }                      : {}),
-        ...(type       ? { type }                        : {}),
-        ...(buildingId ? { buildingId }                  : {}),
-        ...(farmId     ? { building: { farmId } }        : {}),
-        // Filtre par fermes accessibles si la liste est restreinte
-        ...(accessibleFarmIds !== null
-          ? { building: { farmId: { in: accessibleFarmIds } } }
-          : {}),
-        ...(cursor ? { id: { gt: cursor } } : {}),
-      },
-      select:  batchSummarySelect,
-      orderBy: { entryDate: "desc" },
-      take:    limit,
-    })
+    const where = {
+      organizationId,
+      deletedAt: null,
+      ...(status     ? { status }                      : {}),
+      ...(type       ? { type }                        : {}),
+      ...(buildingId ? { buildingId }                  : {}),
+      ...(farmId     ? { building: { farmId } }        : {}),
+      ...(accessibleFarmIds !== null
+        ? { building: { farmId: { in: accessibleFarmIds } } }
+        : {}),
+      ...(cursor ? { id: { gt: cursor } } : {}),
+    }
+
+    let batches: BatchSummary[]
+    try {
+      batches = await prisma.batch.findMany({
+        where,
+        select:  batchSummarySelect,
+        orderBy: { entryDate: "desc" },
+        take:    limit,
+      })
+    } catch (error) {
+      if (!isBatchReferenceSchemaUnavailable(error)) {
+        throw error
+      }
+
+      const legacyBatches = await prisma.batch.findMany({
+        where,
+        select:  batchSummarySelectLegacy,
+        orderBy: { entryDate: "desc" },
+        take:    limit,
+      })
+
+      batches = legacyBatches.map((batch) => withLegacyPoultryStrain(batch))
+    }
 
     return { success: true, data: batches }
-  } catch {
-    return { success: false, error: "Impossible de récupérer les lots" }
+  } catch (error) {
+    console.error("[getBatches] unexpected error", error)
+
+    if (error instanceof Error && error.message) {
+      return {
+        success: false,
+        error: `Impossible de recuperer les lots. ${error.message}`,
+      }
+    }
+
+    return { success: false, error: "Impossible de recuperer les lots" }
   }
 }
 
@@ -385,9 +584,6 @@ export async function getBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -395,18 +591,29 @@ export async function getBatch(
 
     const { organizationId, batchId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
-    const batch = await prisma.batch.findFirst({
-      where:  { id: batchId, organizationId, deletedAt: null },
-      select: batchDetailSelect,
-    })
+    let batch: BatchDetail | null = null
+    try {
+      batch = await prisma.batch.findFirst({
+        where:  { id: batchId, organizationId, deletedAt: null },
+        select: batchDetailSelect,
+      })
+    } catch (error) {
+      if (!isBatchReferenceSchemaUnavailable(error)) {
+        throw error
+      }
+
+      const legacyBatch = await prisma.batch.findFirst({
+        where:  { id: batchId, organizationId, deletedAt: null },
+        select: batchDetailSelectLegacy,
+      })
+
+      batch = legacyBatch ? withLegacyPoultryStrain(legacyBatch) : null
+    }
 
     if (!batch) {
       return { success: false, error: "Lot introuvable" }
@@ -417,8 +624,17 @@ export async function getBatch(
     }
 
     return { success: true, data: batch }
-  } catch {
-    return { success: false, error: "Impossible de récupérer le lot" }
+  } catch (error) {
+    console.error("[getBatch] unexpected error", error)
+
+    if (error instanceof Error && error.message) {
+      return {
+        success: false,
+        error: `Impossible de recuperer le lot. ${error.message}`,
+      }
+    }
+
+    return { success: false, error: "Impossible de recuperer le lot" }
   }
 }
 
@@ -438,21 +654,26 @@ export async function createBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, buildingId, ...batchData } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const {
+      organizationId,
+      buildingId,
+      poultryStrainId,
+      vaccinationPlanTemplateId,
+      ...batchData
+    } = parsed.data
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    await ensurePoultryReferenceData()
 
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
+
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -471,27 +692,148 @@ export async function createBatch(
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
     }
 
-    // Génération du numéro + création dans une seule transaction
-    const batch = await prisma.$transaction(async (tx) => {
-      const number = await generateBatchNumber(tx, organizationId)
-      return tx.batch.create({
-        data:   { organizationId, buildingId, number, ...batchData },
-        select: batchDetailSelect,
+    let strainValidation: Awaited<ReturnType<typeof validatePoultryStrainForBatch>>
+    let templateValidation: Awaited<
+      ReturnType<typeof validateVaccinationPlanTemplateForBatch>
+    >
+    try {
+      ;[strainValidation, templateValidation] = await Promise.all([
+        validatePoultryStrainForBatch({
+          poultryStrainId: poultryStrainId ?? null,
+          speciesId: batchData.speciesId,
+          batchType: batchData.type,
+        }),
+        validateVaccinationPlanTemplateForBatch({
+          vaccinationPlanTemplateId: vaccinationPlanTemplateId ?? null,
+          batchType: batchData.type,
+        }),
+      ])
+    } catch (error) {
+      if (!isBatchReferenceSchemaUnavailable(error)) {
+        throw error
+      }
+
+      return {
+        success: false,
+        error:
+          "La base de donnees n'est pas encore migree pour les souches avicoles et les templates vaccinaux.",
+      }
+    }
+
+    if (!strainValidation.success) {
+      return { success: false, error: strainValidation.error }
+    }
+
+    if (!templateValidation.success) {
+      return { success: false, error: templateValidation.error }
+    }
+
+    const selectedTemplate = templateValidation.data
+
+    let batch: BatchDetail
+    try {
+      batch = await prisma.$transaction(async (tx) => {
+        const number = await generateBatchNumber(tx, organizationId)
+        const createdBatch = await tx.batch.create({
+          data:   {
+            organizationId,
+            buildingId,
+            number,
+            poultryStrainId: poultryStrainId ?? null,
+            ...batchData,
+          },
+          select: batchDetailSelect,
+        })
+
+        if (!selectedTemplate) {
+          return createdBatch
+        }
+
+        const generatedPlan = await tx.vaccinationPlan.create({
+          data: {
+            organizationId,
+            name: buildVaccinationPlanNameFromTemplate(
+              selectedTemplate.name,
+              number,
+            ),
+            batchType: batchData.type,
+            items: {
+              create: buildVaccinationPlanItemsFromTemplate(selectedTemplate.items),
+            },
+          },
+          select: { id: true },
+        })
+
+        return tx.batch.update({
+          where: { id: createdBatch.id },
+          data: {
+            notes: buildBatchNotesWithVaccinationPlan(
+              { planId: generatedPlan.id },
+              createdBatch.notes,
+            ),
+          },
+          select: batchDetailSelect,
+        })
       })
-    })
+    } catch (error) {
+      if (!isBatchReferenceSchemaUnavailable(error)) {
+        throw error
+      }
+
+      if (poultryStrainId || vaccinationPlanTemplateId) {
+        return {
+          success: false,
+          error:
+            "La base de donnees n'est pas encore migree pour les souches avicoles et les templates vaccinaux.",
+        }
+      }
+
+      const legacyBatch = await prisma.$transaction(async (tx) => {
+        const number = await generateBatchNumber(tx, organizationId)
+        return tx.batch.create({
+          data: {
+            organizationId,
+            buildingId,
+            number,
+            ...batchData,
+          },
+          select: batchDetailSelectLegacy,
+        })
+      })
+
+      batch = withLegacyPoultryStrain(legacyBatch)
+    }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "BATCH",
       resourceId:     batch.id,
-      after:          { number: batch.number, buildingId, ...batchData },
+      after:          {
+        number: batch.number,
+        buildingId,
+        poultryStrainId: poultryStrainId ?? null,
+        vaccinationPlanTemplateId: vaccinationPlanTemplateId ?? null,
+        ...batchData,
+      },
     })
 
     return { success: true, data: batch }
-  } catch {
-    return { success: false, error: "Impossible de créer le lot" }
+  } catch (error) {
+    console.error("[createBatch] unexpected error", error)
+
+    if (error instanceof Error && error.message) {
+      return {
+        success: false,
+        error: `Impossible de creer le lot. ${error.message}`,
+      }
+    }
+
+    return { success: false, error: "Impossible de creer le lot" }
   }
 }
 
@@ -512,21 +854,18 @@ export async function updateBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, batchId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "UPDATE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -545,15 +884,73 @@ export async function updateBatch(
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
     }
 
-    const batch = await prisma.batch.update({
-      where:  { id: batchId },
-      data:   updates,
-      select: batchDetailSelect,
-    })
+    if (updates.poultryStrainId !== undefined) {
+      let strainValidation: Awaited<ReturnType<typeof validatePoultryStrainForBatch>>
+      try {
+        strainValidation = await validatePoultryStrainForBatch({
+          poultryStrainId: updates.poultryStrainId,
+          speciesId: existing.speciesId,
+          batchType: existing.type,
+        })
+      } catch (error) {
+        if (!isBatchReferenceSchemaUnavailable(error)) {
+          throw error
+        }
+
+        return {
+          success: false,
+          error:
+            "La base de donnees n'est pas encore migree pour enregistrer une souche avicole sur les lots.",
+        }
+      }
+
+      if (!strainValidation.success) {
+        return { success: false, error: strainValidation.error }
+      }
+    }
+
+    let batch: BatchDetail
+    try {
+      batch = await prisma.batch.update({
+        where:  { id: batchId },
+        data:   updates,
+        select: batchDetailSelect,
+      })
+    } catch (error) {
+      if (!isBatchReferenceSchemaUnavailable(error)) {
+        throw error
+      }
+
+      if (updates.poultryStrainId !== undefined) {
+        return {
+          success: false,
+          error:
+            "La base de donnees n'est pas encore migree pour enregistrer une souche avicole sur les lots.",
+        }
+      }
+
+      const legacyBatch = await prisma.batch.update({
+        where: { id: batchId },
+        data: {
+          breedId: updates.breedId,
+          supplierId: updates.supplierId,
+          entryWeightG: updates.entryWeightG,
+          unitCostFcfa: updates.unitCostFcfa,
+          totalCostFcfa: updates.totalCostFcfa,
+          notes: updates.notes,
+        },
+        select: batchDetailSelectLegacy,
+      })
+
+      batch = withLegacyPoultryStrain(legacyBatch)
+    }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "BATCH",
       resourceId:     batchId,
@@ -588,9 +985,6 @@ export async function closeBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = closeBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -598,12 +992,12 @@ export async function closeBatch(
 
     const { organizationId, batchId, closeStatus, closeReason, closedAt } =
       parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CLOSE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -625,19 +1019,41 @@ export async function closeBatch(
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
     }
 
-    const batch = await prisma.batch.update({
-      where: { id: batchId },
-      data:  {
-        status:      closeStatus,
-        closedAt:    closedAt ?? new Date(),
-        closeReason: closeReason ?? null,
-      },
-      select: batchDetailSelect,
-    })
+    let batch: BatchDetail
+    try {
+      batch = await prisma.batch.update({
+        where: { id: batchId },
+        data:  {
+          status:      closeStatus,
+          closedAt:    closedAt ?? new Date(),
+          closeReason: closeReason ?? null,
+        },
+        select: batchDetailSelect,
+      })
+    } catch (error) {
+      if (!isBatchReferenceSchemaUnavailable(error)) {
+        throw error
+      }
+
+      const legacyBatch = await prisma.batch.update({
+        where: { id: batchId },
+        data:  {
+          status:      closeStatus,
+          closedAt:    closedAt ?? new Date(),
+          closeReason: closeReason ?? null,
+        },
+        select: batchDetailSelectLegacy,
+      })
+
+      batch = withLegacyPoultryStrain(legacyBatch)
+    }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "BATCH",
       resourceId:     batchId,
@@ -674,21 +1090,18 @@ export async function closeBatch(
 export async function deleteBatch(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = deleteBatchSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, batchId } = parsed.data
-  const actorId = sessionResult.data.user.id
 
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
+  const accessResult = await requireOrganizationAccess(organizationId)
+  if (!accessResult.success) return accessResult
 
-  const { role, farmPermissions } = membershipResult.data
+  const { session, membership, effectiveUserId } = accessResult.data
+  const { role, farmPermissions } = membership
 
   if (!canPerformAction(role, "DELETE_BATCH")) {
     return { success: false, error: "Permission refusée" }
@@ -734,8 +1147,11 @@ export async function deleteBatch(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.DELETE,
       resourceType:   "BATCH",
       resourceId:     batchId,

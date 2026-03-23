@@ -27,8 +27,7 @@
 import { z }                          from "zod"
 import prisma                         from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 }                                     from "@/src/lib/auth"
 import { canAccessFarm }              from "@/src/lib/permissions"
@@ -88,9 +87,6 @@ export async function getBatchProfitability(
   data: unknown,
 ): Promise<ActionResult<BatchProfitability>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchProfitabilitySchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -98,11 +94,8 @@ export async function getBatchProfitability(
 
     const { organizationId, batchId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
     // ── Fetch parallèle ────────────────────────────────────────────────────
     const [batch, saleItemsAgg, expensesAgg, mortalityAgg] = await Promise.all([
@@ -147,8 +140,8 @@ export async function getBatchProfitability(
 
     // Vérifier l'accès en lecture à la ferme du lot
     if (!canAccessFarm(
-      membershipResult.data.role,
-      membershipResult.data.farmPermissions,
+      accessResult.data.membership.role,
+      accessResult.data.membership.farmPermissions,
       batch.building.farmId,
       "canRead",
     )) {

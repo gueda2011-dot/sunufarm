@@ -51,8 +51,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -66,6 +65,7 @@ import {
   requiredIdSchema,
   optionalIdSchema,
   positiveIntSchema,
+  positiveNumberSchema,
   optionalDateSchema,
   dateSchema,
 } from "@/src/lib/validators"
@@ -74,6 +74,28 @@ import {
   BatchType,
   UserRole,
 } from "@/src/generated/prisma/client"
+import { createMedicineMovement } from "@/src/actions/stock"
+import {
+  buildMovementNotesWithSource,
+  validateStockMovementInput,
+} from "@/src/lib/stock-movement-conventions"
+import {
+  buildVaccinationMovementContext,
+  buildVaccinationNotesWithStockImpact,
+  parseVaccinationStockImpact,
+  type VaccinationStockImpact,
+} from "@/src/lib/health-stock-impact"
+import {
+  buildVaccinationPlanItemsFromTemplate,
+  buildVaccinationPlanNameFromTemplate,
+  getTemplateProductionTypeForBatchType,
+} from "@/src/lib/poultry-reference"
+import { ensurePoultryReferenceData } from "@/src/lib/poultry-reference-data"
+import { isMissingSchemaFeatureError } from "@/src/lib/prisma-schema-guard"
+import {
+  buildBatchNotesWithVaccinationPlan,
+  parseBatchVaccinationPlanLink,
+} from "@/src/lib/vaccination-planning"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod — Plans vaccinaux
@@ -120,6 +142,18 @@ const updateVaccinationPlanSchema = z.object({
   items:          z.array(vaccinationPlanItemSchema).min(1).optional(),
 })
 
+const assignVaccinationPlanToBatchSchema = z.object({
+  organizationId: requiredIdSchema,
+  batchId: requiredIdSchema,
+  planId: z.string().cuid().nullable(),
+})
+
+const assignVaccinationPlanTemplateToBatchSchema = z.object({
+  organizationId: requiredIdSchema,
+  batchId: requiredIdSchema,
+  templateId: requiredIdSchema,
+})
+
 // ---------------------------------------------------------------------------
 // Schémas Zod — Vaccinations réalisées
 // ---------------------------------------------------------------------------
@@ -154,6 +188,11 @@ const createVaccinationSchema = z.object({
   countVaccinated: positiveIntSchema,
   medicineStockId: optionalIdSchema,
   notes:           z.string().max(1000).optional(),
+  stockImpact: z.object({
+    enabled: z.boolean().default(false),
+    consumedQuantity: positiveNumberSchema.optional(),
+    consumedUnit: z.string().min(1).max(30).optional(),
+  }).optional(),
 })
 
 const updateVaccinationSchema = z.object({
@@ -166,6 +205,11 @@ const updateVaccinationSchema = z.object({
   countVaccinated: positiveIntSchema.optional(),
   medicineStockId: z.string().cuid().nullable().optional(),
   notes:           z.string().max(1000).optional(),
+  stockImpact: z.object({
+    enabled: z.boolean().default(false),
+    consumedQuantity: positiveNumberSchema.optional(),
+    consumedUnit: z.string().min(1).max(30).optional(),
+  }).optional(),
 })
 
 // ---------------------------------------------------------------------------
@@ -270,6 +314,7 @@ export interface VaccinationSummary {
   recordedById:    string | null
   createdAt:       Date
   updatedAt:       Date
+  stockImpact:     VaccinationStockImpact
 }
 
 export interface TreatmentSummary {
@@ -428,6 +473,266 @@ function resolveHealthFarmReadScope(
   return perms.filter((p) => p.canRead).map((p) => p.farmId)
 }
 
+type VaccinationStockMovementPlan = {
+  medicineStockId: string
+  consumedQuantity: number
+  consumedUnit: string
+  unitPriceFcfa: number
+}
+
+function normalizeVaccinationStockImpact(
+  stockImpact:
+    | z.infer<typeof createVaccinationSchema>["stockImpact"]
+    | z.infer<typeof updateVaccinationSchema>["stockImpact"]
+    | undefined,
+): VaccinationStockImpact {
+  return stockImpact?.enabled
+    ? {
+        enabled: true,
+        consumedQuantity: stockImpact.consumedQuantity ?? null,
+        consumedUnit: stockImpact.consumedUnit ?? null,
+      }
+    : {
+        enabled: false,
+        consumedQuantity: null,
+        consumedUnit: null,
+      }
+}
+
+function vaccinationMovementSignature(
+  movement: VaccinationStockMovementPlan | null,
+  medicineStockId: string | null,
+) {
+  if (!movement || !medicineStockId) return "NONE"
+  return [
+    medicineStockId,
+    movement.consumedQuantity,
+    movement.consumedUnit,
+    movement.unitPriceFcfa,
+  ].join("|")
+}
+
+async function resolveVaccinationMedicineStock(args: {
+  organizationId: string
+  batchFarmId: string
+  medicineStockId: string
+}) {
+  const { organizationId, batchFarmId, medicineStockId } = args
+
+  const medicineStock = await prisma.medicineStock.findFirst({
+    where: { id: medicineStockId, organizationId },
+    select: {
+      id: true,
+      farmId: true,
+      unit: true,
+      quantityOnHand: true,
+      unitPriceFcfa: true,
+    },
+  })
+
+  if (!medicineStock) {
+    return { success: false as const, error: "Stock de medicament introuvable" }
+  }
+
+  if (medicineStock.farmId !== batchFarmId) {
+    return {
+      success: false as const,
+      error:
+        "Le stock de medicament doit appartenir a la meme ferme que le lot concerne",
+    }
+  }
+
+  return { success: true as const, data: medicineStock }
+}
+
+async function resolveVaccinationMovementPlan(args: {
+  organizationId: string
+  batchFarmId: string
+  medicineStockId: string | null
+  stockImpact: VaccinationStockImpact
+}): Promise<ActionResult<VaccinationStockMovementPlan | null>> {
+  const { organizationId, batchFarmId, medicineStockId, stockImpact } = args
+
+  if (!stockImpact.enabled) {
+    return { success: true, data: null }
+  }
+
+  if (!medicineStockId) {
+    return {
+      success: false,
+      error: "Le stock medicament est obligatoire si la vaccination impacte le stock",
+    }
+  }
+
+  if (!stockImpact.consumedQuantity || !stockImpact.consumedUnit) {
+    return {
+      success: false,
+      error:
+        "La quantite consommee et l'unite sont obligatoires si la vaccination impacte le stock",
+    }
+  }
+
+  const stockResult = await resolveVaccinationMedicineStock({
+    organizationId,
+    batchFarmId,
+    medicineStockId,
+  })
+  if (!stockResult.success) {
+    return stockResult
+  }
+
+  if (stockImpact.consumedUnit !== stockResult.data.unit) {
+    return {
+      success: false,
+      error:
+        `L'unite saisie doit correspondre a l'unite du stock cible (${stockResult.data.unit})`,
+    }
+  }
+
+  const validation = validateStockMovementInput({
+    type: "SORTIE",
+    quantity: stockImpact.consumedQuantity,
+    availableQuantity: stockResult.data.quantityOnHand,
+    stockId: medicineStockId,
+  })
+
+  if (validation) {
+    return { success: false, error: validation }
+  }
+
+  return {
+    success: true,
+    data: {
+      medicineStockId,
+      consumedQuantity: stockImpact.consumedQuantity,
+      consumedUnit: stockImpact.consumedUnit,
+      unitPriceFcfa: stockResult.data.unitPriceFcfa,
+    },
+  }
+}
+
+function buildCurrentVaccinationMovementPlan(vaccination: {
+  medicineStockId: string | null
+  notes: string | null
+}): ActionResult<VaccinationStockMovementPlan | null> {
+  const impact = parseVaccinationStockImpact(vaccination.notes)
+
+  if (!impact.enabled) {
+    return { success: true, data: null }
+  }
+
+  if (!vaccination.medicineStockId) {
+    return {
+      success: false,
+      error:
+        "Etat vaccination incoherent : impact stock actif sans stock medicament exploitable",
+    }
+  }
+
+  if (!impact.consumedQuantity || !impact.consumedUnit) {
+    return {
+      success: false,
+      error:
+        "Etat vaccination incoherent : quantite ou unite de consommation introuvable",
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      medicineStockId: vaccination.medicineStockId,
+      consumedQuantity: impact.consumedQuantity,
+      consumedUnit: impact.consumedUnit,
+      unitPriceFcfa: 0,
+    },
+  }
+}
+
+async function createVaccinationStockExit(args: {
+  organizationId: string
+  vaccinationId: string
+  batchId: string
+  date: Date
+  notes: string | null
+  movement: VaccinationStockMovementPlan
+  label: string
+  source?: "SANTE" | "CORRECTION"
+}): Promise<ActionResult<{ id: string }>> {
+  const {
+    organizationId,
+    vaccinationId,
+    batchId,
+    date,
+    notes,
+    movement,
+    label,
+    source = "SANTE",
+  } = args
+
+  const movementNotes = buildMovementNotesWithSource(
+    source,
+    buildVaccinationMovementContext(vaccinationId, label, notes),
+  )
+
+  const result = await createMedicineMovement({
+    organizationId,
+    medicineStockId: movement.medicineStockId,
+    type: "SORTIE",
+    quantity: movement.consumedQuantity,
+    unitPriceFcfa: movement.unitPriceFcfa > 0 ? movement.unitPriceFcfa : undefined,
+    batchId,
+    notes: movementNotes,
+    date,
+  })
+
+  if (!result.success) {
+    return { success: false, error: result.error }
+  }
+
+  return { success: true, data: { id: result.data.id } }
+}
+
+async function reverseVaccinationStockExit(args: {
+  organizationId: string
+  vaccinationId: string
+  batchId: string
+  date: Date
+  notes: string | null
+  movement: VaccinationStockMovementPlan
+  label: string
+}): Promise<ActionResult<{ id: string }>> {
+  const { organizationId, vaccinationId, batchId, date, notes, movement, label } = args
+
+  const movementNotes = buildMovementNotesWithSource(
+    "CORRECTION",
+    buildVaccinationMovementContext(vaccinationId, label, notes),
+  )
+
+  const result = await createMedicineMovement({
+    organizationId,
+    medicineStockId: movement.medicineStockId,
+    type: "ENTREE",
+    quantity: movement.consumedQuantity,
+    unitPriceFcfa: movement.unitPriceFcfa > 0 ? movement.unitPriceFcfa : undefined,
+    batchId,
+    notes: movementNotes,
+    date,
+  })
+
+  if (!result.success) {
+    return { success: false, error: result.error }
+  }
+
+  return { success: true, data: { id: result.data.id } }
+}
+
+function mapVaccinationSummary(vaccination: VaccinationSummary) {
+  return {
+    ...vaccination,
+    stockImpact: parseVaccinationStockImpact(vaccination.notes),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 1. getVaccinationPlans
 // ---------------------------------------------------------------------------
@@ -447,9 +752,6 @@ export async function getVaccinationPlans(
   data: unknown,
 ): Promise<ActionResult<VaccinationPlanSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getVaccinationPlansSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -457,11 +759,8 @@ export async function getVaccinationPlans(
 
     const { organizationId, batchType } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
     const plans = await prisma.vaccinationPlan.findMany({
       where: {
@@ -492,21 +791,18 @@ export async function createVaccinationPlan(
   data: unknown,
 ): Promise<ActionResult<VaccinationPlanSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createVaccinationPlanSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, name, batchType, items } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const { session, membership, effectiveUserId } = accessResult.data
 
-    if (!canPerformAction(membershipResult.data.role, "MANAGE_FARMS")) {
+    if (!canPerformAction(membership.role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
     }
 
@@ -521,8 +817,11 @@ export async function createVaccinationPlan(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "VACCINATION_PLAN",
       resourceId:     plan.id,
@@ -549,21 +848,18 @@ export async function updateVaccinationPlan(
   data: unknown,
 ): Promise<ActionResult<VaccinationPlanSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateVaccinationPlanSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, planId, items, ...planUpdates } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const { session, membership, effectiveUserId } = accessResult.data
 
-    if (!canPerformAction(membershipResult.data.role, "MANAGE_FARMS")) {
+    if (!canPerformAction(membership.role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
     }
 
@@ -599,8 +895,11 @@ export async function updateVaccinationPlan(
     }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "VACCINATION_PLAN",
       resourceId:     planId,
@@ -611,6 +910,284 @@ export async function updateVaccinationPlan(
     return { success: true, data: plan }
   } catch {
     return { success: false, error: "Impossible de mettre à jour le plan vaccinal" }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3b. assignVaccinationPlanToBatch
+// ---------------------------------------------------------------------------
+
+export async function assignVaccinationPlanToBatch(
+  data: unknown,
+): Promise<ActionResult<{ batchId: string; planId: string | null }>> {
+  try {
+
+    const parsed = assignVaccinationPlanToBatchSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Données invalides" }
+    }
+
+    const { organizationId, batchId, planId } = parsed.data
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
+
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    const { role, farmPermissions } = membership
+
+    if (!canPerformAction(role, "UPDATE_BATCH")) {
+      return { success: false, error: "Permission refusée" }
+    }
+
+    const batch = await prisma.batch.findFirst({
+      where: { id: batchId, organizationId, deletedAt: null },
+      select: {
+        id: true,
+        type: true,
+        notes: true,
+        status: true,
+        building: { select: { farmId: true } },
+      },
+    })
+
+    if (!batch) {
+      return { success: false, error: "Lot introuvable" }
+    }
+
+    if (!canAccessFarm(role, farmPermissions, batch.building.farmId, "canWrite")) {
+      return { success: false, error: "Accès en écriture refusé sur cette ferme" }
+    }
+
+    if (batch.status !== BatchStatus.ACTIVE) {
+      return {
+        success: false,
+        error: "Le plan vaccinal ne peut être associé qu'à un lot actif",
+      }
+    }
+
+    if (planId) {
+      const plan = await prisma.vaccinationPlan.findFirst({
+        where: { id: planId, organizationId, isActive: true },
+        select: { id: true, batchType: true },
+      })
+
+      if (!plan) {
+        return { success: false, error: "Plan vaccinal introuvable" }
+      }
+
+      if (plan.batchType !== batch.type) {
+        return {
+          success: false,
+          error: "Le type du plan vaccinal doit correspondre au type du lot",
+        }
+      }
+    }
+
+    const nextNotes = buildBatchNotesWithVaccinationPlan(
+      { planId },
+      batch.notes,
+    )
+
+    await prisma.batch.update({
+      where: { id: batchId },
+      data: { notes: nextNotes },
+      select: { id: true },
+    })
+
+    await createAuditLog({
+      userId: effectiveUserId,
+      organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
+      action: AuditAction.UPDATE,
+      resourceType: "BATCH_VACCINATION_PLAN",
+      resourceId: batchId,
+      before: parseBatchVaccinationPlanLink(batch.notes),
+      after: { planId },
+    })
+
+    return { success: true, data: { batchId, planId } }
+  } catch {
+    return {
+      success: false,
+      error: "Impossible d'associer le plan vaccinal à ce lot",
+    }
+  }
+}
+
+export async function assignVaccinationPlanTemplateToBatch(
+  data: unknown,
+): Promise<ActionResult<{ batchId: string; planId: string }>> {
+  try {
+
+    const parsed = assignVaccinationPlanTemplateToBatchSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Donnees invalides" }
+    }
+
+    const { organizationId, batchId, templateId } = parsed.data
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
+
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    await ensurePoultryReferenceData()
+
+    const { role, farmPermissions } = membership
+
+    if (!canPerformAction(role, "UPDATE_BATCH")) {
+      return { success: false, error: "Permission refusee" }
+    }
+
+    const batch = await prisma.batch.findFirst({
+      where: { id: batchId, organizationId, deletedAt: null },
+      select: {
+        id: true,
+        number: true,
+        type: true,
+        notes: true,
+        status: true,
+        building: { select: { farmId: true } },
+      },
+    })
+
+    if (!batch) {
+      return { success: false, error: "Lot introuvable" }
+    }
+
+    if (!canAccessFarm(role, farmPermissions, batch.building.farmId, "canWrite")) {
+      return { success: false, error: "Acces en ecriture refuse sur cette ferme" }
+    }
+
+    if (batch.status !== BatchStatus.ACTIVE) {
+      return {
+        success: false,
+        error: "Le plan vaccinal ne peut etre associe qu'a un lot actif",
+      }
+    }
+
+    const expectedProductionType = getTemplateProductionTypeForBatchType(batch.type)
+    if (!expectedProductionType) {
+      return {
+        success: false,
+        error: "Aucun template vaccinal n'est prevu pour ce type de lot",
+      }
+    }
+
+    let template: {
+      id: string
+      name: string
+      items: {
+        dayOfAge: number
+        vaccineName: string
+        disease: string | null
+        notes: string | null
+      }[]
+    } | null = null
+
+    try {
+      template = await prisma.vaccinationPlanTemplate.findFirst({
+        where: {
+          id: templateId,
+          isActive: true,
+          productionType: expectedProductionType,
+        },
+        select: {
+          id: true,
+          name: true,
+          items: {
+            orderBy: { dayOfAge: "asc" },
+            select: {
+              dayOfAge: true,
+              vaccineName: true,
+              disease: true,
+              notes: true,
+            },
+          },
+        },
+      })
+    } catch (error) {
+      if (
+        isMissingSchemaFeatureError(error, [
+          "VaccinationPlanTemplate",
+          "VaccinationPlanTemplateItem",
+        ])
+      ) {
+        return {
+          success: false,
+          error:
+            "La base de donnees n'est pas encore migree pour les templates vaccinaux.",
+        }
+      }
+
+      throw error
+    }
+
+    if (!template) {
+      return {
+        success: false,
+        error: "Template vaccinal introuvable ou incompatible avec ce lot",
+      }
+    }
+
+    const previousPlanLink = parseBatchVaccinationPlanLink(batch.notes)
+
+    const generatedPlan = await prisma.$transaction(async (tx) => {
+      const createdPlan = await tx.vaccinationPlan.create({
+        data: {
+          organizationId,
+          name: buildVaccinationPlanNameFromTemplate(template.name, batch.number),
+          batchType: batch.type,
+          items: {
+            create: buildVaccinationPlanItemsFromTemplate(template.items),
+          },
+        },
+        select: { id: true },
+      })
+
+      await tx.batch.update({
+        where: { id: batchId },
+        data: {
+          notes: buildBatchNotesWithVaccinationPlan(
+            { planId: createdPlan.id },
+            batch.notes,
+          ),
+        },
+        select: { id: true },
+      })
+
+      return createdPlan
+    })
+
+    await createAuditLog({
+      userId: effectiveUserId,
+      organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
+      action: AuditAction.UPDATE,
+      resourceType: "BATCH_VACCINATION_PLAN_TEMPLATE",
+      resourceId: batchId,
+      before: previousPlanLink,
+      after: {
+        templateId,
+        planId: generatedPlan.id,
+      },
+    })
+
+    return {
+      success: true,
+      data: {
+        batchId,
+        planId: generatedPlan.id,
+      },
+    }
+  } catch {
+    return {
+      success: false,
+      error: "Impossible de generer et d'associer le plan vaccinal a ce lot",
+    }
   }
 }
 
@@ -629,9 +1206,6 @@ export async function getVaccinations(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getVaccinationsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -646,13 +1220,10 @@ export async function getVaccinations(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     // Construire le filtre ferme
     let farmFilter: object = {}
@@ -693,7 +1264,7 @@ export async function getVaccinations(
       take:    limit,
     })
 
-    return { success: true, data: vaccinations }
+    return { success: true, data: vaccinations.map((vaccination) => mapVaccinationSummary(vaccination as VaccinationSummary)) }
   } catch {
     return { success: false, error: "Impossible de récupérer les vaccinations" }
   }
@@ -711,9 +1282,6 @@ export async function getVaccination(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getVaccinationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -721,13 +1289,10 @@ export async function getVaccination(
 
     const { organizationId, vaccinationId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     const vaccination = await prisma.vaccinationRecord.findFirst({
       where:  { id: vaccinationId, organizationId },
@@ -746,8 +1311,9 @@ export async function getVaccination(
     }
 
     // Extraire batch du résultat avant de retourner (non inclus dans VaccinationSummary)
-    const { batch: _batch, ...vaccinationData } = vaccination
-    return { success: true, data: vaccinationData }
+    const { batch, ...vaccinationData } = vaccination
+    void batch
+    return { success: true, data: mapVaccinationSummary(vaccinationData as VaccinationSummary) }
   } catch {
     return { success: false, error: "Impossible de récupérer la vaccination" }
   }
@@ -778,9 +1344,6 @@ export async function createVaccination(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createVaccinationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -796,13 +1359,13 @@ export async function createVaccination(
       countVaccinated,
       medicineStockId,
       notes,
+      stockImpact,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_VACCINATION")) {
       return { success: false, error: "Permission refusée" }
@@ -845,16 +1408,28 @@ export async function createVaccination(
       }
     }
 
-    // Valider le stock médicament si fourni
-    if (medicineStockId) {
-      const medStock = await prisma.medicineStock.findFirst({
-        where:  { id: medicineStockId, organizationId },
-        select: { id: true },
+    const normalizedStockImpact = normalizeVaccinationStockImpact(stockImpact)
+    const movementPlan = await resolveVaccinationMovementPlan({
+      organizationId,
+      batchFarmId: batch.building.farmId,
+      medicineStockId: medicineStockId ?? null,
+      stockImpact: normalizedStockImpact,
+    })
+    if (!movementPlan.success) return movementPlan
+
+    if (medicineStockId && !normalizedStockImpact.enabled) {
+      const medicineStockResult = await resolveVaccinationMedicineStock({
+        organizationId,
+        batchFarmId: batch.building.farmId,
+        medicineStockId,
       })
-      if (!medStock) {
-        return { success: false, error: "Stock de médicament introuvable" }
-      }
+      if (!medicineStockResult.success) return medicineStockResult
     }
+
+    const vaccinationNotes = buildVaccinationNotesWithStockImpact(
+      normalizedStockImpact,
+      notes ?? null,
+    )
 
     const vaccination = await prisma.vaccinationRecord.create({
       data: {
@@ -867,22 +1442,53 @@ export async function createVaccination(
         dose:            dose ?? null,
         countVaccinated,
         medicineStockId: medicineStockId ?? null,
-        notes:           notes ?? null,
-        recordedById:    actorId,
+        notes:           vaccinationNotes,
+        recordedById:    effectiveUserId,
       },
       select: vaccinationSelect,
     })
 
+    if (movementPlan.data) {
+      const movementResult = await createVaccinationStockExit({
+        organizationId,
+        vaccinationId: vaccination.id,
+        batchId,
+        date,
+        notes: notes ?? null,
+        movement: movementPlan.data,
+        label: "Consommation vaccination",
+      })
+
+      if (!movementResult.success) {
+        await prisma.vaccinationRecord.delete({ where: { id: vaccination.id } })
+        return {
+          success: false,
+          error:
+            `Creation de la vaccination annulee : impossible d'enregistrer la sortie de stock. ${movementResult.error}`,
+        }
+      }
+    }
+
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "VACCINATION_RECORD",
       resourceId:     vaccination.id,
-      after:          { batchId, date, vaccineName, countVaccinated, batchAgeDay: ageResult.ageDay },
+      after:          {
+        batchId,
+        date,
+        vaccineName,
+        countVaccinated,
+        batchAgeDay: ageResult.ageDay,
+        stockImpact: normalizedStockImpact,
+      },
     })
 
-    return { success: true, data: vaccination }
+    return { success: true, data: mapVaccinationSummary(vaccination as VaccinationSummary) }
   } catch {
     return { success: false, error: "Impossible d'enregistrer la vaccination" }
   }
@@ -911,21 +1517,23 @@ export async function updateVaccination(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateVaccinationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, vaccinationId, countVaccinated, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const {
+      organizationId,
+      vaccinationId,
+      countVaccinated,
+      stockImpact,
+      ...updates
+    } = parsed.data
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_VACCINATION")) {
       return { success: false, error: "Permission refusée" }
@@ -962,36 +1570,170 @@ export async function updateVaccination(
       }
     }
 
-    // Valider le nouveau stock médicament si fourni
-    if (updates.medicineStockId) {
-      const medStock = await prisma.medicineStock.findFirst({
-        where:  { id: updates.medicineStockId, organizationId },
-        select: { id: true },
+    const nextMedicineStockId =
+      updates.medicineStockId === undefined
+        ? existing.medicineStockId
+        : updates.medicineStockId
+
+    const currentMovementPlan = buildCurrentVaccinationMovementPlan(existing)
+    if (!currentMovementPlan.success) return currentMovementPlan
+
+    const normalizedStockImpact =
+      stockImpact === undefined
+        ? parseVaccinationStockImpact(existing.notes)
+        : normalizeVaccinationStockImpact(stockImpact)
+
+    const nextMovementPlan = await resolveVaccinationMovementPlan({
+      organizationId,
+      batchFarmId: existing.batch.building.farmId,
+      medicineStockId: nextMedicineStockId ?? null,
+      stockImpact: normalizedStockImpact,
+    })
+    if (!nextMovementPlan.success) return nextMovementPlan
+
+    if (nextMedicineStockId && !normalizedStockImpact.enabled) {
+      const medicineStockResult = await resolveVaccinationMedicineStock({
+        organizationId,
+        batchFarmId: existing.batch.building.farmId,
+        medicineStockId: nextMedicineStockId,
       })
-      if (!medStock) {
-        return { success: false, error: "Stock de médicament introuvable" }
+      if (!medicineStockResult.success) return medicineStockResult
+    }
+
+    const { batch, ...existingData } = existing
+    const nextNotes = buildVaccinationNotesWithStockImpact(
+      normalizedStockImpact,
+      updates.notes === undefined ? existing.notes : updates.notes ?? null,
+    )
+    const nextCountVaccinated = countVaccinated ?? existing.countVaccinated
+
+    const stockSignatureChanged =
+      vaccinationMovementSignature(currentMovementPlan.data, existing.medicineStockId) !==
+      vaccinationMovementSignature(nextMovementPlan.data, nextMedicineStockId ?? null)
+
+    if (stockSignatureChanged) {
+      if (currentMovementPlan.data) {
+        const reverseResult = await reverseVaccinationStockExit({
+          organizationId,
+          vaccinationId,
+          batchId: existing.batchId,
+          date: existing.date,
+          notes: existing.notes,
+          movement: currentMovementPlan.data,
+          label: "Reconciliation vaccination - annulation ancienne sortie",
+        })
+
+        if (!reverseResult.success) {
+          return {
+            success: false,
+            error:
+              `Modification bloquee : impossible d'annuler l'ancienne sortie de stock. ${reverseResult.error}`,
+          }
+        }
+      }
+
+      if (nextMovementPlan.data) {
+        const createNextResult = await createVaccinationStockExit({
+          organizationId,
+          vaccinationId,
+          batchId: existing.batchId,
+          date: existing.date,
+          notes: updates.notes === undefined ? existing.notes : updates.notes ?? null,
+          movement: nextMovementPlan.data,
+          label: "Reconciliation vaccination - nouvelle sortie",
+        })
+
+        if (!createNextResult.success) {
+          if (currentMovementPlan.data) {
+            await createVaccinationStockExit({
+              organizationId,
+              vaccinationId,
+              batchId: existing.batchId,
+              date: existing.date,
+              notes: existing.notes,
+              movement: currentMovementPlan.data,
+              label: "Rollback sortie vaccination",
+              source: "CORRECTION",
+            })
+          }
+
+          return {
+            success: false,
+            error:
+              `Modification annulee : impossible d'appliquer la nouvelle sortie de stock. ${createNextResult.error}`,
+          }
+        }
       }
     }
 
-    const { batch: _batch, ...existingData } = existing
+    let vaccination
 
-    const vaccination = await prisma.vaccinationRecord.update({
-      where:  { id: vaccinationId },
-      data:   { ...updates, ...(countVaccinated !== undefined ? { countVaccinated } : {}) },
-      select: vaccinationSelect,
-    })
+    try {
+      vaccination = await prisma.vaccinationRecord.update({
+        where:  { id: vaccinationId },
+        data:   {
+          ...updates,
+          notes: nextNotes,
+          medicineStockId: nextMedicineStockId ?? null,
+          ...(countVaccinated !== undefined ? { countVaccinated } : {}),
+        },
+        select: vaccinationSelect,
+      })
+    } catch {
+      if (stockSignatureChanged) {
+        if (nextMovementPlan.data) {
+          await reverseVaccinationStockExit({
+            organizationId,
+            vaccinationId,
+            batchId: existing.batchId,
+            date: existing.date,
+            notes: updates.notes === undefined ? existing.notes : updates.notes ?? null,
+            movement: nextMovementPlan.data,
+            label: "Rollback nouvelle sortie vaccination",
+          })
+        }
+
+        if (currentMovementPlan.data) {
+          await createVaccinationStockExit({
+            organizationId,
+            vaccinationId,
+            batchId: existing.batchId,
+            date: existing.date,
+            notes: existing.notes,
+            movement: currentMovementPlan.data,
+            label: "Rollback etat stock initial vaccination",
+            source: "CORRECTION",
+          })
+        }
+      }
+
+      return { success: false, error: "Impossible de mettre a jour la vaccination" }
+    }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "VACCINATION_RECORD",
       resourceId:     vaccinationId,
-      before:         existingData,
-      after:          { ...updates, ...(countVaccinated !== undefined ? { countVaccinated } : {}) },
+      before:         {
+        ...existingData,
+        stockImpact: parseVaccinationStockImpact(existing.notes),
+      },
+      after:          {
+        ...updates,
+        notes: nextNotes,
+        medicineStockId: nextMedicineStockId ?? null,
+        countVaccinated: nextCountVaccinated,
+        stockImpact: normalizedStockImpact,
+      },
     })
 
-    return { success: true, data: vaccination }
+    void batch
+    return { success: true, data: mapVaccinationSummary(vaccination as VaccinationSummary) }
   } catch {
     return { success: false, error: "Impossible de mettre à jour la vaccination" }
   }
@@ -1009,9 +1751,6 @@ export async function getTreatments(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getTreatmentsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1026,13 +1765,10 @@ export async function getTreatments(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     let farmFilter: object = {}
 
@@ -1090,9 +1826,6 @@ export async function getTreatment(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getTreatmentSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1100,13 +1833,10 @@ export async function getTreatment(
 
     const { organizationId, treatmentId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     const treatment = await prisma.treatmentRecord.findFirst({
       where:  { id: treatmentId, organizationId },
@@ -1124,7 +1854,8 @@ export async function getTreatment(
       return { success: false, error: "Accès refusé à cette ferme" }
     }
 
-    const { batch: _batch, ...treatmentData } = treatment
+    const { batch, ...treatmentData } = treatment
+    void batch
     return { success: true, data: treatmentData }
   } catch {
     return { success: false, error: "Impossible de récupérer le traitement" }
@@ -1159,9 +1890,6 @@ export async function createTreatment(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createTreatmentSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1180,12 +1908,11 @@ export async function createTreatment(
       indication,
       notes,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_TREATMENT")) {
       return { success: false, error: "Permission refusée" }
@@ -1249,14 +1976,17 @@ export async function createTreatment(
         medicineStockId: medicineStockId ?? null,
         indication:      indication ?? null,
         notes:           notes ?? null,
-        recordedById:    actorId,
+        recordedById:    effectiveUserId,
       },
       select: treatmentSelect,
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "TREATMENT_RECORD",
       resourceId:     treatment.id,
@@ -1295,21 +2025,17 @@ export async function updateTreatment(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateTreatmentSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, treatmentId, countTreated, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_TREATMENT")) {
       return { success: false, error: "Permission refusée" }
@@ -1364,7 +2090,8 @@ export async function updateTreatment(
       }
     }
 
-    const { batch: _batch, ...existingData } = existing
+    const { batch, ...existingData } = existing
+    void batch
 
     const treatment = await prisma.treatmentRecord.update({
       where:  { id: treatmentId },
@@ -1373,8 +2100,11 @@ export async function updateTreatment(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "TREATMENT_RECORD",
       resourceId:     treatmentId,

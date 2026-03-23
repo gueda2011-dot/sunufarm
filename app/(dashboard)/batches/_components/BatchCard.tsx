@@ -18,12 +18,14 @@
  */
 
 import Link                              from "next/link"
+import { useState }                      from "react"
 import { cn }                            from "@/src/lib/utils"
 import {
   formatMoneyFCFACompact,
   formatDate,
   formatNumber,
 }                                        from "@/src/lib/formatters"
+import { batchAgeDay, diffDays }         from "@/src/lib/utils"
 import type { BatchSummary }             from "@/src/actions/batches"
 
 // ---------------------------------------------------------------------------
@@ -57,25 +59,22 @@ const STATUS_CONFIG: Record<string, {
  *   ACTIVE    → entryAgeDay + jours depuis entryDate
  *   Terminé   → entryAgeDay + jours entre entryDate et closedAt
  */
-function computeAgeDay(batch: BatchSummary): number {
-  const entryMs = new Date(batch.entryDate).getTime()
-  const endMs   = batch.status === "ACTIVE"
-    ? Date.now()
-    : new Date(batch.closedAt ?? new Date()).getTime()
-  const diffDays = Math.max(0, Math.floor((endMs - entryMs) / 86_400_000))
-  return batch.entryAgeDay + diffDays
+function computeAgeDay(batch: BatchSummary, now: Date): number {
+  return batchAgeDay(
+    batch.entryDate,
+    batch.entryAgeDay,
+    batch.status === "ACTIVE" ? now : (batch.closedAt ?? now),
+  )
 }
 
 /**
  * Badge "Aucune saisie" — ajustement 4 :
  *   seulement si ACTIVE + lot existe depuis > 1 jour (entryDate) + 0 saisies
  */
-function shouldShowNoRecordsBadge(batch: BatchSummary): boolean {
+function shouldShowNoRecordsBadge(batch: BatchSummary, now: Date): boolean {
   if (batch.status !== "ACTIVE") return false
   if (batch._count.dailyRecords > 0) return false
-  const daysSinceEntry = Math.floor(
-    (Date.now() - new Date(batch.entryDate).getTime()) / 86_400_000,
-  )
+  const daysSinceEntry = diffDays(batch.entryDate, now)
   return daysSinceEntry > 1
 }
 
@@ -92,8 +91,9 @@ interface BatchCardProps {
 // ---------------------------------------------------------------------------
 
 export function BatchCard({ batch }: BatchCardProps) {
-  const ageDay        = computeAgeDay(batch)
-  const noRecords     = shouldShowNoRecordsBadge(batch)
+  const [now]         = useState(() => new Date())
+  const ageDay        = computeAgeDay(batch, now)
+  const noRecords     = shouldShowNoRecordsBadge(batch, now)
   const isActive      = batch.status === "ACTIVE"
   const statusCfg     = STATUS_CONFIG[batch.status] ?? STATUS_CONFIG.CLOSED
   const typeLabel     = TYPE_LABELS[batch.type]     ?? batch.type

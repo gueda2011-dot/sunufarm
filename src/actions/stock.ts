@@ -53,8 +53,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -504,9 +503,6 @@ export async function getFeedStocks(
   data: unknown,
 ): Promise<ActionResult<FeedStockSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getFeedStocksSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -514,13 +510,10 @@ export async function getFeedStocks(
 
     const { organizationId, farmId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     // Valider l'accès à la ferme si farmId est fourni
     if (farmId && !canAccessFarm(role, farmPermissions, farmId, "canRead")) {
@@ -575,9 +568,6 @@ export async function getFeedMovements(
   data: unknown,
 ): Promise<ActionResult<FeedMovementSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getFeedMovementsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -594,13 +584,10 @@ export async function getFeedMovements(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     // --- Validation feedStockId + cohérence avec farmId (Ajustement 2) ---
     let feedStockFarmId: string | undefined
@@ -687,21 +674,18 @@ export async function createFeedStock(
   data: unknown,
 ): Promise<ActionResult<FeedStockSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createFeedStockSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, farmId, ...stockData } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
@@ -724,8 +708,11 @@ export async function createFeedStock(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "FEED_STOCK",
       resourceId:     feedStock.id,
@@ -755,21 +742,18 @@ export async function updateFeedStock(
   data: unknown,
 ): Promise<ActionResult<FeedStockSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateFeedStockSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, feedStockId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
@@ -794,8 +778,11 @@ export async function updateFeedStock(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "FEED_STOCK",
       resourceId:     feedStockId,
@@ -842,9 +829,6 @@ export async function createFeedMovement(
   data: unknown,
 ): Promise<ActionResult<FeedMovementSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createFeedMovementSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -861,12 +845,12 @@ export async function createFeedMovement(
       notes,
       date,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_FEED_MOVEMENT")) {
       return { success: false, error: "Permission refusée" }
@@ -934,7 +918,7 @@ export async function createFeedMovement(
             batchId:       batchId ?? null,
             reference:     reference ?? null,
             notes:         notes ?? null,
-            recordedById:  actorId,
+            recordedById:  effectiveUserId,
             date,
           },
           select: feedMovementSelect,
@@ -948,8 +932,11 @@ export async function createFeedMovement(
     }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "FEED_MOVEMENT",
       resourceId:     createdMovement.id,
@@ -980,9 +967,6 @@ export async function getMedicineStocks(
   data: unknown,
 ): Promise<ActionResult<MedicineStockSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getMedicineStocksSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -990,13 +974,10 @@ export async function getMedicineStocks(
 
     const { organizationId, farmId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (farmId && !canAccessFarm(role, farmPermissions, farmId, "canRead")) {
       return { success: false, error: "Accès refusé à cette ferme" }
@@ -1049,9 +1030,6 @@ export async function getMedicineMovements(
   data: unknown,
 ): Promise<ActionResult<MedicineMovementSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getMedicineMovementsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1068,13 +1046,10 @@ export async function getMedicineMovements(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     // --- Validation medicineStockId + cohérence farmId (Ajustement 2) ---
     if (medicineStockId) {
@@ -1153,21 +1128,18 @@ export async function createMedicineStock(
   data: unknown,
 ): Promise<ActionResult<MedicineStockSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createMedicineStockSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, farmId, ...stockData } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
@@ -1190,8 +1162,11 @@ export async function createMedicineStock(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "MEDICINE_STOCK",
       resourceId:     medStock.id,
@@ -1225,21 +1200,18 @@ export async function updateMedicineStock(
   data: unknown,
 ): Promise<ActionResult<MedicineStockSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateMedicineStockSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, medicineStockId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
@@ -1264,8 +1236,11 @@ export async function updateMedicineStock(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "MEDICINE_STOCK",
       resourceId:     medicineStockId,
@@ -1316,9 +1291,6 @@ export async function createMedicineMovement(
   data: unknown,
 ): Promise<ActionResult<MedicineMovementSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createMedicineMovementSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1335,12 +1307,12 @@ export async function createMedicineMovement(
       notes,
       date,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_MEDICINE_MOVEMENT")) {
       return { success: false, error: "Permission refusée" }
@@ -1403,7 +1375,7 @@ export async function createMedicineMovement(
             batchId:       batchId ?? null,
             reference:     reference ?? null,
             notes:         notes ?? null,
-            recordedById:  actorId,
+            recordedById:  effectiveUserId,
             date,
           },
           select: medicineMovementSelect,
@@ -1417,8 +1389,11 @@ export async function createMedicineMovement(
     }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "MEDICINE_MOVEMENT",
       resourceId:     createdMovement.id,

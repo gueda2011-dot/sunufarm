@@ -1,43 +1,24 @@
 /**
- * SunuFarm — Server Actions : gestion des ventes
+ * SunuFarm - Server Actions : gestion des ventes
  *
- * Les ventes sont la composante revenu de la rentabilité par lot.
- * Ce module complète la couche financière avec expenses.ts.
- *
- * Architecture Sale / SaleItem :
- *   Sale      → entête de vente (organisation, client, date, total, paiement)
- *   SaleItem  → lignes de vente, chacune optionnellement liée à un lot (batchId)
- *
- *   Une vente n'est pas rattachée directement à un lot — c'est la ligne (SaleItem)
- *   qui porte le lien. Cela permet des ventes groupées (plusieurs lots) et des
- *   ventes sans lot précis (fientes d'une ferme en général).
- *
- * totalFcfa :
- *   Toujours calculé côté serveur : SUM(ROUND(quantity × unitPriceFcfa)).
- *   Jamais accepté du client — incohérence impossible.
- *
- * paidFcfa :
- *   Mis à jour directement sur Sale pour le MVP.
- *   Le modèle Payment (relation Payment[]) est géré en V2.
- *
- * Suppression (hard delete) :
- *   Autorisée uniquement si paidFcfa = 0 et invoiceId = null.
- *   La cascade onDelete: Cascade sur SaleItem supprime les lignes automatiquement.
- *
- * Périmètre MVP :
+ * Perimetre :
  *   - Lister et consulter les ventes d'une organisation
- *   - Créer une vente avec ses lignes (en une seule action)
- *   - Corriger une vente (header + remplacement optionnel des lignes)
- *   - Supprimer une vente vierge de paiement
+ *   - Creer / modifier / supprimer une vente
+ *   - Relier provisoirement les ventes de FIENTE au stock aliment
+ *
+ * Regle cle :
+ *   Aucune vente avec impact stock ne doit laisser un ecart silencieux
+ *   entre ventes et stock. Si la reconciliation n'est pas possible,
+ *   l'operation est bloquee ou rollbackee.
  */
 
 "use server"
 
 import { z } from "zod"
+
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -50,125 +31,131 @@ import {
   optionalDateSchema,
 } from "@/src/lib/validators"
 import { SaleProductType } from "@/src/generated/prisma/client"
+import { createFeedMovement } from "@/src/actions/stock"
+import {
+  buildMovementNotesWithSource,
+  validateStockMovementInput,
+} from "@/src/lib/stock-movement-conventions"
+import {
+  buildSaleMovementContext,
+  buildSaleNotesWithStockImpact,
+  parseSaleStockImpact,
+  type SaleStockImpact,
+} from "@/src/lib/sale-stock-impact"
 
-// ---------------------------------------------------------------------------
-// Constantes
-// ---------------------------------------------------------------------------
-
-/** Unités de vente supportées au MVP */
 const SALE_UNITS = ["KG", "PIECE", "PLATEAU", "CAISSE"] as const
-type SaleUnit = typeof SALE_UNITS[number]
 
-// ---------------------------------------------------------------------------
-// Schémas Zod
-// ---------------------------------------------------------------------------
+export interface SaleItemSummary {
+  id: string
+  batchId: string | null
+  description: string
+  quantity: number
+  unit: string
+  unitPriceFcfa: number
+  totalFcfa: number
+}
 
-/** Ligne de vente — schéma commun à la création et au remplacement */
+export interface SaleSummary {
+  id: string
+  organizationId: string
+  customerId: string | null
+  invoiceId: string | null
+  saleDate: Date
+  productType: SaleProductType
+  totalFcfa: number
+  paidFcfa: number
+  createdAt: Date
+  customer: {
+    id: string
+    name: string
+    phone: string | null
+  } | null
+  items: SaleItemSummary[]
+  stockImpact: SaleStockImpact
+}
+
+export interface SaleDetail extends SaleSummary {
+  notes: string | null
+  createdById: string | null
+  updatedAt: Date
+}
+
+type SaleItemsWithTotal = SaleItemSummary[]
+
+type SaleStockMovementPlan = {
+  feedStockId: string
+  quantityKg: number
+  unitPriceFcfa: number
+}
+
+type SaleRecordForLifecycle = {
+  id: string
+  organizationId: string
+  customerId: string | null
+  invoiceId: string | null
+  saleDate: Date
+  productType: SaleProductType
+  totalFcfa: number
+  paidFcfa: number
+  notes: string | null
+  items: SaleItemSummary[]
+  _count: { payments: number }
+}
+
 const saleItemInputSchema = z.object({
-  /** Lot source optionnel — absent pour les ventes de fientes ou ventes génériques */
-  batchId:       optionalIdSchema,
-  description:   z.string().min(1).max(255),
-  /** Float : 12.5 kg, 300 pièces, 25.5 plateaux */
-  quantity:      z.number().positive(),
-  unit:          z.enum(SALE_UNITS),
-  /** Prix unitaire en FCFA — entier strict */
+  batchId: optionalIdSchema,
+  description: z.string().min(1).max(255),
+  quantity: z.number().positive(),
+  unit: z.enum(SALE_UNITS),
   unitPriceFcfa: positiveIntSchema,
+})
+
+const saleStockImpactSchema = z.object({
+  enabled: z.boolean().default(false),
+  feedStockId: optionalIdSchema,
 })
 
 const getSalesSchema = z.object({
   organizationId: requiredIdSchema,
-  customerId:     optionalIdSchema,
-  productType:    z.nativeEnum(SaleProductType).optional(),
-  fromDate:       optionalDateSchema,
-  toDate:         optionalDateSchema,
-  /**
-   * Cursor de pagination : saleDate de la dernière vente reçue.
-   * La page suivante retourne les ventes dont saleDate est strictement antérieure.
-   */
-  cursorDate:     z.coerce.date().optional(),
-  limit:          z.number().int().min(1).max(100).default(20),
+  customerId: optionalIdSchema,
+  productType: z.nativeEnum(SaleProductType).optional(),
+  fromDate: optionalDateSchema,
+  toDate: optionalDateSchema,
+  cursorDate: z.coerce.date().optional(),
+  limit: z.number().int().min(1).max(100).default(20),
 })
 
 const getSaleSchema = z.object({
   organizationId: requiredIdSchema,
-  saleId:         requiredIdSchema,
+  saleId: requiredIdSchema,
 })
 
 const createSaleSchema = z.object({
   organizationId: requiredIdSchema,
-  customerId:     optionalIdSchema,
-  saleDate:       dateSchema,
-  productType:    z.nativeEnum(SaleProductType),
-  notes:          z.string().max(1000).optional(),
-  /** Au moins une ligne de vente obligatoire */
-  items:          z.array(saleItemInputSchema).min(1),
+  customerId: optionalIdSchema,
+  saleDate: dateSchema,
+  productType: z.nativeEnum(SaleProductType),
+  notes: z.string().max(1000).optional(),
+  items: z.array(saleItemInputSchema).min(1),
+  stockImpact: saleStockImpactSchema.optional(),
 })
 
 const updateSaleSchema = z.object({
   organizationId: requiredIdSchema,
-  saleId:         requiredIdSchema,
-  customerId:     optionalIdSchema,
-  saleDate:       optionalDateSchema,
-  /**
-   * Montant encaissé en FCFA.
-   * Doit être ≤ totalFcfa de la vente.
-   * MVP : mise à jour directe (pas de modèle Payment).
-   */
-  paidFcfa:       z.number().int().nonnegative().optional(),
-  notes:          z.string().max(1000).optional(),
-  /**
-   * Si fourni, remplace TOUTES les lignes existantes et recalcule totalFcfa.
-   * Si absent, les lignes existantes sont conservées.
-   */
-  items:          z.array(saleItemInputSchema).min(1).optional(),
+  saleId: requiredIdSchema,
+  customerId: optionalIdSchema,
+  saleDate: optionalDateSchema,
+  productType: z.nativeEnum(SaleProductType).optional(),
+  paidFcfa: z.number().int().nonnegative().optional(),
+  notes: z.string().max(1000).optional(),
+  items: z.array(saleItemInputSchema).min(1).optional(),
+  stockImpact: saleStockImpactSchema.optional(),
 })
 
 const deleteSaleSchema = z.object({
   organizationId: requiredIdSchema,
-  saleId:         requiredIdSchema,
+  saleId: requiredIdSchema,
 })
-
-// ---------------------------------------------------------------------------
-// Types retournés
-// ---------------------------------------------------------------------------
-
-export interface SaleItemSummary {
-  id:            string
-  batchId:       string | null
-  description:   string
-  quantity:      number
-  unit:          string
-  unitPriceFcfa: number
-  totalFcfa:     number
-}
-
-export interface SaleSummary {
-  id:             string
-  organizationId: string
-  customerId:     string | null
-  invoiceId:      string | null
-  saleDate:       Date
-  productType:    SaleProductType
-  totalFcfa:      number
-  paidFcfa:       number
-  createdAt:      Date
-  customer: {
-    id:    string
-    name:  string
-    phone: string | null
-  } | null
-  items: SaleItemSummary[]
-}
-
-export interface SaleDetail extends SaleSummary {
-  notes:       string | null
-  createdById: string | null
-  updatedAt:   Date
-}
-
-// ---------------------------------------------------------------------------
-// Erreur métier interne
-// ---------------------------------------------------------------------------
 
 class BusinessRuleError extends Error {
   constructor(message: string) {
@@ -177,69 +164,98 @@ class BusinessRuleError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Sélections Prisma partagées
-// ---------------------------------------------------------------------------
-
 const saleItemSelect = {
-  id:            true,
-  batchId:       true,
-  description:   true,
-  quantity:      true,
-  unit:          true,
+  id: true,
+  batchId: true,
+  description: true,
+  quantity: true,
+  unit: true,
   unitPriceFcfa: true,
-  totalFcfa:     true,
+  totalFcfa: true,
 } as const
 
 const saleSummarySelect = {
-  id:             true,
+  id: true,
   organizationId: true,
-  customerId:     true,
-  invoiceId:      true,
-  saleDate:       true,
-  productType:    true,
-  totalFcfa:      true,
-  paidFcfa:       true,
-  createdAt:      true,
+  customerId: true,
+  invoiceId: true,
+  saleDate: true,
+  productType: true,
+  totalFcfa: true,
+  paidFcfa: true,
+  createdAt: true,
   customer: {
     select: { id: true, name: true, phone: true },
   },
   items: { select: saleItemSelect },
+  notes: true,
 } as const
 
 const saleDetailSelect = {
   ...saleSummarySelect,
-  notes:       true,
   createdById: true,
-  updatedAt:   true,
+  updatedAt: true,
 } as const
 
-// ---------------------------------------------------------------------------
-// Helpers internes
-// ---------------------------------------------------------------------------
-
-/**
- * Calcule le totalFcfa d'une ligne : ROUND(quantity × unitPriceFcfa).
- * Résultat toujours entier — cohérent avec le type Int du schéma Prisma.
- */
 function computeItemTotal(quantity: number, unitPriceFcfa: number): number {
   return Math.round(quantity * unitPriceFcfa)
 }
 
-/**
- * Calcule le totalFcfa d'une vente depuis ses lignes.
- * Appelé systématiquement côté serveur — jamais lu depuis le client.
- */
 function computeSaleTotal(
   items: Array<{ quantity: number; unitPriceFcfa: number }>,
 ): number {
-  return items.reduce((sum, item) => sum + computeItemTotal(item.quantity, item.unitPriceFcfa), 0)
+  return items.reduce(
+    (sum, item) => sum + computeItemTotal(item.quantity, item.unitPriceFcfa),
+    0,
+  )
 }
 
-/**
- * Valide que tous les batchIds des lignes appartiennent à l'organisation.
- * Retourne null si tout est valide, ou un message d'erreur.
- */
+function buildItemsWithTotal(
+  items: z.infer<typeof saleItemInputSchema>[],
+): SaleItemsWithTotal {
+  return items.map((item) => ({
+    id: "",
+    batchId: item.batchId ?? null,
+    description: item.description,
+    quantity: item.quantity,
+    unit: item.unit,
+    unitPriceFcfa: item.unitPriceFcfa,
+    totalFcfa: computeItemTotal(item.quantity, item.unitPriceFcfa),
+  }))
+}
+
+function normalizeStockImpact(
+  stockImpact: z.infer<typeof saleStockImpactSchema> | undefined,
+): SaleStockImpact {
+  return stockImpact?.enabled
+    ? {
+        enabled: true,
+        feedStockId: stockImpact.feedStockId ?? null,
+      }
+    : {
+        enabled: false,
+        feedStockId: null,
+      }
+}
+
+function movementDateKey(date: Date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function saleMovementSignature(
+  movement: SaleStockMovementPlan | null,
+  saleDate: Date,
+) {
+  if (!movement) return "NONE"
+
+  return [
+    movement.feedStockId,
+    movement.quantityKg,
+    movement.unitPriceFcfa,
+    movementDateKey(saleDate),
+  ].join("|")
+}
+
 async function validateItemBatchIds(
   items: Array<{ batchId?: string | null }>,
   organizationId: string,
@@ -250,41 +266,341 @@ async function validateItemBatchIds(
   if (batchIds.length === 0) return null
 
   const validBatches = await prisma.batch.findMany({
-    where:  { id: { in: batchIds }, organizationId, deletedAt: null },
+    where: { id: { in: batchIds }, organizationId, deletedAt: null },
     select: { id: true },
   })
 
   if (validBatches.length !== batchIds.length) {
-    return "Un ou plusieurs lots référencés sont introuvables ou appartiennent à une autre organisation"
+    return "Un ou plusieurs lots references sont introuvables ou appartiennent a une autre organisation"
   }
+
   return null
 }
 
-// ---------------------------------------------------------------------------
-// 1. getSales
-// ---------------------------------------------------------------------------
+async function validateCustomer(
+  organizationId: string,
+  customerId: string | undefined,
+) {
+  if (!customerId) return null
 
-/**
- * Retourne les ventes d'une organisation avec filtres optionnels.
- *
- * Filtres cumulables :
- *   customerId   → ventes d'un client spécifique
- *   productType  → par type de produit (POULET_VIF, OEUF, FIENTE)
- *   fromDate / toDate → plage de dates sur saleDate (inclusive)
- *
- * Pagination cursor-based sur saleDate desc.
- * Requiert VIEW_FINANCES.
- */
+  return prisma.customer.findFirst({
+    where: { id: customerId, organizationId },
+    select: { id: true },
+  })
+}
+
+async function resolveNextMovementPlan(args: {
+  organizationId: string
+  productType: SaleProductType
+  items: SaleItemsWithTotal
+  stockImpact: SaleStockImpact
+}): Promise<ActionResult<SaleStockMovementPlan | null>> {
+  const { organizationId, productType, items, stockImpact } = args
+
+  if (!stockImpact.enabled) {
+    return { success: true, data: null }
+  }
+
+  if (productType !== SaleProductType.FIENTE) {
+    return {
+      success: false,
+      error: "Seules les ventes de fiente peuvent impacter le stock dans cette phase",
+    }
+  }
+
+  if (!stockImpact.feedStockId) {
+    return {
+      success: false,
+      error: "Le stock cible est obligatoire si la vente impacte le stock",
+    }
+  }
+
+  if (items.length !== 1) {
+    return {
+      success: false,
+      error: "Une vente avec impact stock doit contenir une seule ligne pour cette phase",
+    }
+  }
+
+  const [item] = items
+
+  const basicValidation = validateStockMovementInput({
+    type: "SORTIE",
+    quantity: item.quantity,
+    availableQuantity: Number.POSITIVE_INFINITY,
+    stockId: stockImpact.feedStockId,
+  })
+
+  if (basicValidation) {
+    return { success: false, error: basicValidation }
+  }
+
+  if (item.unit !== "KG") {
+    return {
+      success: false,
+      error: "Une vente de fiente avec impact stock doit etre saisie en KG",
+    }
+  }
+
+  const feedStock = await prisma.feedStock.findFirst({
+    where: { id: stockImpact.feedStockId, organizationId },
+    select: { id: true, quantityKg: true },
+  })
+
+  if (!feedStock) {
+    return { success: false, error: "Stock cible introuvable" }
+  }
+
+  const stockValidation = validateStockMovementInput({
+    type: "SORTIE",
+    quantity: item.quantity,
+    availableQuantity: feedStock.quantityKg,
+    stockId: stockImpact.feedStockId,
+  })
+
+  if (stockValidation) {
+    return { success: false, error: stockValidation }
+  }
+
+  return {
+    success: true,
+    data: {
+      feedStockId: stockImpact.feedStockId,
+      quantityKg: item.quantity,
+      unitPriceFcfa: item.unitPriceFcfa,
+    },
+  }
+}
+
+function buildCurrentMovementPlan(
+  sale: SaleRecordForLifecycle,
+): ActionResult<SaleStockMovementPlan | null> {
+  const impact = parseSaleStockImpact(sale.notes)
+
+  if (!impact.enabled) {
+    return { success: true, data: null }
+  }
+
+  if (sale.productType !== SaleProductType.FIENTE) {
+    return {
+      success: false,
+      error: "Etat vente incoherent : impact stock actif sur un produit non pris en charge",
+    }
+  }
+
+  if (!impact.feedStockId) {
+    return {
+      success: false,
+      error: "Etat vente incoherent : impact stock actif sans stock cible exploitable",
+    }
+  }
+
+  if (sale.items.length !== 1) {
+    return {
+      success: false,
+      error: "Etat vente incoherent : une vente liee au stock devrait contenir une seule ligne",
+    }
+  }
+
+  const [item] = sale.items
+  return {
+    success: true,
+    data: {
+      feedStockId: impact.feedStockId,
+      quantityKg: item.quantity,
+      unitPriceFcfa: item.unitPriceFcfa,
+    },
+  }
+}
+
+async function createSaleStockExit(args: {
+  organizationId: string
+  saleId: string
+  saleDate: Date
+  notes: string | null
+  movement: SaleStockMovementPlan
+  label: string
+  source?: "VENTE" | "CORRECTION"
+}): Promise<ActionResult<{ id: string }>> {
+  const {
+    organizationId,
+    saleId,
+    saleDate,
+    notes,
+    movement,
+    label,
+    source = "VENTE",
+  } = args
+
+  const movementNotes = buildMovementNotesWithSource(
+    source,
+    buildSaleMovementContext(saleId, label, notes),
+  )
+
+  const result = await createFeedMovement({
+    organizationId,
+    feedStockId: movement.feedStockId,
+    type: "SORTIE",
+    quantityKg: movement.quantityKg,
+    unitPriceFcfa: movement.unitPriceFcfa,
+    notes: movementNotes,
+    date: saleDate,
+  })
+
+  if (!result.success) {
+    return { success: false, error: result.error }
+  }
+
+  return { success: true, data: { id: result.data.id } }
+}
+
+async function reverseSaleStockExit(args: {
+  organizationId: string
+  saleId: string
+  saleDate: Date
+  notes: string | null
+  movement: SaleStockMovementPlan
+  label: string
+}): Promise<ActionResult<{ id: string }>> {
+  const { organizationId, saleId, saleDate, notes, movement, label } = args
+
+  const movementNotes = buildMovementNotesWithSource(
+    "CORRECTION",
+    buildSaleMovementContext(saleId, label, notes),
+  )
+
+  const result = await createFeedMovement({
+    organizationId,
+    feedStockId: movement.feedStockId,
+    type: "ENTREE",
+    quantityKg: movement.quantityKg,
+    unitPriceFcfa: movement.unitPriceFcfa,
+    notes: movementNotes,
+    date: saleDate,
+  })
+
+  if (!result.success) {
+    return { success: false, error: result.error }
+  }
+
+  return { success: true, data: { id: result.data.id } }
+}
+
+async function persistSaleState(args: {
+  saleId: string
+  customerId: string | undefined
+  saleDate: Date
+  productType: SaleProductType
+  paidFcfa: number
+  notes: string | null
+  items: SaleItemsWithTotal
+}) {
+  const {
+    saleId,
+    customerId,
+    saleDate,
+    productType,
+    paidFcfa,
+    notes,
+    items,
+  } = args
+
+  await prisma.$transaction(async (tx) => {
+    await tx.sale.update({
+      where: { id: saleId },
+      data: {
+        customerId: customerId ?? null,
+        saleDate,
+        productType,
+        paidFcfa,
+        notes,
+        totalFcfa: computeSaleTotal(items),
+      },
+    })
+
+    await tx.saleItem.deleteMany({ where: { saleId } })
+    await tx.saleItem.createMany({
+      data: items.map((item) => ({
+        saleId,
+        batchId: item.batchId ?? null,
+        description: item.description,
+        quantity: item.quantity,
+        unit: item.unit,
+        unitPriceFcfa: item.unitPriceFcfa,
+        totalFcfa: item.totalFcfa,
+      })),
+    })
+  })
+}
+
+function lifecycleSelect() {
+  return {
+    id: true,
+    organizationId: true,
+    customerId: true,
+    invoiceId: true,
+    saleDate: true,
+    productType: true,
+    totalFcfa: true,
+    paidFcfa: true,
+    notes: true,
+    items: {
+      select: saleItemSelect,
+    },
+    _count: { select: { payments: true } },
+  } as const
+}
+
+function mapSaleSummary(sale: {
+  id: string
+  organizationId: string
+  customerId: string | null
+  invoiceId: string | null
+  saleDate: Date
+  productType: SaleProductType
+  totalFcfa: number
+  paidFcfa: number
+  createdAt: Date
+  notes: string | null
+  customer: { id: string; name: string; phone: string | null } | null
+  items: SaleItemSummary[]
+}): SaleSummary {
+  const { notes, ...summary } = sale
+  return {
+    ...summary,
+    stockImpact: parseSaleStockImpact(notes),
+  }
+}
+
+function mapSaleDetail(sale: {
+  id: string
+  organizationId: string
+  customerId: string | null
+  invoiceId: string | null
+  saleDate: Date
+  productType: SaleProductType
+  totalFcfa: number
+  paidFcfa: number
+  createdAt: Date
+  notes: string | null
+  createdById: string | null
+  updatedAt: Date
+  customer: { id: string; name: string; phone: string | null } | null
+  items: SaleItemSummary[]
+}): SaleDetail {
+  return {
+    ...sale,
+    stockImpact: parseSaleStockImpact(sale.notes),
+  }
+}
+
 export async function getSales(
   data: unknown,
 ): Promise<ActionResult<SaleSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getSalesSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
+      return { success: false, error: "Donnees invalides" }
     }
 
     const {
@@ -297,76 +613,59 @@ export async function getSales(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
-      return { success: false, error: "Accès aux données financières refusé" }
+    if (!canPerformAction(accessResult.data.membership.role, "VIEW_FINANCES")) {
+      return { success: false, error: "Acces aux donnees financieres refuse" }
     }
 
     const sales = await prisma.sale.findMany({
       where: {
         organizationId,
-        ...(customerId   ? { customerId }   : {}),
-        ...(productType  ? { productType }  : {}),
+        ...(customerId ? { customerId } : {}),
+        ...(productType ? { productType } : {}),
         ...(fromDate || toDate
           ? {
               saleDate: {
                 ...(fromDate ? { gte: fromDate } : {}),
-                ...(toDate   ? { lte: toDate }   : {}),
+                ...(toDate ? { lte: toDate } : {}),
               },
             }
           : {}),
         ...(cursorDate ? { saleDate: { lt: cursorDate } } : {}),
       },
-      select:  saleSummarySelect,
+      select: saleSummarySelect,
       orderBy: { saleDate: "desc" },
-      take:    limit,
+      take: limit,
     })
 
-    return { success: true, data: sales }
+    return { success: true, data: sales.map(mapSaleSummary) }
   } catch {
-    return { success: false, error: "Impossible de récupérer les ventes" }
+    return { success: false, error: "Impossible de recuperer les ventes" }
   }
 }
 
-// ---------------------------------------------------------------------------
-// 2. getSale
-// ---------------------------------------------------------------------------
-
-/**
- * Retourne le détail complet d'une vente avec ses lignes.
- * Requiert VIEW_FINANCES.
- */
 export async function getSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getSaleSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
+      return { success: false, error: "Donnees invalides" }
     }
 
     const { organizationId, saleId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
-      return { success: false, error: "Accès aux données financières refusé" }
+    if (!canPerformAction(accessResult.data.membership.role, "VIEW_FINANCES")) {
+      return { success: false, error: "Acces aux donnees financieres refuse" }
     }
 
     const sale = await prisma.sale.findFirst({
-      where:  { id: saleId, organizationId },
+      where: { id: saleId, organizationId },
       select: saleDetailSelect,
     })
 
@@ -374,301 +673,490 @@ export async function getSale(
       return { success: false, error: "Vente introuvable" }
     }
 
-    return { success: true, data: sale }
+    return { success: true, data: mapSaleDetail(sale) }
   } catch {
-    return { success: false, error: "Impossible de récupérer la vente" }
+    return { success: false, error: "Impossible de recuperer la vente" }
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. createSale
-// ---------------------------------------------------------------------------
-
-/**
- * Crée une vente avec ses lignes en une seule opération atomique.
- *
- * totalFcfa est calculé côté serveur depuis les lignes — jamais transmis par le client.
- * Si customerId est fourni, il doit appartenir à l'organisation.
- * Si une ligne a un batchId, le lot doit appartenir à l'organisation et ne pas être supprimé.
- *
- * Requiert CREATE_SALE.
- */
 export async function createSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createSaleSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
-    }
-
-    const { organizationId, customerId, items, ...saleData } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
-
-    // Valider le client si fourni
-    if (customerId) {
-      const customer = await prisma.customer.findFirst({
-        where:  { id: customerId, organizationId },
-        select: { id: true },
-      })
-      if (!customer) {
-        return { success: false, error: "Client introuvable" }
+      return {
+        success: false,
+        error: parsed.error.issues[0]?.message ?? "Donnees invalides",
       }
     }
 
-    // Valider les lots référencés dans les lignes
+    const {
+      organizationId,
+      customerId,
+      saleDate,
+      productType,
+      notes,
+      items,
+      stockImpact,
+    } = parsed.data
+
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
+
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_SALE")) {
+      return { success: false, error: "Permission refusee" }
+    }
+
+    const customer = await validateCustomer(organizationId, customerId)
+    if (customerId && !customer) {
+      return { success: false, error: "Client introuvable" }
+    }
+
     const batchError = await validateItemBatchIds(items, organizationId)
     if (batchError) {
       return { success: false, error: batchError }
     }
 
-    // Calculer le total depuis les lignes
-    const totalFcfa = computeSaleTotal(items)
-
-    // Créer la vente + lignes dans une transaction
-    const sale = await prisma.$transaction(async (tx) => {
-      const created = await tx.sale.create({
-        data: {
-          organizationId,
-          customerId:  customerId ?? null,
-          totalFcfa,
-          createdById: actorId,
-          ...saleData,
-          items: {
-            create: items.map((item) => ({
-              batchId:       item.batchId ?? null,
-              description:   item.description,
-              quantity:      item.quantity,
-              unit:          item.unit,
-              unitPriceFcfa: item.unitPriceFcfa,
-              totalFcfa:     computeItemTotal(item.quantity, item.unitPriceFcfa),
-            })),
-          },
-        },
-        select: saleDetailSelect,
-      })
-      return created
+    const itemsWithTotal = buildItemsWithTotal(items)
+    const normalizedStockImpact = normalizeStockImpact(stockImpact)
+    const nextMovementPlan = await resolveNextMovementPlan({
+      organizationId,
+      productType,
+      items: itemsWithTotal,
+      stockImpact: normalizedStockImpact,
     })
+    if (!nextMovementPlan.success) return nextMovementPlan
+
+    const saleNotes = buildSaleNotesWithStockImpact(
+      normalizedStockImpact,
+      notes || null,
+    )
+
+    const sale = await prisma.sale.create({
+      data: {
+        organizationId,
+        customerId: customerId ?? null,
+        saleDate,
+        productType,
+        totalFcfa: computeSaleTotal(itemsWithTotal),
+        paidFcfa: 0,
+        notes: saleNotes,
+        createdById: effectiveUserId,
+        items: {
+          create: itemsWithTotal.map((item) => ({
+            batchId: item.batchId,
+            description: item.description,
+            quantity: item.quantity,
+            unit: item.unit,
+            unitPriceFcfa: item.unitPriceFcfa,
+            totalFcfa: item.totalFcfa,
+          })),
+        },
+      },
+      select: saleDetailSelect,
+    })
+
+    if (nextMovementPlan.data) {
+      const movementResult = await createSaleStockExit({
+        organizationId,
+        saleId: sale.id,
+        saleDate,
+        notes: notes || null,
+        movement: nextMovementPlan.data,
+        label: "Sortie stock vente",
+      })
+
+      if (!movementResult.success) {
+        await prisma.sale.delete({ where: { id: sale.id } })
+        return {
+          success: false,
+          error:
+            `Creation de la vente annulee : impossible d'enregistrer la sortie de stock. ${movementResult.error}`,
+        }
+      }
+    }
 
     await createAuditLog({
-      userId:         actorId,
+      userId: effectiveUserId,
       organizationId,
-      action:         AuditAction.CREATE,
-      resourceType:   "SALE",
-      resourceId:     sale.id,
-      after:          { customerId, totalFcfa, itemCount: items.length, ...saleData },
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
+      action: AuditAction.CREATE,
+      resourceType: "SALE",
+      resourceId: sale.id,
+      after: {
+        customerId: customerId ?? null,
+        saleDate,
+        productType,
+        itemCount: itemsWithTotal.length,
+        totalFcfa: computeSaleTotal(itemsWithTotal),
+        stockImpact: normalizedStockImpact,
+      },
     })
 
-    return { success: true, data: sale }
+    return { success: true, data: mapSaleDetail(sale) }
   } catch {
-    return { success: false, error: "Impossible de créer la vente" }
+    return { success: false, error: "Impossible de creer la vente" }
   }
 }
 
-// ---------------------------------------------------------------------------
-// 4. updateSale
-// ---------------------------------------------------------------------------
-
-/**
- * Corrige une vente existante.
- *
- * Si items est fourni → remplace TOUTES les lignes et recalcule totalFcfa.
- * Si items est absent → seul le header est mis à jour, totalFcfa inchangé.
- *
- * paidFcfa doit être ≤ totalFcfa final de la vente.
- *
- * Requiert CREATE_SALE.
- */
 export async function updateSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateSaleSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
+      return {
+        success: false,
+        error: parsed.error.issues[0]?.message ?? "Donnees invalides",
+      }
     }
 
-    const { organizationId, saleId, items, paidFcfa, ...headerUpdates } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const {
+      organizationId,
+      saleId,
+      customerId,
+      saleDate,
+      productType,
+      paidFcfa,
+      notes,
+      items,
+      stockImpact,
+    } = parsed.data
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_SALE")) {
+      return { success: false, error: "Permission refusee" }
     }
 
     const existing = await prisma.sale.findFirst({
-      where:  { id: saleId, organizationId },
-      select: { ...saleDetailSelect, paidFcfa: true, totalFcfa: true },
+      where: { id: saleId, organizationId },
+      select: lifecycleSelect(),
     })
     if (!existing) {
       return { success: false, error: "Vente introuvable" }
     }
 
-    // Valider le nouveau client si fourni
-    if (headerUpdates.customerId) {
-      const customer = await prisma.customer.findFirst({
-        where:  { id: headerUpdates.customerId, organizationId },
-        select: { id: true },
-      })
-      if (!customer) {
-        return { success: false, error: "Client introuvable" }
-      }
-    }
-
-    // Valider les lots si les lignes sont remplacées
-    if (items) {
-      const batchError = await validateItemBatchIds(items, organizationId)
-      if (batchError) {
-        return { success: false, error: batchError }
-      }
-    }
-
-    // Calculer le nouveau totalFcfa
-    const newTotalFcfa = items ? computeSaleTotal(items) : existing.totalFcfa
-
-    // Valider paidFcfa ≤ totalFcfa
-    const finalPaidFcfa = paidFcfa ?? existing.paidFcfa
-    if (finalPaidFcfa > newTotalFcfa) {
+    if (existing._count.payments > 0 || existing.paidFcfa > 0) {
       return {
         success: false,
-        error:   `Le montant encaissé (${finalPaidFcfa} FCFA) dépasse le total de la vente (${newTotalFcfa} FCFA)`,
+        error: "Une vente avec encaissement ne peut plus etre modifiee",
       }
     }
 
-    const sale = await prisma.$transaction(async (tx) => {
-      if (items) {
-        // Remplacement complet des lignes
-        await tx.saleItem.deleteMany({ where: { saleId } })
-        await tx.saleItem.createMany({
-          data: items.map((item) => ({
-            saleId,
-            batchId:       item.batchId ?? null,
-            description:   item.description,
-            quantity:      item.quantity,
-            unit:          item.unit,
-            unitPriceFcfa: item.unitPriceFcfa,
-            totalFcfa:     computeItemTotal(item.quantity, item.unitPriceFcfa),
-          })),
+    if (existing.invoiceId) {
+      return {
+        success: false,
+        error: "Une vente deja facturee ne peut plus etre modifiee dans cette phase",
+      }
+    }
+
+    const nextCustomerId =
+      customerId === undefined ? existing.customerId ?? undefined : customerId
+    const nextSaleDate = saleDate ?? existing.saleDate
+    const nextProductType = productType ?? existing.productType
+    const nextItems = items
+      ? buildItemsWithTotal(items)
+      : existing.items.map((item) => ({ ...item }))
+    const nextPaidFcfa = paidFcfa ?? existing.paidFcfa
+
+    const customer = await validateCustomer(organizationId, nextCustomerId)
+    if (nextCustomerId && !customer) {
+      return { success: false, error: "Client introuvable" }
+    }
+
+    const batchError = await validateItemBatchIds(nextItems, organizationId)
+    if (batchError) {
+      return { success: false, error: batchError }
+    }
+
+    const nextTotalFcfa = computeSaleTotal(nextItems)
+    if (nextPaidFcfa > nextTotalFcfa) {
+      return {
+        success: false,
+        error:
+          `Le montant encaisse (${nextPaidFcfa} FCFA) depasse le total de la vente (${nextTotalFcfa} FCFA)`,
+      }
+    }
+
+    const currentMovementPlan = buildCurrentMovementPlan(
+      existing as SaleRecordForLifecycle,
+    )
+    if (!currentMovementPlan.success) return currentMovementPlan
+
+    const normalizedStockImpact =
+      stockImpact === undefined
+        ? parseSaleStockImpact(existing.notes)
+        : normalizeStockImpact(stockImpact)
+
+    const nextMovementPlan = await resolveNextMovementPlan({
+      organizationId,
+      productType: nextProductType,
+      items: nextItems,
+      stockImpact: normalizedStockImpact,
+    })
+    if (!nextMovementPlan.success) return nextMovementPlan
+
+    const previousUserNotes = existing.notes
+    const nextSaleNotes = buildSaleNotesWithStockImpact(
+      normalizedStockImpact,
+      notes === undefined ? previousUserNotes : notes || null,
+    )
+
+    const stockSignatureChanged =
+      saleMovementSignature(currentMovementPlan.data, existing.saleDate) !==
+      saleMovementSignature(nextMovementPlan.data, nextSaleDate)
+
+    if (stockSignatureChanged) {
+      if (currentMovementPlan.data) {
+        const reverseCurrent = await reverseSaleStockExit({
+          organizationId,
+          saleId,
+          saleDate: existing.saleDate,
+          notes: previousUserNotes,
+          movement: currentMovementPlan.data,
+          label: "Reconciliation vente - annulation ancienne sortie",
         })
+
+        if (!reverseCurrent.success) {
+          return {
+            success: false,
+            error:
+              `Modification bloquee : impossible d'annuler l'ancienne sortie de stock. ${reverseCurrent.error}`,
+          }
+        }
       }
 
-      return tx.sale.update({
-        where:  { id: saleId },
-        data:   {
-          ...headerUpdates,
-          paidFcfa:  finalPaidFcfa,
-          totalFcfa: newTotalFcfa,
-        },
-        select: saleDetailSelect,
-      })
+      if (nextMovementPlan.data) {
+        const createNext = await createSaleStockExit({
+          organizationId,
+          saleId,
+          saleDate: nextSaleDate,
+          notes: notes === undefined ? previousUserNotes : notes || null,
+          movement: nextMovementPlan.data,
+          label: "Reconciliation vente - nouvelle sortie",
+        })
+
+        if (!createNext.success) {
+          if (currentMovementPlan.data) {
+            await createSaleStockExit({
+              organizationId,
+              saleId,
+              saleDate: existing.saleDate,
+              notes: previousUserNotes,
+              movement: currentMovementPlan.data,
+              label: "Rollback ancienne sortie vente",
+              source: "CORRECTION",
+            })
+          }
+
+          return {
+            success: false,
+            error:
+              `Modification annulee : impossible d'appliquer la nouvelle sortie de stock. ${createNext.error}`,
+          }
+        }
+      }
+
+      try {
+        await persistSaleState({
+          saleId,
+          customerId: nextCustomerId,
+          saleDate: nextSaleDate,
+          productType: nextProductType,
+          paidFcfa: nextPaidFcfa,
+          notes: nextSaleNotes,
+          items: nextItems,
+        })
+      } catch {
+        if (nextMovementPlan.data) {
+          await reverseSaleStockExit({
+            organizationId,
+            saleId,
+            saleDate: nextSaleDate,
+            notes: notes === undefined ? previousUserNotes : notes || null,
+            movement: nextMovementPlan.data,
+            label: "Rollback nouvelle sortie vente",
+          })
+        }
+
+        if (currentMovementPlan.data) {
+          await createSaleStockExit({
+            organizationId,
+            saleId,
+            saleDate: existing.saleDate,
+            notes: previousUserNotes,
+            movement: currentMovementPlan.data,
+            label: "Rollback etat stock initial vente",
+            source: "CORRECTION",
+          })
+        }
+
+        return {
+          success: false,
+          error: "Impossible de mettre a jour la vente apres reconciliation du stock",
+        }
+      }
+    } else {
+      try {
+        await persistSaleState({
+          saleId,
+          customerId: nextCustomerId,
+          saleDate: nextSaleDate,
+          productType: nextProductType,
+          paidFcfa: nextPaidFcfa,
+          notes: nextSaleNotes,
+          items: nextItems,
+        })
+      } catch {
+        return { success: false, error: "Impossible de mettre a jour la vente" }
+      }
+    }
+
+    const updated = await prisma.sale.findFirst({
+      where: { id: saleId, organizationId },
+      select: saleDetailSelect,
     })
 
+    if (!updated) {
+      return { success: false, error: "Vente introuvable apres mise a jour" }
+    }
+
     await createAuditLog({
-      userId:         actorId,
+      userId: effectiveUserId,
       organizationId,
-      action:         AuditAction.UPDATE,
-      resourceType:   "SALE",
-      resourceId:     saleId,
-      before:         existing,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
+      action: AuditAction.UPDATE,
+      resourceType: "SALE",
+      resourceId: saleId,
+      before: {
+        ...existing,
+        stockImpact: parseSaleStockImpact(existing.notes),
+      },
       after: {
-        ...headerUpdates,
-        paidFcfa: finalPaidFcfa,
-        totalFcfa: newTotalFcfa,
-        ...(items ? { itemCount: items.length } : {}),
+        customerId: nextCustomerId ?? null,
+        saleDate: nextSaleDate,
+        productType: nextProductType,
+        paidFcfa: nextPaidFcfa,
+        notes: nextSaleNotes,
+        items: nextItems,
+        stockImpact: normalizedStockImpact,
       },
     })
 
-    return { success: true, data: sale }
+    return { success: true, data: mapSaleDetail(updated) }
   } catch {
-    return { success: false, error: "Impossible de mettre à jour la vente" }
+    return { success: false, error: "Impossible de mettre a jour la vente" }
   }
 }
 
-// ---------------------------------------------------------------------------
-// 5. deleteSale
-// ---------------------------------------------------------------------------
-
-/**
- * Supprime définitivement une vente et ses lignes (hard delete).
- * Les SaleItems sont supprimés par cascade (onDelete: Cascade en base).
- *
- * Conditions requises (les deux) :
- *   paidFcfa = 0     → aucun paiement enregistré
- *   invoiceId = null → aucune facture émise
- *
- * Si l'une des deux conditions n'est pas remplie, la suppression est refusée.
- * La correction d'une vente partielle doit passer par updateSale.
- *
- * Retourne { success: true, data: undefined } — conforme à ActionResult<void>.
- * Requiert CREATE_SALE.
- */
 export async function deleteSale(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
-  const parsed = deleteSaleSchema.safeParse(data)
-  if (!parsed.success) {
-    return { success: false, error: "Données invalides" }
-  }
-
-  const { organizationId, saleId } = parsed.data
-  const actorId = sessionResult.data.user.id
-
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
-
-  if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-    return { success: false, error: "Permission refusée" }
-  }
-
-  const existing = await prisma.sale.findFirst({
-    where:  { id: saleId, organizationId },
-    select: saleDetailSelect,
-  })
-  if (!existing) {
-    return { success: false, error: "Vente introuvable" }
-  }
-
   try {
-    await prisma.$transaction(async (tx) => {
-      if (existing.paidFcfa > 0) {
-        throw new BusinessRuleError(
-          `Impossible de supprimer cette vente : ${existing.paidFcfa.toLocaleString("fr-SN")} FCFA ont déjà été encaissés`,
-        )
+    const parsed = deleteSaleSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Donnees invalides" }
+    }
+
+    const { organizationId, saleId } = parsed.data
+
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
+
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_SALE")) {
+      return { success: false, error: "Permission refusee" }
+    }
+
+    const existing = await prisma.sale.findFirst({
+      where: { id: saleId, organizationId },
+      select: lifecycleSelect(),
+    })
+    if (!existing) {
+      return { success: false, error: "Vente introuvable" }
+    }
+
+    if (existing._count.payments > 0 || existing.paidFcfa > 0) {
+      return {
+        success: false,
+        error: "Impossible de supprimer une vente avec encaissement",
       }
-      if (existing.invoiceId) {
-        throw new BusinessRuleError(
-          "Impossible de supprimer cette vente : une facture a déjà été émise",
-        )
+    }
+
+    if (existing.invoiceId) {
+      return {
+        success: false,
+        error: "Impossible de supprimer une vente deja facturee",
+      }
+    }
+
+    const currentMovementPlan = buildCurrentMovementPlan(
+      existing as SaleRecordForLifecycle,
+    )
+    if (!currentMovementPlan.success) return currentMovementPlan
+
+    if (currentMovementPlan.data) {
+      const reverseResult = await reverseSaleStockExit({
+        organizationId,
+        saleId,
+        saleDate: existing.saleDate,
+        notes: existing.notes,
+        movement: currentMovementPlan.data,
+        label: "Suppression vente",
+      })
+
+      if (!reverseResult.success) {
+        return {
+          success: false,
+          error:
+            `Suppression bloquee : impossible de reverser la sortie de stock liee. ${reverseResult.error}`,
+        }
+      }
+    }
+
+    try {
+      await prisma.sale.delete({ where: { id: saleId } })
+    } catch {
+      if (currentMovementPlan.data) {
+        await createSaleStockExit({
+          organizationId,
+          saleId,
+          saleDate: existing.saleDate,
+          notes: existing.notes,
+          movement: currentMovementPlan.data,
+          label: "Rollback suppression vente",
+          source: "CORRECTION",
+        })
       }
 
-      await tx.sale.delete({ where: { id: saleId } })
-    })
+      return { success: false, error: "Impossible de supprimer la vente" }
+    }
 
     await createAuditLog({
-      userId:         actorId,
+      userId: effectiveUserId,
       organizationId,
-      action:         AuditAction.DELETE,
-      resourceType:   "SALE",
-      resourceId:     saleId,
-      before:         existing,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
+      action: AuditAction.DELETE,
+      resourceType: "SALE",
+      resourceId: saleId,
+      before: {
+        ...existing,
+        stockImpact: parseSaleStockImpact(existing.notes),
+      },
     })
 
     return { success: true, data: undefined }
@@ -676,6 +1164,7 @@ export async function deleteSale(
     if (error instanceof BusinessRuleError) {
       return { success: false, error: error.message }
     }
+
     return { success: false, error: "Impossible de supprimer la vente" }
   }
 }

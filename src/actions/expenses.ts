@@ -34,8 +34,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -230,9 +229,6 @@ export async function getExpenses(
   data: unknown,
 ): Promise<ActionResult<ExpenseSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getExpensesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -249,13 +245,10 @@ export async function getExpenses(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
+    if (!canPerformAction(accessResult.data.membership.role, "VIEW_FINANCES")) {
       return { success: false, error: "Accès aux données financières refusé" }
     }
 
@@ -298,9 +291,6 @@ export async function getExpense(
   data: unknown,
 ): Promise<ActionResult<ExpenseDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getExpenseSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -308,13 +298,10 @@ export async function getExpense(
 
     const { organizationId, expenseId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
+    if (!canPerformAction(accessResult.data.membership.role, "VIEW_FINANCES")) {
       return { success: false, error: "Accès aux données financières refusé" }
     }
 
@@ -350,21 +337,19 @@ export async function createExpense(
   data: unknown,
 ): Promise<ActionResult<ExpenseDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createExpenseSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, batchId, farmId, ...expenseData } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_EXPENSE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_EXPENSE")) {
       return { success: false, error: "Permission refusée" }
     }
 
@@ -388,15 +373,18 @@ export async function createExpense(
         organizationId,
         batchId:     batchId ?? null,
         farmId:      farmId  ?? null,
-        createdById: actorId,
+        createdById: effectiveUserId,
         ...expenseData,
       },
       select: expenseDetailSelect,
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "EXPENSE",
       resourceId:     expense.id,
@@ -426,21 +414,19 @@ export async function updateExpense(
   data: unknown,
 ): Promise<ActionResult<ExpenseDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateExpenseSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, expenseId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_EXPENSE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_EXPENSE")) {
       return { success: false, error: "Permission refusée" }
     }
 
@@ -459,8 +445,11 @@ export async function updateExpense(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "EXPENSE",
       resourceId:     expenseId,
@@ -493,21 +482,19 @@ export async function updateExpense(
 export async function deleteExpense(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = deleteExpenseSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, expenseId } = parsed.data
-  const actorId = sessionResult.data.user.id
 
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
+  const accessResult = await requireOrganizationAccess(organizationId)
+  if (!accessResult.success) return accessResult
 
-  if (!canPerformAction(membershipResult.data.role, "CREATE_EXPENSE")) {
+  const { session, membership, effectiveUserId } = accessResult.data
+
+  if (!canPerformAction(membership.role, "CREATE_EXPENSE")) {
     return { success: false, error: "Permission refusée" }
   }
 
@@ -531,8 +518,11 @@ export async function deleteExpense(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.DELETE,
       resourceType:   "EXPENSE",
       resourceId:     expenseId,

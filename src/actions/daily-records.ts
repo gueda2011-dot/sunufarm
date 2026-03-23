@@ -33,8 +33,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -269,9 +268,6 @@ export async function getDailyRecords(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getDailyRecordsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -279,13 +275,10 @@ export async function getDailyRecords(
 
     const { organizationId, batchId, cursorDate, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     const batch = await findBatchWithFarm(batchId, organizationId)
     if (!batch) {
@@ -325,9 +318,6 @@ export async function getDailyRecord(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getDailyRecordSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -335,13 +325,10 @@ export async function getDailyRecord(
 
     const { organizationId, batchId, dailyRecordId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     const batch = await findBatchWithFarm(batchId, organizationId)
     if (!batch) {
@@ -388,9 +375,6 @@ export async function createDailyRecord(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createDailyRecordSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -403,12 +387,12 @@ export async function createDailyRecord(
       mortalityDetails,
       ...recordData
     } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_DAILY_RECORD")) {
       return { success: false, error: "Permission refusée" }
@@ -449,7 +433,7 @@ export async function createDailyRecord(
           organizationId,
           batchId,
           date:         normalizedDate,
-          recordedById: actorId,
+          recordedById: effectiveUserId,
           ...recordData,
         },
         select: dailyRecordDetailSelect,
@@ -475,8 +459,11 @@ export async function createDailyRecord(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "DAILY_RECORD",
       resourceId:     record.id,
@@ -515,9 +502,6 @@ export async function updateDailyRecord(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateDailyRecordSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -530,12 +514,12 @@ export async function updateDailyRecord(
       mortalityDetails,
       ...updates
     } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "UPDATE_DAILY_RECORD")) {
       return { success: false, error: "Permission refusée" }
@@ -621,8 +605,11 @@ export async function updateDailyRecord(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "DAILY_RECORD",
       resourceId:     dailyRecordId,
