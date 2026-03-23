@@ -9,7 +9,6 @@
  */
 
 import Link                   from "next/link"
-import { useState }           from "react"
 import { cn, batchAgeDay, diffDays } from "@/src/lib/utils"
 import { formatNumber }       from "@/src/lib/formatters"
 import type { BatchSummary }  from "@/src/actions/batches"
@@ -51,7 +50,7 @@ export function ActiveBatchList({
   batchesNeedingSaisieIds,
   totalActiveBatches,
 }: ActiveBatchListProps) {
-  const [now] = useState(() => new Date())
+  const now = new Date()
 
   // ── État vide ─────────────────────────────────────────────────────────
   if (batches.length === 0) {
