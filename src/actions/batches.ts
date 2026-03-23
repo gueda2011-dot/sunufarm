@@ -29,8 +29,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -501,9 +500,6 @@ export async function getBatches(
   data: unknown,
 ): Promise<ActionResult<BatchSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -512,13 +508,10 @@ export async function getBatches(
     const { organizationId, status, type, farmId, buildingId, cursor, limit } =
       parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     // Résoudre les fermes accessibles pour ce rôle
     const accessibleFarmIds = getAccessibleFarmIds(role, farmPermissions, "canRead")
@@ -591,9 +584,6 @@ export async function getBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -601,13 +591,10 @@ export async function getBatch(
 
     const { organizationId, batchId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     let batch: BatchDetail | null = null
     try {
@@ -667,9 +654,6 @@ export async function createBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -682,14 +666,14 @@ export async function createBatch(
       vaccinationPlanTemplateId,
       ...batchData
     } = parsed.data
-    const actorId = sessionResult.data.user.id
 
     await ensurePoultryReferenceData()
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CREATE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -821,8 +805,11 @@ export async function createBatch(
     }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.CREATE,
       resourceType:   "BATCH",
       resourceId:     batch.id,
@@ -867,21 +854,18 @@ export async function updateBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, batchId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "UPDATE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -962,8 +946,11 @@ export async function updateBatch(
     }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "BATCH",
       resourceId:     batchId,
@@ -998,9 +985,6 @@ export async function closeBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = closeBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1008,12 +992,12 @@ export async function closeBatch(
 
     const { organizationId, batchId, closeStatus, closeReason, closedAt } =
       parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { session, membership, effectiveUserId } = accessResult.data
+    const { role, farmPermissions } = membership
 
     if (!canPerformAction(role, "CLOSE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -1065,8 +1049,11 @@ export async function closeBatch(
     }
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.UPDATE,
       resourceType:   "BATCH",
       resourceId:     batchId,
@@ -1103,21 +1090,18 @@ export async function closeBatch(
 export async function deleteBatch(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = deleteBatchSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, batchId } = parsed.data
-  const actorId = sessionResult.data.user.id
 
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
+  const accessResult = await requireOrganizationAccess(organizationId)
+  if (!accessResult.success) return accessResult
 
-  const { role, farmPermissions } = membershipResult.data
+  const { session, membership, effectiveUserId } = accessResult.data
+  const { role, farmPermissions } = membership
 
   if (!canPerformAction(role, "DELETE_BATCH")) {
     return { success: false, error: "Permission refusée" }
@@ -1163,8 +1147,11 @@ export async function deleteBatch(
     })
 
     await createAuditLog({
-      userId:         actorId,
+      userId:         effectiveUserId,
       organizationId,
+      actorUserId:    session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action:         AuditAction.DELETE,
       resourceType:   "BATCH",
       resourceId:     batchId,

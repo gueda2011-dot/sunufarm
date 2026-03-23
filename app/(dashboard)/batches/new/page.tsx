@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation"
 import type { Metadata } from "next"
-import { auth } from "@/src/auth"
+import { getSession } from "@/src/lib/auth"
 import { getFarms } from "@/src/actions/farms"
 import prisma from "@/src/lib/prisma"
 import { ensurePoultryReferenceData } from "@/src/lib/poultry-reference-data"
@@ -11,17 +11,24 @@ import { CreateBatchForm } from "./_components/CreateBatchForm"
 export const metadata: Metadata = { title: "Nouveau lot" }
 
 export default async function NewBatchPage() {
-  const session = await auth()
+  const session = await getSession()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
+  const memberships = await prisma.userOrganization.findMany({
+    where: session.isImpersonating
+      ? {
+          userId: session.effectiveUserId,
+          organizationId: session.impersonatedOrganizationId ?? undefined,
+        }
+      : {
+          userId: session.effectiveUserId,
+        },
     select: { organizationId: true, role: true },
     orderBy: { organization: { name: "asc" } },
   })
-  if (!membership) redirect("/login?error=no-org")
+  if (memberships.length === 0) redirect("/login?error=no-org")
 
-  const { organizationId, role } = membership
+  const { organizationId, role } = memberships[0]
   const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(role)
   if (!canCreate) redirect("/batches")
 
