@@ -10,7 +10,7 @@
 import { redirect } from "next/navigation"
 import type { Metadata } from "next"
 import { BatchStatus } from "@/src/generated/prisma/client"
-import { auth } from "@/src/auth"
+import { getSession } from "@/src/lib/auth"
 import {
   getTreatments,
   getVaccinationPlans,
@@ -66,11 +66,18 @@ function addUtcDays(date: Date, days: number) {
 }
 
 export default async function HealthPage() {
-  const session = await auth()
+  const session = await getSession()
   if (!session?.user?.id) redirect("/login")
 
   const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
+    where: session.isImpersonating
+      ? {
+          userId: session.effectiveUserId,
+          organizationId: session.impersonatedOrganizationId ?? undefined,
+        }
+      : {
+          userId: session.effectiveUserId,
+        },
     select: { organizationId: true, role: true, farmPermissions: true },
     orderBy: { organization: { name: "asc" } },
   })
