@@ -84,7 +84,19 @@ export default async function BatchDetailPage({
     getBatchProfitability({ organizationId, batchId: id }),
   ])
 
-  if (!batchResult.success) notFound()
+  if (!batchResult.success) {
+    if (batchResult.error === "Lot introuvable") {
+      notFound()
+    }
+
+    return (
+      <div className="mx-auto max-w-3xl">
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+          {batchResult.error}
+        </div>
+      </div>
+    )
+  }
 
   const batch         = batchResult.data
   const records       = recordsResult.success       ? recordsResult.data       : []

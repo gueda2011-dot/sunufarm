@@ -68,13 +68,17 @@ function FilterPill({
 interface BatchListClientProps {
   organizationId: string
   initialBatches: BatchSummary[]
+  loadError?: string | null
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function BatchListClient({ initialBatches }: BatchListClientProps) {
+export function BatchListClient({
+  initialBatches,
+  loadError = null,
+}: BatchListClientProps) {
   // ── Filtres — valeurs par défaut (ajustement 1) ──────────────────────────
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ACTIVE")
   const [typeFilter,   setTypeFilter]   = useState<string>("ALL")
@@ -122,6 +126,11 @@ export function BatchListClient({ initialBatches }: BatchListClientProps) {
   if (initialBatches.length === 0) {
     return (
       <div className="mx-auto max-w-2xl py-16 text-center">
+        {loadError && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-left text-sm text-red-700">
+            {loadError}
+          </div>
+        )}
         <p className="text-5xl mb-4" aria-hidden>🐓</p>
         <h2 className="text-lg font-semibold text-gray-900 mb-2">
           Aucun lot créé
@@ -135,6 +144,11 @@ export function BatchListClient({ initialBatches }: BatchListClientProps) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
+      {loadError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
 
       {/* ── Titre + compteur ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">

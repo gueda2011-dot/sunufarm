@@ -199,6 +199,7 @@ function isBatchReferenceSchemaUnavailable(error: unknown): boolean {
   return isMissingSchemaFeatureError(error, [
     "PoultryStrain",
     "VaccinationPlanTemplate",
+    "poultryStrain",
     "poultryStrainId",
   ])
 }
@@ -564,8 +565,17 @@ export async function getBatches(
     }
 
     return { success: true, data: batches }
-  } catch {
-    return { success: false, error: "Impossible de récupérer les lots" }
+  } catch (error) {
+    console.error("[getBatches] unexpected error", error)
+
+    if (error instanceof Error && error.message) {
+      return {
+        success: false,
+        error: `Impossible de recuperer les lots. ${error.message}`,
+      }
+    }
+
+    return { success: false, error: "Impossible de recuperer les lots" }
   }
 }
 
@@ -627,8 +637,17 @@ export async function getBatch(
     }
 
     return { success: true, data: batch }
-  } catch {
-    return { success: false, error: "Impossible de récupérer le lot" }
+  } catch (error) {
+    console.error("[getBatch] unexpected error", error)
+
+    if (error instanceof Error && error.message) {
+      return {
+        success: false,
+        error: `Impossible de recuperer le lot. ${error.message}`,
+      }
+    }
+
+    return { success: false, error: "Impossible de recuperer le lot" }
   }
 }
 

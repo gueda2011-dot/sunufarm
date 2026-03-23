@@ -56,6 +56,7 @@ export default async function BatchesPage() {
       <BatchListClient
         organizationId={organizationId}
         initialBatches={batches}
+        loadError={result.success ? null : result.error}
       />
     </div>
   )
