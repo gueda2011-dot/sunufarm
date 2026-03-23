@@ -196,7 +196,7 @@ class BusinessRuleError extends Error {
 }
 
 function isBatchReferenceSchemaUnavailable(error: unknown): boolean {
-  return isMissingSchemaFeatureError(error, [
+  return isMissingSchemaFeatureError(error) || isMissingSchemaFeatureError(error, [
     "PoultryStrain",
     "VaccinationPlanTemplate",
     "poultryStrain",

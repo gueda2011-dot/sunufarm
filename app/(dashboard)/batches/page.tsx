@@ -30,7 +30,7 @@ export default async function BatchesPage() {
   const { organizationId } = membership
 
   // Charge tous les lots — le filtrage (statut / type / ferme) est côté client
-  const result = await getBatches({ organizationId, limit: 200 })
+  const result = await getBatches({ organizationId, limit: 100 })
   const batches = result.success ? result.data : []
 
   return (
