@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import type { Metadata } from "next"
 import Link from "next/link"
 
-import { auth } from "@/src/auth"
+import { getSession } from "@/src/lib/auth"
 import prisma from "@/src/lib/prisma"
 import { getSale } from "@/src/actions/sales"
 import { getFeedStocks } from "@/src/actions/stock"
@@ -29,11 +29,16 @@ export default async function SaleDetailPage({
 }) {
   const { id } = await params
 
-  const session = await auth()
+  const session = await getSession()
   if (!session?.user?.id) redirect("/login")
 
   const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
+    where: {
+      userId: session.effectiveUserId,
+      ...(session.isImpersonating && session.impersonatedOrganizationId
+        ? { organizationId: session.impersonatedOrganizationId }
+        : {}),
+    },
     select: { organizationId: true },
     orderBy: { organization: { name: "asc" } },
   })

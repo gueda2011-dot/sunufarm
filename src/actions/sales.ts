@@ -18,8 +18,7 @@ import { z } from "zod"
 
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -599,9 +598,6 @@ export async function getSales(
   data: unknown,
 ): Promise<ActionResult<SaleSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getSalesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Donnees invalides" }
@@ -617,13 +613,10 @@ export async function getSales(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
+    if (!canPerformAction(accessResult.data.membership.role, "VIEW_FINANCES")) {
       return { success: false, error: "Acces aux donnees financieres refuse" }
     }
 
@@ -657,9 +650,6 @@ export async function getSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getSaleSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Donnees invalides" }
@@ -667,13 +657,10 @@ export async function getSale(
 
     const { organizationId, saleId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
+    if (!canPerformAction(accessResult.data.membership.role, "VIEW_FINANCES")) {
       return { success: false, error: "Acces aux donnees financieres refuse" }
     }
 
@@ -696,9 +683,6 @@ export async function createSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createSaleSchema.safeParse(data)
     if (!parsed.success) {
       return {
@@ -716,12 +700,13 @@ export async function createSale(
       items,
       stockImpact,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_SALE")) {
       return { success: false, error: "Permission refusee" }
     }
 
@@ -759,7 +744,7 @@ export async function createSale(
         totalFcfa: computeSaleTotal(itemsWithTotal),
         paidFcfa: 0,
         notes: saleNotes,
-        createdById: actorId,
+        createdById: effectiveUserId,
         items: {
           create: itemsWithTotal.map((item) => ({
             batchId: item.batchId,
@@ -795,8 +780,11 @@ export async function createSale(
     }
 
     await createAuditLog({
-      userId: actorId,
+      userId: effectiveUserId,
       organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action: AuditAction.CREATE,
       resourceType: "SALE",
       resourceId: sale.id,
@@ -820,9 +808,6 @@ export async function updateSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateSaleSchema.safeParse(data)
     if (!parsed.success) {
       return {
@@ -842,12 +827,13 @@ export async function updateSale(
       items,
       stockImpact,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_SALE")) {
       return { success: false, error: "Permission refusee" }
     }
 
@@ -1045,8 +1031,11 @@ export async function updateSale(
     }
 
     await createAuditLog({
-      userId: actorId,
+      userId: effectiveUserId,
       organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action: AuditAction.UPDATE,
       resourceType: "SALE",
       resourceId: saleId,
@@ -1075,21 +1064,19 @@ export async function deleteSale(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = deleteSaleSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Donnees invalides" }
     }
 
     const { organizationId, saleId } = parsed.data
-    const actorId = sessionResult.data.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationAccess(organizationId)
+    if (!accessResult.success) return accessResult
 
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
+    const { session, membership, effectiveUserId } = accessResult.data
+
+    if (!canPerformAction(membership.role, "CREATE_SALE")) {
       return { success: false, error: "Permission refusee" }
     }
 
@@ -1158,8 +1145,11 @@ export async function deleteSale(
     }
 
     await createAuditLog({
-      userId: actorId,
+      userId: effectiveUserId,
       organizationId,
+      actorUserId: session.actorUserId,
+      effectiveUserId: session.effectiveUserId,
+      impersonationSessionId: session.impersonationSessionId,
       action: AuditAction.DELETE,
       resourceType: "SALE",
       resourceId: saleId,
