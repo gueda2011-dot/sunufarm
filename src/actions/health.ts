@@ -87,6 +87,12 @@ import {
   type VaccinationStockImpact,
 } from "@/src/lib/health-stock-impact"
 import {
+  buildVaccinationPlanItemsFromTemplate,
+  buildVaccinationPlanNameFromTemplate,
+  getTemplateProductionTypeForBatchType,
+} from "@/src/lib/poultry-reference"
+import { isMissingSchemaFeatureError } from "@/src/lib/prisma-schema-guard"
+import {
   buildBatchNotesWithVaccinationPlan,
   parseBatchVaccinationPlanLink,
 } from "@/src/lib/vaccination-planning"
@@ -140,6 +146,12 @@ const assignVaccinationPlanToBatchSchema = z.object({
   organizationId: requiredIdSchema,
   batchId: requiredIdSchema,
   planId: z.string().cuid().nullable(),
+})
+
+const assignVaccinationPlanTemplateToBatchSchema = z.object({
+  organizationId: requiredIdSchema,
+  batchId: requiredIdSchema,
+  templateId: requiredIdSchema,
 })
 
 // ---------------------------------------------------------------------------
@@ -1005,6 +1017,178 @@ export async function assignVaccinationPlanToBatch(
     return {
       success: false,
       error: "Impossible d'associer le plan vaccinal à ce lot",
+    }
+  }
+}
+
+export async function assignVaccinationPlanTemplateToBatch(
+  data: unknown,
+): Promise<ActionResult<{ batchId: string; planId: string }>> {
+  try {
+    const sessionResult = await requireSession()
+    if (!sessionResult.success) return sessionResult
+
+    const parsed = assignVaccinationPlanTemplateToBatchSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Donnees invalides" }
+    }
+
+    const { organizationId, batchId, templateId } = parsed.data
+    const actorId = sessionResult.data.user.id
+
+    const membershipResult = await requireMembership(actorId, organizationId)
+    if (!membershipResult.success) return membershipResult
+
+    const { role, farmPermissions } = membershipResult.data
+
+    if (!canPerformAction(role, "UPDATE_BATCH")) {
+      return { success: false, error: "Permission refusee" }
+    }
+
+    const batch = await prisma.batch.findFirst({
+      where: { id: batchId, organizationId, deletedAt: null },
+      select: {
+        id: true,
+        number: true,
+        type: true,
+        notes: true,
+        status: true,
+        building: { select: { farmId: true } },
+      },
+    })
+
+    if (!batch) {
+      return { success: false, error: "Lot introuvable" }
+    }
+
+    if (!canAccessFarm(role, farmPermissions, batch.building.farmId, "canWrite")) {
+      return { success: false, error: "Acces en ecriture refuse sur cette ferme" }
+    }
+
+    if (batch.status !== BatchStatus.ACTIVE) {
+      return {
+        success: false,
+        error: "Le plan vaccinal ne peut etre associe qu'a un lot actif",
+      }
+    }
+
+    const expectedProductionType = getTemplateProductionTypeForBatchType(batch.type)
+    if (!expectedProductionType) {
+      return {
+        success: false,
+        error: "Aucun template vaccinal n'est prevu pour ce type de lot",
+      }
+    }
+
+    let template: {
+      id: string
+      name: string
+      items: {
+        dayOfAge: number
+        vaccineName: string
+        disease: string | null
+        notes: string | null
+      }[]
+    } | null = null
+
+    try {
+      template = await prisma.vaccinationPlanTemplate.findFirst({
+        where: {
+          id: templateId,
+          isActive: true,
+          productionType: expectedProductionType,
+        },
+        select: {
+          id: true,
+          name: true,
+          items: {
+            orderBy: { dayOfAge: "asc" },
+            select: {
+              dayOfAge: true,
+              vaccineName: true,
+              disease: true,
+              notes: true,
+            },
+          },
+        },
+      })
+    } catch (error) {
+      if (
+        isMissingSchemaFeatureError(error, [
+          "VaccinationPlanTemplate",
+          "VaccinationPlanTemplateItem",
+        ])
+      ) {
+        return {
+          success: false,
+          error:
+            "La base de donnees n'est pas encore migree pour les templates vaccinaux.",
+        }
+      }
+
+      throw error
+    }
+
+    if (!template) {
+      return {
+        success: false,
+        error: "Template vaccinal introuvable ou incompatible avec ce lot",
+      }
+    }
+
+    const previousPlanLink = parseBatchVaccinationPlanLink(batch.notes)
+
+    const generatedPlan = await prisma.$transaction(async (tx) => {
+      const createdPlan = await tx.vaccinationPlan.create({
+        data: {
+          organizationId,
+          name: buildVaccinationPlanNameFromTemplate(template.name, batch.number),
+          batchType: batch.type,
+          items: {
+            create: buildVaccinationPlanItemsFromTemplate(template.items),
+          },
+        },
+        select: { id: true },
+      })
+
+      await tx.batch.update({
+        where: { id: batchId },
+        data: {
+          notes: buildBatchNotesWithVaccinationPlan(
+            { planId: createdPlan.id },
+            batch.notes,
+          ),
+        },
+        select: { id: true },
+      })
+
+      return createdPlan
+    })
+
+    await createAuditLog({
+      userId: actorId,
+      organizationId,
+      action: AuditAction.UPDATE,
+      resourceType: "BATCH_VACCINATION_PLAN_TEMPLATE",
+      resourceId: batchId,
+      before: previousPlanLink,
+      after: {
+        templateId,
+        planId: generatedPlan.id,
+      },
+    })
+
+    return {
+      success: true,
+      data: {
+        batchId,
+        planId: generatedPlan.id,
+      },
+    }
+  } catch {
+    return {
+      success: false,
+      error: "Impossible de generer et d'associer le plan vaccinal a ce lot",
     }
   }
 }

@@ -53,7 +53,7 @@ import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
 import { buildBatchNotesWithVaccinationPlan } from "@/src/lib/vaccination-planning"
 import { isMissingSchemaFeatureError } from "@/src/lib/prisma-schema-guard"
 import {
-  buildVaccinationPlanItemNotesFromTemplate,
+  buildVaccinationPlanItemsFromTemplate,
   buildVaccinationPlanNameFromTemplate,
   getTemplateProductionTypeForBatchType,
   inferPoultrySpeciesFromSpeciesCode,
@@ -752,14 +752,7 @@ export async function createBatch(
             ),
             batchType: batchData.type,
             items: {
-              create: selectedTemplate.items.map((item) => ({
-                dayOfAge: item.dayOfAge,
-                vaccineName: item.vaccineName,
-                notes: buildVaccinationPlanItemNotesFromTemplate({
-                  disease: item.disease,
-                  notes: item.notes,
-                }),
-              })),
+              create: buildVaccinationPlanItemsFromTemplate(selectedTemplate.items),
             },
           },
           select: { id: true },

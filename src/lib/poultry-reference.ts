@@ -79,3 +79,21 @@ export function buildVaccinationPlanItemNotesFromTemplate(args: {
   const parts = [args.disease?.trim(), args.notes?.trim()].filter(Boolean)
   return parts.length > 0 ? parts.join(" | ") : null
 }
+
+export function buildVaccinationPlanItemsFromTemplate<
+  TItem extends {
+    dayOfAge: number
+    vaccineName: string
+    disease?: string | null
+    notes?: string | null
+  },
+>(items: TItem[]) {
+  return items.map((item) => ({
+    dayOfAge: item.dayOfAge,
+    vaccineName: item.vaccineName,
+    notes: buildVaccinationPlanItemNotesFromTemplate({
+      disease: item.disease,
+      notes: item.notes,
+    }),
+  }))
+}

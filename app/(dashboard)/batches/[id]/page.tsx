@@ -21,6 +21,8 @@ import { getExpenses }                    from "@/src/actions/expenses"
 import { getVaccinationPlans, getVaccinations, getTreatments } from "@/src/actions/health"
 import { getMedicineStocks }              from "@/src/actions/stock"
 import { getBatchProfitability }          from "@/src/actions/profitability"
+import { getTemplateProductionTypeForBatchType } from "@/src/lib/poultry-reference"
+import { isMissingSchemaFeatureError }    from "@/src/lib/prisma-schema-guard"
 import { batchAgeDay, diffDays }          from "@/src/lib/utils"
 import {
   buildPlannedVaccinationOccurrences,
@@ -96,6 +98,43 @@ export default async function BatchDetailPage({
   const vaccinationPlans = vaccinationPlansResult.success
     ? vaccinationPlansResult.data
     : []
+  let vaccinationPlanTemplates: Array<{
+    id: string
+    name: string
+    productionType: "BROILER" | "LAYER"
+  }> = []
+  let templateReferenceUnavailable = false
+
+  const expectedTemplateProductionType =
+    getTemplateProductionTypeForBatchType(batch.type)
+
+  if (expectedTemplateProductionType) {
+    try {
+      vaccinationPlanTemplates = await prisma.vaccinationPlanTemplate.findMany({
+        where: {
+          isActive: true,
+          productionType: expectedTemplateProductionType,
+        },
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          productionType: true,
+        },
+      })
+    } catch (error) {
+      if (
+        isMissingSchemaFeatureError(error, [
+          "VaccinationPlanTemplate",
+          "VaccinationPlanTemplateItem",
+        ])
+      ) {
+        templateReferenceUnavailable = true
+      } else {
+        throw error
+      }
+    }
+  }
   const medicineStocksResult = batchFarmId
     ? await getMedicineStocks({ organizationId, farmId: batchFarmId })
     : { success: true as const, data: [] }
@@ -187,6 +226,8 @@ export default async function BatchDetailPage({
         batchType={batch.type}
         userRole={role as string}
         plans={vaccinationPlans}
+        templates={vaccinationPlanTemplates}
+        templateReferenceUnavailable={templateReferenceUnavailable}
         selectedPlanId={selectedVaccinationPlan?.id ?? null}
         occurrences={plannedVaccinations}
       />

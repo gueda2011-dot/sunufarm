@@ -1,11 +1,15 @@
 "use client"
 
-import { useTransition } from "react"
+import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 
 import type { VaccinationPlanSummary } from "@/src/actions/health"
-import { assignVaccinationPlanToBatch } from "@/src/actions/health"
+import {
+  assignVaccinationPlanTemplateToBatch,
+  assignVaccinationPlanToBatch,
+} from "@/src/actions/health"
 import { formatDate } from "@/src/lib/formatters"
+import type { VaccinationPlanTemplateProductionType } from "@/src/generated/prisma/client"
 import type { PlannedVaccinationOccurrence } from "@/src/lib/vaccination-planning"
 
 type Props = {
@@ -14,6 +18,12 @@ type Props = {
   batchType: string
   userRole: string
   plans: VaccinationPlanSummary[]
+  templates: {
+    id: string
+    name: string
+    productionType: VaccinationPlanTemplateProductionType
+  }[]
+  templateReferenceUnavailable: boolean
   selectedPlanId: string | null
   occurrences: PlannedVaccinationOccurrence[]
 }
@@ -42,11 +52,14 @@ export function VaccinationPlanningSection({
   batchType,
   userRole,
   plans,
+  templates,
+  templateReferenceUnavailable,
   selectedPlanId,
   occurrences,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [selectedTemplateId, setSelectedTemplateId] = useState("")
   const canAssignPlan = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(userRole)
 
   const todoCount = occurrences.filter((item) => item.status === "A_FAIRE").length
@@ -66,6 +79,29 @@ export function VaccinationPlanningSection({
         return
       }
 
+      router.refresh()
+    })
+  }
+
+  function handleGenerateFromTemplate() {
+    if (!selectedTemplateId) {
+      window.alert("Selectionnez d'abord un modele vaccinal a generer.")
+      return
+    }
+
+    startTransition(async () => {
+      const result = await assignVaccinationPlanTemplateToBatch({
+        organizationId,
+        batchId,
+        templateId: selectedTemplateId,
+      })
+
+      if (!result.success) {
+        window.alert(result.error)
+        return
+      }
+
+      setSelectedTemplateId("")
       router.refresh()
     })
   }
@@ -129,6 +165,61 @@ export function VaccinationPlanningSection({
           Le rattachement automatique utilise : meme lot, nom de vaccin normalise
           et fenetre de date de -2 a +3 jours autour de la date prevue.
         </p>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+          <div>
+            <label className="mb-1 block text-xs text-gray-500">
+              Generer depuis un modele Senegal
+            </label>
+            <select
+              value={selectedTemplateId}
+              onChange={(event) => setSelectedTemplateId(event.target.value)}
+              disabled={
+                !canAssignPlan ||
+                isPending ||
+                templateReferenceUnavailable ||
+                templates.length === 0
+              }
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            >
+              <option value="">
+                {templateReferenceUnavailable
+                  ? "Templates indisponibles sur cette base"
+                  : templates.length === 0
+                    ? "Aucun modele disponible pour ce type de lot"
+                    : "Selectionner un modele vaccinal"}
+              </option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGenerateFromTemplate}
+            disabled={!canAssignPlan || isPending || !selectedTemplateId}
+            className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Generer et associer
+          </button>
+        </div>
+
+        {templateReferenceUnavailable ? (
+          <p className="mt-3 text-xs text-orange-700">
+            Les templates vaccinaux ne sont pas encore disponibles sur cette base
+            tant que la migration Prisma n&apos;a pas ete appliquee.
+          </p>
+        ) : (
+          <p className="mt-3 text-xs text-gray-500">
+            Cette action cree un nouveau plan vaccinal a partir du modele choisi,
+            puis l&apos;associe au lot actif sans toucher a l&apos;historique sante.
+          </p>
+        )}
       </div>
 
       {!selectedPlanId ? (
