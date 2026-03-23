@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { auth } from "@/src/auth"
 import { getFarms } from "@/src/actions/farms"
 import prisma from "@/src/lib/prisma"
+import { isMissingTableError } from "@/src/lib/prisma-schema-guard"
 import { CreateBatchForm } from "./_components/CreateBatchForm"
 
 export const metadata: Metadata = { title: "Nouveau lot" }
@@ -22,41 +23,70 @@ export default async function NewBatchPage() {
   const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(role)
   if (!canCreate) redirect("/batches")
 
-  const [
-    farmsResult,
-    species,
-    poultryStrains,
-    vaccinationPlanTemplates,
-    suppliers,
-  ] = await Promise.all([
+  const [farmsResult, species, suppliers] = await Promise.all([
     getFarms({ organizationId }),
     prisma.species.findMany({ orderBy: { name: "asc" } }),
-    prisma.poultryStrain.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        productionType: true,
-        species: true,
-        notes: true,
-      },
-    }),
-    prisma.vaccinationPlanTemplate.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        productionType: true,
-      },
-    }),
     prisma.supplier.findMany({
       where: { organizationId },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
   ])
+
+  let poultryStrains: Array<{
+    id: string
+    name: string
+    productionType: "BROILER" | "LAYER" | "LOCAL" | "DUAL"
+    species: "CHICKEN" | "GUINEA_FOWL"
+    notes: string | null
+  }> = []
+
+  let vaccinationPlanTemplates: Array<{
+    id: string
+    name: string
+    productionType: "BROILER" | "LAYER"
+  }> = []
+
+  let referenceDataUnavailable = false
+
+  try {
+    const [strainResults, templateResults] = await Promise.all([
+      prisma.poultryStrain.findMany({
+        where: { isActive: true },
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          productionType: true,
+          species: true,
+          notes: true,
+        },
+      }),
+      prisma.vaccinationPlanTemplate.findMany({
+        where: { isActive: true },
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          productionType: true,
+        },
+      }),
+    ])
+
+    poultryStrains = strainResults
+    vaccinationPlanTemplates = templateResults
+  } catch (error) {
+    if (
+      isMissingTableError(error, [
+        "PoultryStrain",
+        "VaccinationPlanTemplate",
+      ])
+    ) {
+      referenceDataUnavailable = true
+    } else {
+      throw error
+    }
+  }
 
   const farms = farmsResult.success ? farmsResult.data : []
 
@@ -68,6 +98,7 @@ export default async function NewBatchPage() {
       poultryStrains={poultryStrains}
       vaccinationPlanTemplates={vaccinationPlanTemplates}
       suppliers={suppliers}
+      referenceDataUnavailable={referenceDataUnavailable}
     />
   )
 }

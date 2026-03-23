@@ -37,12 +37,14 @@ interface Props {
   organizationId: string
   userRole: UserRole
   strains: StrainRecord[]
+  schemaUnavailable?: boolean
 }
 
 export function StrainsPageClient({
   organizationId,
   userRole,
   strains,
+  schemaUnavailable = false,
 }: Props) {
   const canManage = CAN_MANAGE_ROLES.includes(userRole)
   const [isPending, startTransition] = useTransition()
@@ -103,6 +105,19 @@ export function StrainsPageClient({
           Retour aux parametres
         </Link>
       </div>
+
+      {schemaUnavailable && (
+        <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+          Le referentiel des souches n&apos;est pas encore disponible sur cette base de donnees.
+          La page reste accessible, mais il faut appliquer la mise a jour Prisma pour voir et gerer les souches.
+        </div>
+      )}
+
+      {!schemaUnavailable && items.length === 0 && (
+        <div className="rounded-xl border border-dashed border-gray-300 bg-white px-4 py-8 text-sm text-gray-500">
+          Aucune souche enregistree pour le moment.
+        </div>
+      )}
 
       {[...groupedItems.entries()].map(([productionType, group]) => (
         <section

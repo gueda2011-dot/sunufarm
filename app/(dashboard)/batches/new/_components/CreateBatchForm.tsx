@@ -86,6 +86,7 @@ interface Props {
     productionType: VaccinationPlanTemplateProductionType
   }[]
   suppliers: { id: string; name: string }[]
+  referenceDataUnavailable?: boolean
 }
 
 export function CreateBatchForm({
@@ -95,6 +96,7 @@ export function CreateBatchForm({
   poultryStrains,
   vaccinationPlanTemplates,
   suppliers,
+  referenceDataUnavailable = false,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -258,6 +260,14 @@ export function CreateBatchForm({
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {referenceDataUnavailable && (
+          <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+            Les souches avicoles et les templates vaccinaux ne sont pas encore disponibles sur cette base.
+            Le lot peut etre cree normalement, mais sans ces nouveaux referentiels tant que la migration
+            de base de donnees n&apos;a pas ete appliquee.
+          </div>
+        )}
+
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Localisation</CardTitle>
