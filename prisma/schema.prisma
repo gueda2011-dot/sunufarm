@@ -31,6 +31,11 @@ enum UserRole {
   VIEWER
 }
 
+enum PlatformRole {
+  NONE
+  SUPER_ADMIN
+}
+
 enum BatchType {
   CHAIR
   PONDEUSE
@@ -251,21 +256,24 @@ model VerificationToken {
 // =============================================================================
 
 model User {
-  id            String    @id @default(cuid())
+  id            String       @id @default(cuid())
   name          String?
-  email         String    @unique
+  email         String       @unique
   emailVerified DateTime?
   image         String?
   passwordHash  String?
+  platformRole  PlatformRole @default(NONE)
   deletedAt     DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  accounts      Account[]
-  sessions      Session[]
-  organizations UserOrganization[]
-  auditLogs     AuditLog[]
-  notifications Notification[]
+  accounts               Account[]
+  sessions               Session[]
+  organizations          UserOrganization[]
+  auditLogs              AuditLog[]
+  notifications          Notification[]
+  startedImpersonations  AdminImpersonationSession[] @relation("ImpersonationAdmin")
+  targetImpersonations   AdminImpersonationSession[] @relation("ImpersonationTarget")
 }
 
 // =============================================================================
@@ -298,8 +306,29 @@ model Organization {
   auditLogs         AuditLog[]
   mortalityReasons  MortalityReason[]
   expenseCategories ExpenseCategory[]
+  impersonationSessions AdminImpersonationSession[]
 
   @@index([slug])
+}
+
+model AdminImpersonationSession {
+  id                   String   @id @default(cuid())
+  adminUserId          String
+  targetUserId         String
+  targetOrganizationId String
+  reason               String
+  startedAt            DateTime @default(now())
+  endedAt              DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  adminUser          User         @relation("ImpersonationAdmin", fields: [adminUserId], references: [id])
+  targetUser         User         @relation("ImpersonationTarget", fields: [targetUserId], references: [id])
+  targetOrganization Organization @relation(fields: [targetOrganizationId], references: [id])
+
+  @@index([adminUserId, endedAt])
+  @@index([targetUserId, endedAt])
+  @@index([targetOrganizationId])
 }
 
 // Lien User <-> Organization avec rôle et permissions fines par ferme
@@ -1042,17 +1071,20 @@ model Notification {
 // =============================================================================
 
 model AuditLog {
-  id             String      @id @default(cuid())
-  organizationId String
-  userId         String
-  action         AuditAction
-  resourceType   String      // "BATCH", "DAILY_RECORD", "SALE", "EXPENSE"
-  resourceId     String
-  before         Json?       // snapshot de l'état avant modification
-  after          Json?       // snapshot de l'état après modification
-  ipAddress      String?
-  userAgent      String?
-  createdAt      DateTime    @default(now())
+  id                    String      @id @default(cuid())
+  organizationId        String
+  userId                String
+  actorUserId           String?
+  effectiveUserId       String?
+  impersonationSessionId String?
+  action                AuditAction
+  resourceType          String      // "BATCH", "DAILY_RECORD", "SALE", "EXPENSE"
+  resourceId            String
+  before                Json?       // snapshot de l'état avant modification
+  after                 Json?       // snapshot de l'état après modification
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime    @default(now())
 
   // Pas de updatedAt : les logs d'audit sont immuables
 
@@ -1061,6 +1093,9 @@ model AuditLog {
 
   @@index([organizationId])
   @@index([userId])
+  @@index([actorUserId])
+  @@index([effectiveUserId])
+  @@index([impersonationSessionId])
   @@index([resourceType, resourceId])
   @@index([createdAt])
 }
