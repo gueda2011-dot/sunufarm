@@ -39,6 +39,14 @@ const analyzeBatchDataSchema = z.object({
     feedKg: z.number().nonnegative(),
     waterLiters: z.number().nullable(),
   })).max(14),
+  benchmark: z.object({
+    sampleSize: z.number().int().nonnegative(),
+    avgMortalityRatePct: z.number().nullable(),
+    avgMarginRate: z.number().nullable(),
+    avgCostPerBird: z.number().nullable(),
+    bestMarginRate: z.number().nullable(),
+    worstMortalityRatePct: z.number().nullable(),
+  }).nullable(),
 })
 
 export type BatchAnalysisInput = z.infer<typeof analyzeBatchDataSchema>
@@ -51,6 +59,7 @@ const aiBatchAnalysisResponseSchema = z.object({
     reason: z.string().min(1).max(300),
   })).max(5),
   profitabilityInsights: z.array(z.string().min(1).max(300)).max(5),
+  comparisonInsights: z.array(z.string().min(1).max(320)).max(4).default([]),
   recommendations: z.array(z.object({
     action: z.string().min(1).max(160),
     priority: z.enum(["immediate", "soon", "monitor"]),
@@ -98,6 +107,14 @@ export interface AIBatchAnalysisEnvelope {
   tier: AIAccessTier
   model: string
   usage: AIBatchUsage
+}
+
+export interface StoredBatchAnalysisItem {
+  id: string
+  createdAt: Date
+  accessTier: AIAccessTier
+  model: string
+  analysis: AIBatchAnalysisResult
 }
 
 export function getAIPolicy(subscription: OrganizationSubscriptionSummary): AIPolicy {
@@ -159,8 +176,9 @@ export function getAIPolicy(subscription: OrganizationSubscriptionSummary): AIPo
 export async function buildBatchAnalysisInput(
   organizationId: string,
   batchId: string,
+  options?: { includeBenchmark?: boolean },
 ): Promise<BatchAnalysisInput | null> {
-  const [batch, profitability, mortalityAgg, expenses, records] = await Promise.all([
+  const [batch, profitability, mortalityAgg, expenses, records, comparableBatches] = await Promise.all([
     prisma.batch.findFirst({
       where: { id: batchId, organizationId, deletedAt: null },
       select: {
@@ -214,6 +232,38 @@ export async function buildBatchAnalysisInput(
         waterLiters: true,
       },
     }),
+    options?.includeBenchmark
+      ? prisma.batch.findMany({
+          where: {
+            organizationId,
+            id: { not: batchId },
+            deletedAt: null,
+          },
+          orderBy: { entryDate: "desc" },
+          take: 8,
+          select: {
+            id: true,
+            type: true,
+            entryCount: true,
+            totalCostFcfa: true,
+            saleItems: {
+              select: {
+                totalFcfa: true,
+              },
+            },
+            expenses: {
+              select: {
+                amountFcfa: true,
+              },
+            },
+            dailyRecords: {
+              select: {
+                mortality: true,
+              },
+            },
+          },
+        })
+      : Promise.resolve([]),
   ])
 
   if (!batch) return null
@@ -235,6 +285,52 @@ export async function buildBatchAnalysisInput(
   const mortalityRatePct = batch.entryCount > 0
     ? Math.round((totalMortality / batch.entryCount) * 1000) / 10
     : 0
+
+  const benchmarkSource = options?.includeBenchmark
+    ? comparableBatches
+        .filter((candidate) => candidate.type === batch.type)
+        .map((candidate) => {
+          const candidateMortality = candidate.dailyRecords.reduce((sum, record) => (
+            sum + record.mortality
+          ), 0)
+          const candidateOperationalCost = candidate.expenses.reduce((sum, expense) => (
+            sum + expense.amountFcfa
+          ), 0)
+          const candidateRevenue = candidate.saleItems.reduce((sum, saleItem) => (
+            sum + saleItem.totalFcfa
+          ), 0)
+          const candidateTotalCost = candidate.totalCostFcfa + candidateOperationalCost
+          const candidateProfit = candidateRevenue - candidateTotalCost
+
+          return {
+            mortalityRatePct: candidate.entryCount > 0
+              ? Math.round((candidateMortality / candidate.entryCount) * 1000) / 10
+              : null,
+            marginRate: candidateTotalCost > 0
+              ? Math.round((candidateProfit / candidateTotalCost) * 1000) / 10
+              : null,
+            costPerBird: candidate.entryCount > 0
+              ? Math.round(candidateTotalCost / candidate.entryCount)
+              : null,
+          }
+        })
+        .filter((candidate) => (
+          candidate.mortalityRatePct !== null ||
+          candidate.marginRate !== null ||
+          candidate.costPerBird !== null
+        ))
+    : []
+
+  const benchmark = benchmarkSource.length > 0
+    ? {
+        sampleSize: benchmarkSource.length,
+        avgMortalityRatePct: averageNullable(benchmarkSource.map((item) => item.mortalityRatePct)),
+        avgMarginRate: averageNullable(benchmarkSource.map((item) => item.marginRate)),
+        avgCostPerBird: averageNullable(benchmarkSource.map((item) => item.costPerBird)),
+        bestMarginRate: maxNullable(benchmarkSource.map((item) => item.marginRate)),
+        worstMortalityRatePct: maxNullable(benchmarkSource.map((item) => item.mortalityRatePct)),
+      }
+    : null
 
   const endDate = batch.status === "ACTIVE"
     ? new Date()
@@ -273,7 +369,21 @@ export async function buildBatchAnalysisInput(
       feedKg: record.feedKg,
       waterLiters: record.waterLiters ?? null,
     })),
+    benchmark,
   })
+}
+
+function averageNullable(values: Array<number | null>): number | null {
+  const filtered = values.filter((value): value is number => value !== null)
+  if (filtered.length === 0) return null
+
+  return Math.round((filtered.reduce((sum, value) => sum + value, 0) / filtered.length) * 10) / 10
+}
+
+function maxNullable(values: Array<number | null>): number | null {
+  const filtered = values.filter((value): value is number => value !== null)
+  if (filtered.length === 0) return null
+  return Math.max(...filtered)
 }
 
 export function hashBatchAnalysisInput(input: BatchAnalysisInput, tier: AIAccessTier): string {
@@ -370,6 +480,41 @@ export async function findCachedBatchAnalysis(
   return parsed.success ? parsed.data : null
 }
 
+export async function listStoredBatchAnalyses(
+  organizationId: string,
+  batchId: string,
+  limit = 5,
+): Promise<StoredBatchAnalysisItem[]> {
+  const analyses = await prisma.aIBatchAnalysis.findMany({
+    where: {
+      organizationId,
+      batchId,
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: {
+      id: true,
+      createdAt: true,
+      accessTier: true,
+      model: true,
+      responseJson: true,
+    },
+  })
+
+  return analyses.flatMap((item) => {
+    const parsed = aiBatchAnalysisResponseSchema.safeParse(item.responseJson)
+    if (!parsed.success) return []
+
+    return [{
+      id: item.id,
+      createdAt: item.createdAt,
+      accessTier: item.accessTier as AIAccessTier,
+      model: item.model,
+      analysis: parsed.data,
+    }]
+  })
+}
+
 function extractResponseText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null
   const data = payload as {
@@ -414,7 +559,7 @@ export async function generateBatchAnalysisWithOpenAI(
             {
               type: "input_text",
               text:
-                "Tu es le moteur d'analyse avicole de SunuFarm. Reponds uniquement en JSON valide. Concentre-toi sur la rentabilite, les risques, et les actions concretes. Pas de chatbot, pas de texte hors JSON.",
+                "Tu es le moteur d'analyse avicole de SunuFarm. Reponds uniquement en JSON valide. Concentre-toi sur la rentabilite, les risques, et les actions concretes. Pas de chatbot, pas de texte hors JSON. Si un benchmark interne est present, utilise-le explicitement pour comparer le lot a des lots similaires de la meme exploitation. Si aucun benchmark n'est present, renvoie comparisonInsights comme tableau vide.",
             },
           ],
         },
@@ -440,7 +585,7 @@ export async function generateBatchAnalysisWithOpenAI(
           schema: {
             type: "object",
             additionalProperties: false,
-            required: ["summary", "keyRisks", "profitabilityInsights", "recommendations"],
+            required: ["summary", "keyRisks", "profitabilityInsights", "comparisonInsights", "recommendations"],
             properties: {
               summary: { type: "string" },
               keyRisks: {
@@ -457,6 +602,10 @@ export async function generateBatchAnalysisWithOpenAI(
                 },
               },
               profitabilityInsights: {
+                type: "array",
+                items: { type: "string" },
+              },
+              comparisonInsights: {
                 type: "array",
                 items: { type: "string" },
               },

@@ -1,9 +1,22 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { Sparkles, AlertTriangle, BadgeDollarSign, CheckCircle2 } from "lucide-react"
+import {
+  Sparkles,
+  AlertTriangle,
+  BadgeDollarSign,
+  CheckCircle2,
+  History,
+} from "lucide-react"
 import { Button } from "@/src/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/src/components/ui/card"
+import { formatDateTime } from "@/src/lib/formatters"
 
 interface AnalysisResult {
   summary: string
@@ -13,6 +26,7 @@ interface AnalysisResult {
     reason: string
   }>
   profitabilityInsights: string[]
+  comparisonInsights: string[]
   recommendations: Array<{
     action: string
     priority: "immediate" | "soon" | "monitor"
@@ -29,6 +43,14 @@ interface BatchAIAnalysisCardProps {
   monthlyLimitLabel: string
   enabled: boolean
   upsellMessage?: string
+  comparisonEnabled: boolean
+  previousAnalyses: Array<{
+    id: string
+    createdAt: Date
+    accessTier: "trial" | "pro" | "business"
+    model: string
+    analysis: AnalysisResult
+  }>
 }
 
 export function BatchAIAnalysisCard({
@@ -40,11 +62,18 @@ export function BatchAIAnalysisCard({
   monthlyLimitLabel,
   enabled,
   upsellMessage,
+  comparisonEnabled,
+  previousAnalyses,
 }: BatchAIAnalysisCardProps) {
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [cached, setCached] = useState(false)
   const [usageLabel, setUsageLabel] = useState<string | null>(null)
+  const [usageDetail, setUsageDetail] = useState<{
+    dailyRemaining: number | null
+    monthlyRemaining: number | null
+    trialRemaining: number | null
+  } | null>(null)
   const [isPending, startTransition] = useTransition()
 
   function handleAnalyze() {
@@ -89,11 +118,23 @@ export function BatchAIAnalysisCard({
 
       const usage = payload.data.usage
       if (usage.totalTrialLimit > 0) {
-        setUsageLabel(`${usage.totalTrialUsed}/${usage.totalTrialLimit} analyses d'essai utilisees`)
+        setUsageLabel(
+          `${usage.totalTrialUsed}/${usage.totalTrialLimit} analyses d'essai utilisees`,
+        )
+        setUsageDetail({
+          dailyRemaining: null,
+          monthlyRemaining: null,
+          trialRemaining: Math.max(0, usage.totalTrialLimit - usage.totalTrialUsed),
+        })
       } else {
         setUsageLabel(
           `${usage.dailyUsed}/${usage.dailyLimit} aujourd'hui · ${usage.monthlyUsed}/${usage.monthlyLimit} ce mois`,
         )
+        setUsageDetail({
+          dailyRemaining: Math.max(0, usage.dailyLimit - usage.dailyUsed),
+          monthlyRemaining: Math.max(0, usage.monthlyLimit - usage.monthlyUsed),
+          trialRemaining: null,
+        })
       }
     })
   }
@@ -125,7 +166,9 @@ export function BatchAIAnalysisCard({
               Analyse AI du lot
             </CardTitle>
             <CardDescription>
-              Synthese rentabilite, risques et recommandations orientees business.
+              {comparisonEnabled
+                ? "Synthese rentabilite, risques, recommandations et comparaison avec les lots similaires de l'exploitation."
+                : "Synthese rentabilite, risques et recommandations orientees business."}
             </CardDescription>
           </div>
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800">
@@ -137,12 +180,33 @@ export function BatchAIAnalysisCard({
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-2xl bg-white px-4 py-3 text-sm text-gray-700">
-            <p className="font-medium text-gray-900">Quota journalier</p>
+            <p className="font-medium text-gray-900">Analyses disponibles aujourd&apos;hui</p>
             <p className="mt-1">{dailyLimitLabel}</p>
+            {usageDetail?.dailyRemaining !== null && usageDetail?.dailyRemaining !== undefined && (
+              <p className="mt-2 text-xs text-gray-500">
+                Restant aujourd&apos;hui : {usageDetail.dailyRemaining}
+              </p>
+            )}
           </div>
           <div className="rounded-2xl bg-white px-4 py-3 text-sm text-gray-700">
-            <p className="font-medium text-gray-900">Quota mensuel</p>
+            <p className="font-medium text-gray-900">
+              {usageDetail?.trialRemaining !== null && usageDetail?.trialRemaining !== undefined
+                ? "Analyses offertes pendant l'essai"
+                : "Analyses disponibles ce mois"}
+            </p>
             <p className="mt-1">{monthlyLimitLabel}</p>
+            {usageDetail?.trialRemaining !== null && usageDetail?.trialRemaining !== undefined ? (
+              <p className="mt-2 text-xs text-gray-500">
+                Restant pendant l&apos;essai : {usageDetail.trialRemaining}
+              </p>
+            ) : (
+              usageDetail?.monthlyRemaining !== null &&
+              usageDetail?.monthlyRemaining !== undefined && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Restant ce mois : {usageDetail.monthlyRemaining}
+                </p>
+              )
+            )}
           </div>
         </div>
 
@@ -207,6 +271,25 @@ export function BatchAIAnalysisCard({
               </ul>
             </div>
 
+            {comparisonEnabled && result.comparisonInsights.length > 0 && (
+              <div>
+                <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  <Sparkles className="h-4 w-4 text-violet-700" />
+                  Performance comparee
+                </p>
+                <p className="mt-1 text-sm text-gray-600">
+                  Ces points comparent ce lot a des lots similaires de la meme exploitation.
+                </p>
+                <ul className="mt-2 space-y-2 text-sm text-gray-700">
+                  {result.comparisonInsights.map((insight) => (
+                    <li key={insight} className="rounded-xl bg-violet-50 px-3 py-2">
+                      {insight}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div>
               <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
                 <CheckCircle2 className="h-4 w-4 text-blue-700" />
@@ -225,6 +308,32 @@ export function BatchAIAnalysisCard({
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {previousAnalyses.length > 0 && (
+          <div className="rounded-2xl bg-white p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <History className="h-4 w-4 text-gray-700" />
+              Historique recent des analyses
+            </p>
+            <div className="mt-3 space-y-3">
+              {previousAnalyses.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-xl border border-gray-100 px-3 py-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                    <span>{formatDateTime(item.createdAt)}</span>
+                    <span className="rounded-full bg-gray-100 px-2 py-1 font-semibold text-gray-700">
+                      {item.accessTier.toUpperCase()}
+                    </span>
+                    <span>{item.model}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-gray-700">{item.analysis.summary}</p>
+                </div>
+              ))}
             </div>
           </div>
         )}

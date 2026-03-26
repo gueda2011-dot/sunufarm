@@ -24,7 +24,7 @@ import { getBatchProfitability, type BatchProfitability } from "@/src/actions/pr
 import { PlanGuardCard }                  from "@/src/components/subscription/PlanGuardCard"
 import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
-import { getAIPolicy } from "@/src/lib/ai"
+import { getAIPolicy, listStoredBatchAnalyses } from "@/src/lib/ai"
 import { BatchHeader }                    from "./_components/BatchHeader"
 import { BatchAIAnalysisCard }            from "./_components/BatchAIAnalysisCard"
 import { BatchKpis }                      from "./_components/BatchKpis"
@@ -68,6 +68,7 @@ export default async function BatchDetailPage({
     vaccinationsResult,
     treatmentsResult,
     profitabilityResult,
+    previousAnalyses,
   ] = await Promise.all([
     getBatch({ organizationId, batchId: id }),
     getDailyRecords({ organizationId, batchId: id, limit: 100 }),
@@ -80,6 +81,7 @@ export default async function BatchDetailPage({
           success: false,
           error: getFeatureUpgradeMessage("PROFITABILITY"),
         }),
+    listStoredBatchAnalyses(organizationId, id, 5),
   ])
 
   if (!batchResult.success) notFound()
@@ -177,6 +179,8 @@ export default async function BatchDetailPage({
         }
         enabled={canUseBatchAI}
         upsellMessage={getFeatureUpgradeMessage("AI_BATCH_ANALYSIS")}
+        previousAnalyses={previousAnalyses}
+        comparisonEnabled={aiPolicy.advanced}
       />
 
       <RecentDailyRecords

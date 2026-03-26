@@ -37,7 +37,11 @@ export async function POST(request: NextRequest) {
 
     const subscription = await getOrganizationSubscription(organizationId)
     const policy = getAIPolicy(subscription)
-    const input = batchData ?? (batchId ? await buildBatchAnalysisInput(organizationId, batchId) : null)
+    const input = batchData ?? (batchId
+      ? await buildBatchAnalysisInput(organizationId, batchId, {
+          includeBenchmark: policy.advanced,
+        })
+      : null)
 
     if (!input) {
       return NextResponse.json({ success: false, error: "Lot introuvable" }, { status: 404 })
