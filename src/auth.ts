@@ -71,7 +71,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           // 2. Chercher l'utilisateur actif (non soft-deleted)
           const user = await prisma.user.findFirst({
             where: {
-              email:     parsed.data.email,
+              email:     parsed.data.email.trim().toLowerCase(),
               deletedAt: null,            // exclut les comptes supprimés
             },
             select: {

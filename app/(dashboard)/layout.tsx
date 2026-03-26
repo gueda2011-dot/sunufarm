@@ -55,7 +55,7 @@ export default async function DashboardLayout({
 
   if (memberships.length === 0) {
     // L'utilisateur existe mais n'appartient à aucune organisation
-    redirect("/login?error=no-org")
+    redirect("/onboarding")
   }
 
   const superAdminMembership = memberships.find((membership) => (
