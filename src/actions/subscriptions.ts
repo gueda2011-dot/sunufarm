@@ -34,6 +34,11 @@ const manageSubscriptionPaymentSchema = z.object({
   paymentId: requiredIdSchema,
 })
 
+const adminUpdateOrganizationSubscriptionSchema = z.object({
+  organizationId: requiredIdSchema,
+  plan: z.nativeEnum(SubscriptionPlan),
+})
+
 export async function createSubscriptionPaymentRequest(
   data: unknown,
 ): Promise<ActionResult<{ paymentId: string }>> {
@@ -298,5 +303,89 @@ export async function rejectSubscriptionPayment(
     return { success: true, data: undefined }
   } catch {
     return { success: false, error: "Impossible de refuser ce paiement." }
+  }
+}
+
+export async function adminUpdateOrganizationSubscription(
+  data: unknown,
+): Promise<ActionResult<{ plan: SubscriptionPlan }>> {
+  try {
+    const sessionResult = await requireSession()
+    if (!sessionResult.success) return sessionResult
+
+    const parsed = adminUpdateOrganizationSubscriptionSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Donnees invalides" }
+    }
+
+    const { organizationId, plan } = parsed.data
+    const actorId = sessionResult.data.user.id
+
+    const superAdminMembership = await prisma.userOrganization.findFirst({
+      where: {
+        userId: actorId,
+        role: UserRole.SUPER_ADMIN,
+      },
+      select: { id: true },
+    })
+
+    if (!superAdminMembership) {
+      return { success: false, error: "Seul un super admin peut modifier cet abonnement." }
+    }
+
+    const organization = await prisma.organization.findFirst({
+      where: { id: organizationId, deletedAt: null },
+      select: { id: true, name: true },
+    })
+
+    if (!organization) {
+      return { success: false, error: "Organisation introuvable." }
+    }
+
+    const now = new Date()
+    const periodEnd = new Date(now)
+    periodEnd.setDate(periodEnd.getDate() + 30)
+
+    await prisma.subscription.upsert({
+      where: { organizationId },
+      update: {
+        plan,
+        status: "ACTIVE",
+        amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+        canceledAt: null,
+      },
+      create: {
+        organizationId,
+        plan,
+        status: "ACTIVE",
+        amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
+        startedAt: now,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+      },
+    })
+
+    await createAuditLog({
+      userId: actorId,
+      organizationId,
+      action: AuditAction.UPDATE,
+      resourceType: "SUBSCRIPTION",
+      resourceId: organizationId,
+      after: {
+        plan,
+        amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
+      },
+    })
+
+    revalidatePath("/admin")
+
+    return {
+      success: true,
+      data: { plan },
+    }
+  } catch {
+    return { success: false, error: "Impossible de mettre a jour l'abonnement." }
   }
 }

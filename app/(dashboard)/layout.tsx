@@ -58,6 +58,14 @@ export default async function DashboardLayout({
     redirect("/login?error=no-org")
   }
 
+  const superAdminMembership = memberships.find((membership) => (
+    membership.role === "SUPER_ADMIN"
+  ))
+
+  if (superAdminMembership) {
+    redirect("/admin")
+  }
+
   // -------------------------------------------------------------------------
   // 3. Organisation active (MVP : première alphabétiquement)
   // -------------------------------------------------------------------------

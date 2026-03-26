@@ -151,7 +151,29 @@ export async function getMembership(
       farmPermissions: true,
     },
   })
-  return membership
+  if (membership) return membership
+
+  // SUPER_ADMIN : accès global à toutes les organisations même sans membership direct.
+  const superAdminMembership = await prisma.userOrganization.findFirst({
+    where: {
+      userId,
+      role: "SUPER_ADMIN",
+    },
+    select: {
+      userId: true,
+      role: true,
+      farmPermissions: true,
+    },
+  })
+
+  if (!superAdminMembership) return null
+
+  return {
+    userId,
+    organizationId,
+    role: superAdminMembership.role,
+    farmPermissions: superAdminMembership.farmPermissions,
+  }
 }
 
 /**

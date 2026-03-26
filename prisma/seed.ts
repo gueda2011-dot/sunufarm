@@ -165,13 +165,43 @@ async function main() {
   console.log("🏢 Organisation 1 : Ferme Diallo et Fils (Dakar)...")
 
   // Utilisateurs org 1
-  const [owner1, manager1, tech1, saisie1, comptable1] = await Promise.all([
+  const [superAdmin, owner1, manager1, tech1, saisie1, comptable1] = await Promise.all([
+    prisma.user.create({ data: { email: "admin@sunufarm.sn",         name: "SunuFarm Admin", passwordHash } }),
     prisma.user.create({ data: { email: "ousmane.diallo@sunufarm.sn",  name: "Ousmane Diallo",  passwordHash } }),
     prisma.user.create({ data: { email: "mamadou.fall@sunufarm.sn",    name: "Mamadou Fall",    passwordHash } }),
     prisma.user.create({ data: { email: "fatou.sow@sunufarm.sn",       name: "Fatou Sow",       passwordHash } }),
     prisma.user.create({ data: { email: "ibrahima.ba@sunufarm.sn",     name: "Ibrahima Ba",     passwordHash } }),
     prisma.user.create({ data: { email: "aminata.diop@sunufarm.sn",    name: "Aminata Diop",    passwordHash } }),
   ])
+
+  const platformOrg = await prisma.organization.create({
+    data: {
+      name: "SunuFarm Platform",
+      slug: "sunufarm-platform",
+      currency: "XOF",
+      locale: "fr-SN",
+      timezone: "Africa/Dakar",
+    },
+  })
+
+  await prisma.userOrganization.create({
+    data: {
+      userId: superAdmin.id,
+      organizationId: platformOrg.id,
+      role: UserRole.SUPER_ADMIN,
+    },
+  })
+
+  await prisma.subscription.create({
+    data: {
+      organizationId: platformOrg.id,
+      plan: SubscriptionPlan.BUSINESS,
+      status: SubscriptionStatus.ACTIVE,
+      amountFcfa: 20_000,
+      currentPeriodStart: today,
+      currentPeriodEnd: dt(addDays(today, 365)),
+    },
+  })
 
   const org1 = await prisma.organization.create({
     data: {
@@ -826,6 +856,8 @@ async function main() {
   // =========================================================================
   console.log("\n✅ Données de démonstration créées avec succès !")
   console.log("\n📋 Comptes de test (mot de passe : Sunufarm2025!) :")
+  console.log("   Plateforme SunuFarm :")
+  console.log("   → admin@sunufarm.sn             (SUPER_ADMIN)")
   console.log("   Organisation 1 — Ferme Diallo et Fils (Dakar) :")
   console.log("   → ousmane.diallo@sunufarm.sn   (OWNER)")
   console.log("   → mamadou.fall@sunufarm.sn      (MANAGER)")
