@@ -100,6 +100,8 @@ export default async function DashboardLayout({
           plan={subscription.plan}
           userName={userName}
           userEmail={userEmail}
+          trialDaysRemaining={subscription.trialDaysRemaining}
+          aiCreditsRemaining={subscription.aiCreditsRemaining}
         />
 
         {/*

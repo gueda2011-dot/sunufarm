@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { auth } from "@/src/auth"
 import { AdminSubscriptionControl } from "@/app/admin/_components/AdminSubscriptionControl"
+import { AdminSignOutButton } from "@/app/admin/_components/AdminSignOutButton"
 import prisma from "@/src/lib/prisma"
 import {
   formatDate,
@@ -87,6 +88,7 @@ export default async function AdminOrganizationDetailPage(
           amountFcfa: true,
           currentPeriodStart: true,
           currentPeriodEnd: true,
+          trialEndsAt: true,
           updatedAt: true,
         },
       },
@@ -274,9 +276,12 @@ export default async function AdminOrganizationDetailPage(
             </p>
           </div>
 
-          <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm text-green-50">
-            <p className="font-semibold">Derniere mise a jour abonnement</p>
-            <p>{formatDateTime(organization.subscription?.updatedAt ?? organization.updatedAt)}</p>
+          <div className="flex flex-col gap-3 sm:items-end">
+            <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm text-green-50">
+              <p className="font-semibold">Derniere mise a jour abonnement</p>
+              <p>{formatDateTime(organization.subscription?.updatedAt ?? organization.updatedAt)}</p>
+            </div>
+            <AdminSignOutButton />
           </div>
         </div>
 
@@ -359,6 +364,8 @@ export default async function AdminOrganizationDetailPage(
                   <AdminSubscriptionControl
                     organizationId={organization.id}
                     currentPlan={organization.subscription?.plan ?? "BASIC"}
+                    currentStatus={organization.subscription?.status ?? "ACTIVE"}
+                    trialEndsAt={organization.subscription?.trialEndsAt ?? null}
                   />
                 </div>
               </div>

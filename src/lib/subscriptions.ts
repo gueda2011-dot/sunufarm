@@ -2,6 +2,23 @@ import {
   SubscriptionPlan,
 } from "@/src/generated/prisma/client"
 
+// ---------------------------------------------------------------------------
+// Constantes essai gratuit
+// ---------------------------------------------------------------------------
+
+/** Durée de l'essai gratuit en jours */
+export const TRIAL_DAYS = 7
+
+/** Crédits IA offerts pendant l'essai */
+export const TRIAL_AI_CREDITS = 3
+
+/** Valeur sentinelle pour crédits illimités (plans payants actifs) */
+export const UNLIMITED_AI = -1
+
+// ---------------------------------------------------------------------------
+// Features & plans
+// ---------------------------------------------------------------------------
+
 export type SubscriptionFeature =
   | "REPORTS"
   | "PROFITABILITY"
@@ -94,6 +111,38 @@ export function hasPlanFeature(
   feature: SubscriptionFeature,
 ): boolean {
   return PLAN_DEFINITIONS[plan].features[feature]
+}
+
+// ---------------------------------------------------------------------------
+// Helpers crédits IA
+// ---------------------------------------------------------------------------
+
+/**
+ * Renvoie true si l'organisation peut lancer une analyse IA.
+ * Utilisé côté client/serveur pour afficher ou bloquer le bouton IA.
+ *
+ * @param aiCreditsRemaining - valeur issue de OrganizationSubscriptionSummary
+ * @param hasUnlimitedAI     - valeur issue de OrganizationSubscriptionSummary
+ */
+export function canUseAI(
+  aiCreditsRemaining: number,
+  hasUnlimitedAI: boolean,
+): boolean {
+  return hasUnlimitedAI || aiCreditsRemaining > 0
+}
+
+/**
+ * Message affiché quand l'IA est épuisée ou non disponible.
+ */
+export function getAIUpgradeMessage(
+  aiCreditsRemaining: number,
+  hasUnlimitedAI: boolean,
+): string {
+  if (hasUnlimitedAI) return ""
+  if (aiCreditsRemaining > 0) {
+    return `${aiCreditsRemaining} analyse${aiCreditsRemaining > 1 ? "s" : ""} IA restante${aiCreditsRemaining > 1 ? "s" : ""}`
+  }
+  return "Vos crédits IA sont épuisés. Passez au plan Pro pour des analyses illimitées."
 }
 
 export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {

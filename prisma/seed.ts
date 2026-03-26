@@ -753,14 +753,17 @@ async function main() {
     data: { userId: owner2.id, organizationId: org2.id, role: UserRole.OWNER },
   })
 
+  // org2 est en essai gratuit de 7 jours (3 crédits IA) — pour tester le système trial
   await prisma.subscription.create({
     data: {
-      organizationId: org2.id,
-      plan: SubscriptionPlan.BUSINESS,
-      status: SubscriptionStatus.ACTIVE,
-      amountFcfa: 20_000,
-      currentPeriodStart: today,
-      currentPeriodEnd: dt(addDays(today, 30)),
+      organizationId:  org2.id,
+      plan:            SubscriptionPlan.BASIC,
+      status:          SubscriptionStatus.TRIAL,
+      amountFcfa:      0,
+      startedAt:       today,
+      trialEndsAt:     dt(addDays(today, 5)),   // 5 jours restants (sur 7)
+      aiCreditsTotal:  3,
+      aiCreditsUsed:   1,                        // 1 analyse déjà consommée
     },
   })
 

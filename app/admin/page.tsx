@@ -1,10 +1,18 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { ArrowRight, Building2, CreditCard, Shield, Users } from "lucide-react"
+import {
+  ArrowRight,
+  Building2,
+  CreditCard,
+  Shield,
+  Sparkles,
+  Users,
+} from "lucide-react"
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
 import { formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
+import { AdminSignOutButton } from "./_components/AdminSignOutButton"
 import { AdminSubscriptionControl } from "./_components/AdminSubscriptionControl"
 
 export const metadata: Metadata = { title: "Admin Plateforme" }
@@ -56,7 +64,7 @@ export default async function AdminPage() {
     redirect("/dashboard")
   }
 
-  const [organizations, usersCount, pendingPaymentsCount] = await Promise.all([
+  const [organizations, usersCount, pendingPaymentsCount, pendingPayments] = await Promise.all([
     prisma.organization.findMany({
       where: {
         deletedAt: null,
@@ -72,6 +80,7 @@ export default async function AdminPage() {
             status: true,
             amountFcfa: true,
             currentPeriodEnd: true,
+            trialEndsAt: true,
           },
         },
         _count: {
@@ -89,28 +98,65 @@ export default async function AdminPage() {
     prisma.subscriptionPayment.count({
       where: { status: "PENDING" },
     }),
+    prisma.subscriptionPayment.findMany({
+      where: { status: "PENDING" },
+      select: {
+        id: true,
+        requestedPlan: true,
+        amountFcfa: true,
+        requestedAt: true,
+        organization: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: { requestedAt: "asc" },
+      take: 5,
+    }),
   ])
 
   const visibleOrganizations = organizations.filter((org) => org.slug !== "sunufarm-platform")
+  const activeTrials = visibleOrganizations.filter(
+    (org) =>
+      org.subscription?.status === "TRIAL" &&
+      org.subscription.trialEndsAt != null &&
+      org.subscription.trialEndsAt > new Date(),
+  )
+  const expiringTrials = [...activeTrials]
+    .sort((a, b) => {
+      const aTime = a.subscription?.trialEndsAt?.getTime() ?? 0
+      const bTime = b.subscription?.trialEndsAt?.getTime() ?? 0
+      return aTime - bTime
+    })
+    .slice(0, 5)
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <section className="rounded-3xl bg-gradient-to-br from-gray-950 via-gray-900 to-green-800 px-6 py-8 text-white shadow-xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-green-200">
-            Admin plateforme
-          </p>
-          <h1 className="mt-2 text-3xl font-bold">Pilotage global de SunuFarm</h1>
-          <p className="mt-3 max-w-2xl text-sm text-gray-200 sm:text-base">
-            Connecte en tant que SUPER_ADMIN. Tu peux surveiller les organisations, les abonnements
-            et les demandes de paiement de toute la plateforme.
-          </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-green-200">
+                Admin plateforme
+              </p>
+              <h1 className="mt-2 text-3xl font-bold">Pilotage global de SunuFarm</h1>
+              <p className="mt-3 max-w-2xl text-sm text-gray-200 sm:text-base">
+                Connecte en tant que SUPER_ADMIN. Tu peux surveiller les organisations, les
+                abonnements et les demandes de paiement de toute la plateforme.
+              </p>
+            </div>
+
+            <AdminSignOutButton />
+          </div>
+
           <div className="mt-5 rounded-2xl bg-white/10 px-4 py-3 text-sm text-gray-100">
             {adminMembership.user.name || "Super admin"} · {adminMembership.user.email}
           </div>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-3">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Organisations actives"
             value={String(visibleOrganizations.length)}
@@ -126,6 +172,80 @@ export default async function AdminPage() {
             value={String(pendingPaymentsCount)}
             icon={CreditCard}
           />
+          <StatCard
+            label="Essais en cours"
+            value={String(activeTrials.length)}
+            icon={Sparkles}
+          />
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-3xl border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-100 px-6 py-5">
+              <h2 className="text-lg font-semibold text-gray-900">Paiements a traiter</h2>
+              <p className="text-sm text-gray-500">
+                Les demandes de souscription qui attendent une validation.
+              </p>
+            </div>
+            <div className="space-y-3 px-6 py-5">
+              {pendingPayments.length === 0 ? (
+                <p className="text-sm text-gray-400">Aucune demande de paiement en attente.</p>
+              ) : (
+                pendingPayments.map((payment) => (
+                  <div key={payment.id} className="rounded-2xl border border-gray-100 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <Link
+                        href={`/admin/organizations/${payment.organization.id}`}
+                        className="font-medium text-gray-900 hover:text-green-700"
+                      >
+                        {payment.organization.name}
+                      </Link>
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                        {payment.requestedPlan}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {formatMoneyFCFA(payment.amountFcfa)} · demande le{" "}
+                      {formatDateTime(payment.requestedAt)}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-100 px-6 py-5">
+              <h2 className="text-lg font-semibold text-gray-900">Essais a surveiller</h2>
+              <p className="text-sm text-gray-500">
+                Organisations en trial, triees par fin d&apos;essai la plus proche.
+              </p>
+            </div>
+            <div className="space-y-3 px-6 py-5">
+              {expiringTrials.length === 0 ? (
+                <p className="text-sm text-gray-400">Aucun essai actif en ce moment.</p>
+              ) : (
+                expiringTrials.map((org) => (
+                  <div key={org.id} className="rounded-2xl border border-gray-100 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <Link
+                        href={`/admin/organizations/${org.id}`}
+                        className="font-medium text-gray-900 hover:text-green-700"
+                      >
+                        {org.name}
+                      </Link>
+                      <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800">
+                        Trial
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Fin prevue: {formatDateTime(org.subscription?.trialEndsAt)}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </section>
 
         <section className="rounded-3xl border border-gray-200 bg-white shadow-sm">
@@ -137,7 +257,7 @@ export default async function AdminPage() {
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Organisations</h2>
                 <p className="text-sm text-gray-500">
-                  Vue globale des clients, de leurs équipes et de leurs abonnements.
+                  Vue globale des clients, de leurs equipes et de leurs abonnements.
                 </p>
               </div>
             </div>
@@ -186,6 +306,8 @@ export default async function AdminPage() {
                       <AdminSubscriptionControl
                         organizationId={org.id}
                         currentPlan={org.subscription?.plan ?? "BASIC"}
+                        currentStatus={org.subscription?.status ?? "ACTIVE"}
+                        trialEndsAt={org.subscription?.trialEndsAt ?? null}
                       />
                     </td>
                     <td className="px-6 py-4 text-gray-700">

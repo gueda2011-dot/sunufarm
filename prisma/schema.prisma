@@ -306,6 +306,14 @@ model Subscription {
   currentPeriodStart DateTime?
   currentPeriodEnd   DateTime?
   canceledAt         DateTime?
+
+  // Essai gratuit 7 jours
+  trialEndsAt        DateTime?
+
+  // Crédits IA (essai = 3, plans payants = -1 = illimité)
+  aiCreditsTotal     Int                @default(3)
+  aiCreditsUsed      Int                @default(0)
+
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -313,6 +321,7 @@ model Subscription {
 
   @@index([plan])
   @@index([status])
+  @@index([trialEndsAt])
 }
 
 model SubscriptionPayment {

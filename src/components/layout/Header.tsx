@@ -20,12 +20,16 @@ import { Bell, LogOut, User, ChevronDown } from "lucide-react"
 import { cn } from "@/src/lib/utils"
 
 interface HeaderProps {
-  orgName:        string
-  plan:           SubscriptionPlan
-  userName:       string
-  userEmail:      string
+  orgName:             string
+  plan:                SubscriptionPlan
+  userName:            string
+  userEmail:           string
   /** Nombre de notifications non lues — 0 si aucune */
-  unreadCount?:   number
+  unreadCount?:        number
+  /** Jours restants dans l'essai (null si pas d'essai actif) */
+  trialDaysRemaining?: number | null
+  /** Crédits IA restants (-1 = illimité) */
+  aiCreditsRemaining?: number
 }
 
 export function Header({
@@ -34,6 +38,8 @@ export function Header({
   userName,
   userEmail,
   unreadCount = 0,
+  trialDaysRemaining = null,
+  aiCreditsRemaining,
 }: HeaderProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -83,12 +89,51 @@ export function Header({
         </span>
       </div>
 
-      {/* Espace vide sur desktop (la sidebar occupe la gauche) */}
+      {/* Desktop : plan + bannière essai */}
       <div className="hidden lg:flex lg:items-center lg:gap-3">
-        <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-green-700">
-          Plan {plan}
-        </span>
+        {trialDaysRemaining !== null ? (
+          <span className={cn(
+            "rounded-full border px-3 py-1 text-xs font-semibold",
+            trialDaysRemaining <= 2
+              ? "border-orange-200 bg-orange-50 text-orange-700"
+              : "border-blue-200 bg-blue-50 text-blue-700",
+          )}>
+            Essai — {trialDaysRemaining} jour{trialDaysRemaining > 1 ? "s" : ""} restant{trialDaysRemaining > 1 ? "s" : ""}
+          </span>
+        ) : (
+          <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-green-700">
+            Plan {plan}
+          </span>
+        )}
+
+        {/* Crédits IA visibles si définis et limités */}
+        {aiCreditsRemaining !== undefined && aiCreditsRemaining !== -1 && (
+          <span className={cn(
+            "rounded-full border px-3 py-1 text-xs font-semibold",
+            aiCreditsRemaining === 0
+              ? "border-red-200 bg-red-50 text-red-600"
+              : "border-purple-200 bg-purple-50 text-purple-700",
+          )}>
+            {aiCreditsRemaining === 0
+              ? "IA épuisée"
+              : `${aiCreditsRemaining} analyse${aiCreditsRemaining > 1 ? "s" : ""} IA`}
+          </span>
+        )}
       </div>
+
+      {/* Mobile : bannière essai sous le nom org (si essai actif) */}
+      {trialDaysRemaining !== null && (
+        <div className="flex items-center lg:hidden">
+          <span className={cn(
+            "rounded-full border px-2 py-0.5 text-xs font-semibold",
+            trialDaysRemaining <= 2
+              ? "border-orange-200 bg-orange-50 text-orange-700"
+              : "border-blue-200 bg-blue-50 text-blue-700",
+          )}>
+            Essai {trialDaysRemaining}j
+          </span>
+        </div>
+      )}
 
       {/* Droite : notifications + avatar */}
       <div className="flex items-center gap-2">
