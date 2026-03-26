@@ -36,6 +36,7 @@ const PLAN_ICONS = {
 const FEATURE_LABELS = [
   { key: "REPORTS", label: "Rapports mensuels" },
   { key: "PROFITABILITY", label: "Rentabilite par lot" },
+  { key: "AI_BATCH_ANALYSIS", label: "Analyse AI des lots" },
   { key: "ALERTS", label: "Alertes intelligentes" },
   { key: "MULTI_FARM", label: "Plusieurs fermes" },
   { key: "TEAM_MANAGEMENT", label: "Gestion d'equipe" },
@@ -165,8 +166,14 @@ export default async function SettingsPage() {
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           <div className="rounded-2xl bg-white/12 px-4 py-4 backdrop-blur-sm">
             <p className="text-xs uppercase tracking-wide text-green-100">Plan actuel</p>
-            <p className="mt-1 text-xl font-semibold">{subscription.label}</p>
-            <p className="mt-1 text-sm text-green-50">{subscription.promise}</p>
+            <p className="mt-1 text-xl font-semibold">
+              {subscription.isTrialActive ? "Essai gratuit" : subscription.billingLabel}
+            </p>
+            <p className="mt-1 text-sm text-green-50">
+              {subscription.isTrialActive
+                ? `Acces ${subscription.label} temporaire pendant ${subscription.trialDaysRemaining ?? 0} jour(s).`
+                : `${formatMoneyFCFA(subscription.amountFcfa)} par mois`}
+            </p>
           </div>
           <div className="rounded-2xl bg-white/12 px-4 py-4 backdrop-blur-sm">
             <p className="text-xs uppercase tracking-wide text-green-100">Usage fermes</p>
@@ -402,13 +409,13 @@ export default async function SettingsPage() {
             <div className="rounded-2xl bg-green-50 p-4">
               <p className="font-semibold text-green-900">Pro</p>
               <p className="mt-1 text-green-800">
-                Pour savoir rapidement si un lot est rentable et mieux corriger les pertes.
+                Pour savoir si un lot est rentable, obtenir des analyses AI utiles et mieux corriger les pertes.
               </p>
             </div>
             <div className="rounded-2xl bg-amber-50 p-4">
               <p className="font-semibold text-amber-900">Business</p>
               <p className="mt-1 text-amber-800">
-                Pour coordonner plusieurs fermes, plus d&apos;equipe et plus d&apos;operations sans chaos.
+                Pour coordonner plusieurs fermes avec analyses AI plus poussées et plus de capacite.
               </p>
             </div>
             <div className="rounded-2xl border border-dashed border-gray-200 p-4 text-gray-600">

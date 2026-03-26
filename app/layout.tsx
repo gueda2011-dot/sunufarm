@@ -1,18 +1,7 @@
 import type { Metadata, Viewport } from "next"
-import { Inter } from "next/font/google"
 import { Toaster } from "sonner"
 import { QueryProvider } from "@/src/components/providers/QueryProvider"
 import "./globals.css"
-
-// ---------------------------------------------------------------------------
-// Police Inter — subset latin uniquement (performance mobile)
-// ---------------------------------------------------------------------------
-
-const inter = Inter({
-  subsets:  ["latin"],
-  variable: "--font-inter",
-  display:  "swap",
-})
 
 // ---------------------------------------------------------------------------
 // Métadonnées globales SunuFarm
@@ -48,7 +37,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="fr" className={`${inter.variable} h-full antialiased`}>
+    <html lang="fr" className="h-full antialiased">
       <body className="h-full bg-gray-50 text-gray-900">
         <QueryProvider>
           {children}

@@ -36,6 +36,7 @@ export interface OrganizationSubscriptionSummary {
   status:             SubscriptionStatus
   amountFcfa:         number
   label:              string
+  billingLabel:       string
   promise:            string
   maxActiveBatches:   number
   maxFarms:           number
@@ -114,6 +115,7 @@ export async function getOrganizationSubscription(
     : rawPlan
 
   const definition = getPlanDefinition(effectivePlan)
+  const rawDefinition = getPlanDefinition(rawPlan)
 
   // ── Calcul crédits IA ─────────────────────────────────────────────────
   const aiCreditsTotal = subscription?.aiCreditsTotal ?? TRIAL_AI_CREDITS
@@ -128,12 +130,23 @@ export async function getOrganizationSubscription(
     ? UNLIMITED_AI // sentinelle -1 = illimité
     : Math.max(0, aiCreditsTotal - aiCreditsUsed)
 
+  const amountFcfa = isTrialActive
+    ? 0
+    : subscription?.amountFcfa && subscription.amountFcfa > 0
+      ? subscription.amountFcfa
+      : rawDefinition.monthlyPriceFcfa
+
+  const billingLabel = isTrialActive
+    ? "Essai gratuit"
+    : rawDefinition.label
+
   return {
     plan:               effectivePlan,
     rawPlan,
     status,
-    amountFcfa:         subscription?.amountFcfa ?? definition.monthlyPriceFcfa,
+    amountFcfa,
     label:              definition.label,
+    billingLabel,
     promise:            definition.promise,
     maxActiveBatches:   definition.maxActiveBatches,
     maxFarms:           definition.maxFarms,

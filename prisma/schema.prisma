@@ -258,6 +258,7 @@ model User {
   notifications Notification[]
   requestedSubscriptionPayments SubscriptionPayment[] @relation("RequestedBySubscriptionPayment")
   confirmedSubscriptionPayments SubscriptionPayment[] @relation("ConfirmedBySubscriptionPayment")
+  aiBatchAnalyses AIBatchAnalysis[]
 }
 
 // =============================================================================
@@ -292,6 +293,7 @@ model Organization {
   expenseCategories ExpenseCategory[]
   subscription      Subscription?
   subscriptionPayments SubscriptionPayment[]
+  aiBatchAnalyses   AIBatchAnalysis[]
 
   @@index([slug])
 }
@@ -464,6 +466,7 @@ model Batch {
   vaccinationRecords VaccinationRecord[]
   expenses           Expense[]
   saleItems          SaleItem[]
+  aiBatchAnalyses    AIBatchAnalysis[]
 
   // Le numéro SF-YYYY-NNN est unique au sein d'une organisation
   @@unique([number, organizationId])
@@ -1082,4 +1085,25 @@ model AuditLog {
   @@index([userId])
   @@index([resourceType, resourceId])
   @@index([createdAt])
+}
+
+model AIBatchAnalysis {
+  id             String   @id @default(cuid())
+  organizationId String
+  batchId        String
+  createdById    String
+  inputHash      String
+  accessTier     String
+  model          String
+  responseJson   Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  batch        Batch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, batchId, createdAt])
+  @@index([createdById, createdAt])
+  @@index([organizationId, inputHash, accessTier])
 }

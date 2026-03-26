@@ -24,7 +24,9 @@ import { getBatchProfitability, type BatchProfitability } from "@/src/actions/pr
 import { PlanGuardCard }                  from "@/src/components/subscription/PlanGuardCard"
 import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { getAIPolicy } from "@/src/lib/ai"
 import { BatchHeader }                    from "./_components/BatchHeader"
+import { BatchAIAnalysisCard }            from "./_components/BatchAIAnalysisCard"
 import { BatchKpis }                      from "./_components/BatchKpis"
 import { ProfitabilityCard }              from "./_components/ProfitabilityCard"
 import { RecentDailyRecords }             from "./_components/RecentDailyRecords"
@@ -53,6 +55,8 @@ export default async function BatchDetailPage({
   const { organizationId, role } = membership
   const subscription = await getOrganizationSubscription(organizationId)
   const canSeeProfitability = hasPlanFeature(subscription.plan, "PROFITABILITY")
+  const aiPolicy = getAIPolicy(subscription)
+  const canUseBatchAI = aiPolicy.enabled
 
   // ── Fetch parallèle ──────────────────────────────────────────────────────
   // getBatch doit réussir pour afficher la page.
@@ -147,6 +151,33 @@ export default async function BatchDetailPage({
           currentPlan={subscription.plan}
         />
       )}
+
+      <BatchAIAnalysisCard
+        organizationId={organizationId}
+        batchId={batch.id}
+        planLabel={subscription.isTrialActive ? "Essai gratuit" : subscription.billingLabel}
+        aiAccessLabel={
+          subscription.isTrialActive
+            ? "Essai limite"
+            : aiPolicy.tier === "business"
+              ? "Business AI"
+              : aiPolicy.tier === "pro"
+                ? "Pro AI"
+                : "Upgrade"
+        }
+        dailyLimitLabel={
+          aiPolicy.tier === "trial"
+            ? "3 analyses maximum pendant l'essai"
+            : `${aiPolicy.dailyLimit} analyses maximum par jour`
+        }
+        monthlyLimitLabel={
+          aiPolicy.tier === "trial"
+            ? "3 analyses maximum au total"
+            : `${aiPolicy.monthlyLimit} analyses maximum par mois`
+        }
+        enabled={canUseBatchAI}
+        upsellMessage={getFeatureUpgradeMessage("AI_BATCH_ANALYSIS")}
+      />
 
       <RecentDailyRecords
         records={records.slice(0, 7)}

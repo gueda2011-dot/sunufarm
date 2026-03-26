@@ -296,7 +296,9 @@ export default async function AdminPage() {
                     </td>
                     <td className="px-6 py-4">
                       <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">
-                        {org.subscription?.plan ?? "BASIC"}
+                        {org.subscription?.status === "TRIAL"
+                          ? "ESSAI GRATUIT"
+                          : org.subscription?.plan ?? "BASIC"}
                       </span>
                       <div className="mt-1 text-xs text-gray-500">
                         {org.subscription?.status ?? "ACTIVE"}
@@ -311,7 +313,13 @@ export default async function AdminPage() {
                       />
                     </td>
                     <td className="px-6 py-4 text-gray-700">
-                      {formatMoneyFCFA(org.subscription?.amountFcfa ?? 5_000)}
+                      {org.subscription?.status === "TRIAL"
+                        ? "Essai gratuit"
+                        : formatMoneyFCFA(
+                            org.subscription?.amountFcfa && org.subscription.amountFcfa > 0
+                              ? org.subscription.amountFcfa
+                              : 5_000,
+                          )}
                     </td>
                     <td className="px-6 py-4 text-gray-700">{org._count.farms}</td>
                     <td className="px-6 py-4 text-gray-700">{org._count.users}</td>

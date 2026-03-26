@@ -288,7 +288,9 @@ export default async function AdminOrganizationDetailPage(
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <InfoCard
             title="Plan actif"
-            value={organization.subscription?.plan ?? "BASIC"}
+            value={organization.subscription?.status === "TRIAL"
+              ? "ESSAI GRATUIT"
+              : organization.subscription?.plan ?? "BASIC"}
             subtitle={organization.subscription?.status ?? "ACTIVE"}
             icon={CreditCard}
           />
@@ -341,7 +343,14 @@ export default async function AdminOrganizationDetailPage(
                 <div className="rounded-2xl bg-gray-50 px-4 py-3">
                   <p className="text-gray-500">Montant abonnement</p>
                   <p className="mt-1 font-medium text-gray-900">
-                    {formatMoneyFCFA(organization.subscription?.amountFcfa ?? 5_000)}
+                    {organization.subscription?.status === "TRIAL"
+                      ? "Essai gratuit"
+                      : formatMoneyFCFA(
+                          organization.subscription?.amountFcfa &&
+                            organization.subscription.amountFcfa > 0
+                            ? organization.subscription.amountFcfa
+                            : 5_000,
+                        )}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-gray-50 px-4 py-3">

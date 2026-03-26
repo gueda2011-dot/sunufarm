@@ -26,6 +26,7 @@ export type SubscriptionFeature =
   | "MULTI_FARM"
   | "TEAM_MANAGEMENT"
   | "ADVANCED_EXPORTS"
+  | "AI_BATCH_ANALYSIS"
 
 interface PlanDefinition {
   label: string
@@ -57,6 +58,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       MULTI_FARM: false,
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
+      AI_BATCH_ANALYSIS: false,
     },
   },
   PRO: {
@@ -78,6 +80,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       MULTI_FARM: false,
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
+      AI_BATCH_ANALYSIS: true,
     },
   },
   BUSINESS: {
@@ -98,6 +101,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       MULTI_FARM: true,
       TEAM_MANAGEMENT: true,
       ADVANCED_EXPORTS: true,
+      AI_BATCH_ANALYSIS: true,
     },
   },
 }
@@ -159,5 +163,7 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
       return "La gestion d'equipe est reservee au plan Business."
     case "ADVANCED_EXPORTS":
       return "Les exports avances sont disponibles dans le plan Business."
+    case "AI_BATCH_ANALYSIS":
+      return "L'analyse intelligente des lots est disponible a partir du plan Pro."
   }
 }

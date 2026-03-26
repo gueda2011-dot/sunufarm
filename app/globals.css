@@ -7,7 +7,7 @@
 
 @theme {
   /* Police */
-  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 
   /* Couleur principale : vert SunuFarm (#16a34a = green-600) */
   --color-primary:       #16a34a;
