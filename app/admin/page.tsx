@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 import { redirect } from "next/navigation"
-import { Building2, CreditCard, Shield, Users } from "lucide-react"
+import { ArrowRight, Building2, CreditCard, Shield, Users } from "lucide-react"
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
 import { formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
@@ -147,6 +148,7 @@ export default async function AdminPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left font-medium text-gray-500">Organisation</th>
+                  <th className="px-6 py-3 text-left font-medium text-gray-500">Details</th>
                   <th className="px-6 py-3 text-left font-medium text-gray-500">Plan</th>
                   <th className="px-6 py-3 text-left font-medium text-gray-500">Changer plan</th>
                   <th className="px-6 py-3 text-left font-medium text-gray-500">Montant</th>
@@ -162,6 +164,15 @@ export default async function AdminPage() {
                     <td className="px-6 py-4">
                       <div className="font-medium text-gray-900">{org.name}</div>
                       <div className="text-xs text-gray-500">{org.slug}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Link
+                        href={`/admin/organizations/${org.id}`}
+                        className="inline-flex items-center rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                      >
+                        Ouvrir
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </Link>
                     </td>
                     <td className="px-6 py-4">
                       <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">

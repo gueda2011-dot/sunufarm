@@ -28,6 +28,8 @@ import { getExpenses }         from "@/src/actions/expenses"
 import { AlertBanner }         from "../_components/AlertBanner"
 import { DashboardKpis }       from "../_components/DashboardKpis"
 import { ActiveBatchList }     from "../_components/ActiveBatchList"
+import { MortalityChart }      from "../_components/MortalityChart"
+import type { MortalityChartPoint } from "../_components/MortalityChart"
 
 export const metadata: Metadata = { title: "Tableau de bord" }
 
@@ -55,6 +57,7 @@ export default async function DashboardPage() {
     expensesResult,
     mortalityAgg,
     recentRecordBatchIds,
+    mortalityChart,
   ] = await Promise.all([
     getBatches({ organizationId, status: "ACTIVE", limit: 100 }),
     getExpenses({ organizationId, limit: 100 }),
@@ -76,6 +79,17 @@ export default async function DashboardPage() {
       },
       select:   { batchId: true },
       distinct: ["batchId"],
+    }),
+
+    // Mortalité agrégée par jour sur 30 jours — pour le graphique dashboard
+    prisma.dailyRecord.groupBy({
+      by:    ["date"],
+      where: {
+        batch: { organizationId, status: "ACTIVE", deletedAt: null },
+        date:  { gte: new Date(Date.now() - 30 * 86_400_000) },
+      },
+      _sum:    { mortality: true },
+      orderBy: { date: "asc" },
     }),
   ])
 
@@ -104,6 +118,23 @@ export default async function DashboardPage() {
     )
     return daysSinceEntry > 1 && !recentIds.has(b.id)
   })
+
+  // ── Chart mortalité 30 jours : remplissage des jours sans saisie avec 0 ──
+  const mortMap = new Map(
+    mortalityChart.map((r) => [
+      new Date(r.date).toISOString().substring(0, 10),
+      r._sum.mortality ?? 0,
+    ]),
+  )
+  const chartData: MortalityChartPoint[] = []
+  for (let i = 29; i >= 0; i--) {
+    const d   = new Date(Date.now() - i * 86_400_000)
+    const key = d.toISOString().substring(0, 10)
+    chartData.push({
+      date: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
+      mort: mortMap.get(key) ?? 0,
+    })
+  }
 
   // ── Tri des lots : âge décroissant (plus vieux = plus critique en premier) ─
   const sortedBatches = [...activeBatches].sort((a, b) => {
@@ -135,6 +166,9 @@ export default async function DashboardPage() {
         mortalityRate={mortalityRate}
         alertCount={batchesNeedingSaisie.length}
       />
+
+      {/* ── Graphique mortalité 30j ─────────────────────────────────────────── */}
+      <MortalityChart data={chartData} />
 
       {/* ── Lots actifs ──────────────────────────────────────────────────── */}
       <ActiveBatchList

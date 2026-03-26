@@ -6,13 +6,14 @@
  * Rapport mensuel : navigation entre mois, synthèse production + financière.
  */
 
-import { useRouter }   from "next/navigation"
-import Link            from "next/link"
+import { useRouter }        from "next/navigation"
+import Link                from "next/link"
 import {
   formatMoneyFCFA,
   formatMoneyFCFACompact,
   formatNumber,
-}                      from "@/src/lib/formatters"
+}                          from "@/src/lib/formatters"
+import { FinancialChart }  from "../../_components/FinancialChart"
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -148,6 +149,13 @@ export function ReportsPageClient({
           </button>
         </div>
       </div>
+
+      {/* ── Graphique financier ────────────────────────────────────────────── */}
+      <FinancialChart
+        totalSales={totalSales}
+        totalExpenses={totalExpenses}
+        totalPurchases={totalPurchases}
+      />
 
       {/* ── KPI financiers ─────────────────────────────────────────────────── */}
       <section className="space-y-3">

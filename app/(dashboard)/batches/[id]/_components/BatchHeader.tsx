@@ -161,22 +161,33 @@ export function BatchHeader({
         )}
 
         {/* Actions */}
-        {isActive && (
-          <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-3 flex-wrap">
-            <Link
-              href={`/daily?batchId=${batch.id}`}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-green-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-green-700 transition-colors"
-            >
-              Saisir aujourd&apos;hui
-            </Link>
-            {canManage && (
-              <CloseBatchForm
-                organizationId={batch.organizationId}
-                batchId={batch.id}
-              />
+        <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isActive && (
+              <Link
+                href={`/daily?batchId=${batch.id}`}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-green-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-green-700 transition-colors"
+              >
+                Saisir aujourd&apos;hui
+              </Link>
             )}
+            {/* Export PDF — lien direct vers l'API route */}
+            <a
+              href={`/api/reports/batch/${batch.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm font-medium px-4 py-2.5 hover:bg-gray-50 transition-colors"
+            >
+              Télécharger PDF
+            </a>
           </div>
-        )}
+          {isActive && canManage && (
+            <CloseBatchForm
+              organizationId={batch.organizationId}
+              batchId={batch.id}
+            />
+          )}
+        </div>
       </div>
     </div>
   )
