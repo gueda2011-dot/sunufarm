@@ -20,6 +20,8 @@ import {
   MedicineMovementType,
   SaleProductType,
   UserRole,
+  SubscriptionPlan,
+  SubscriptionStatus,
 } from "../src/generated/prisma"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
@@ -78,6 +80,8 @@ async function clearAll() {
   await prisma.customer.deleteMany()
   await prisma.supplier.deleteMany()
   await prisma.userOrganization.deleteMany()
+  await prisma.subscriptionPayment.deleteMany()
+  await prisma.subscription.deleteMany()
   await prisma.organization.deleteMany()
   await prisma.verificationToken.deleteMany()
   await prisma.session.deleteMany()
@@ -188,6 +192,17 @@ async function main() {
     prisma.userOrganization.create({ data: { userId: saisie1.id,   organizationId: org1.id, role: UserRole.DATA_ENTRY } }),
     prisma.userOrganization.create({ data: { userId: comptable1.id, organizationId: org1.id, role: UserRole.ACCOUNTANT } }),
   ])
+
+  await prisma.subscription.create({
+    data: {
+      organizationId: org1.id,
+      plan: SubscriptionPlan.PRO,
+      status: SubscriptionStatus.ACTIVE,
+      amountFcfa: 10_000,
+      currentPeriodStart: today,
+      currentPeriodEnd: dt(addDays(today, 30)),
+    },
+  })
 
   // Fournisseurs org 1
   const [supplierPoussins, supplierAliment1] = await Promise.all([
@@ -706,6 +721,17 @@ async function main() {
 
   await prisma.userOrganization.create({
     data: { userId: owner2.id, organizationId: org2.id, role: UserRole.OWNER },
+  })
+
+  await prisma.subscription.create({
+    data: {
+      organizationId: org2.id,
+      plan: SubscriptionPlan.BUSINESS,
+      status: SubscriptionStatus.ACTIVE,
+      amountFcfa: 20_000,
+      currentPeriodStart: today,
+      currentPeriodEnd: dt(addDays(today, 30)),
+    },
   })
 
   const farm2 = await prisma.farm.create({

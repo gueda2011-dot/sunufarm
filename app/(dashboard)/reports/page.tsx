@@ -12,6 +12,12 @@ import { redirect }      from "next/navigation"
 import type { Metadata } from "next"
 import { auth }          from "@/src/auth"
 import prisma            from "@/src/lib/prisma"
+import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
+import {
+  getFeatureUpgradeMessage,
+  getOrganizationSubscription,
+  hasPlanFeature,
+} from "@/src/lib/subscriptions"
 import { ReportsPageClient } from "./_components/ReportsPageClient"
 
 export const metadata: Metadata = { title: "Rapports" }
@@ -32,6 +38,28 @@ export default async function ReportsPage({
   if (!membership) redirect("/login?error=no-org")
 
   const { organizationId } = membership
+  const subscription = await getOrganizationSubscription(organizationId)
+
+  if (!hasPlanFeature(subscription.plan, "REPORTS")) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-5">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Rapports</h1>
+          <p className="mt-0.5 text-sm text-gray-500">
+            La vue mensuelle est reservee aux organisations qui veulent piloter leur rentabilite.
+          </p>
+        </div>
+
+        <PlanGuardCard
+          title="Debloquez les rapports mensuels"
+          message={getFeatureUpgradeMessage("REPORTS")}
+          requiredPlan="Pro"
+          currentPlan={subscription.plan}
+        />
+      </div>
+    )
+  }
+
   const sp = await searchParams
 
   const now   = new Date()
@@ -65,7 +93,7 @@ export default async function ReportsPage({
       },
       select: {
         id:           true,
-        batchNumber:  true,
+        number:       true,
         status:       true,
         entryCount:   true,
         totalCostFcfa: true,

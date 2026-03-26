@@ -116,6 +116,26 @@ enum AuditAction {
   EXPORT
 }
 
+enum SubscriptionPlan {
+  BASIC
+  PRO
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum SubscriptionPaymentStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELED
+}
+
 // =============================================================================
 // RÉFÉRENTIELS GLOBAUX (partagés entre toutes les organisations)
 // =============================================================================
@@ -236,6 +256,8 @@ model User {
   organizations UserOrganization[]
   auditLogs     AuditLog[]
   notifications Notification[]
+  requestedSubscriptionPayments SubscriptionPayment[] @relation("RequestedBySubscriptionPayment")
+  confirmedSubscriptionPayments SubscriptionPayment[] @relation("ConfirmedBySubscriptionPayment")
 }
 
 // =============================================================================
@@ -268,8 +290,56 @@ model Organization {
   auditLogs         AuditLog[]
   mortalityReasons  MortalityReason[]
   expenseCategories ExpenseCategory[]
+  subscription      Subscription?
+  subscriptionPayments SubscriptionPayment[]
 
   @@index([slug])
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String             @unique
+  plan               SubscriptionPlan   @default(BASIC)
+  status             SubscriptionStatus @default(ACTIVE)
+  amountFcfa         Int                @default(5000)
+  startedAt          DateTime           @default(now())
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  canceledAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([plan])
+  @@index([status])
+}
+
+model SubscriptionPayment {
+  id               String                    @id @default(cuid())
+  organizationId   String
+  requestedPlan    SubscriptionPlan
+  status           SubscriptionPaymentStatus @default(PENDING)
+  amountFcfa       Int
+  paymentMethod    PaymentMethod
+  paymentReference String?
+  notes            String?
+  requestedById    String
+  confirmedById    String?
+  requestedAt      DateTime                  @default(now())
+  paidAt           DateTime?
+  confirmedAt      DateTime?
+  rejectedAt       DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedBy  User         @relation("RequestedBySubscriptionPayment", fields: [requestedById], references: [id], onDelete: Cascade)
+  confirmedBy  User?        @relation("ConfirmedBySubscriptionPayment", fields: [confirmedById], references: [id])
+
+  @@index([organizationId, status])
+  @@index([requestedById])
+  @@index([confirmedById])
 }
 
 // Lien User <-> Organization avec rôle et permissions fines par ferme

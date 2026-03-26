@@ -29,7 +29,7 @@ const MONTHS = [
 
 interface BatchInfo {
   id:            string
-  batchNumber:   string
+  number:        string
   status:        string
   entryCount:    number
   totalCostFcfa: number
@@ -248,7 +248,7 @@ export function ReportsPageClient({
                 className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
               >
                 <div>
-                  <span className="text-sm font-medium text-gray-900">{b.batchNumber}</span>
+                  <span className="text-sm font-medium text-gray-900">{b.number}</span>
                   <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${
                     b.status === "ACTIVE"
                       ? "bg-green-100 text-green-700"

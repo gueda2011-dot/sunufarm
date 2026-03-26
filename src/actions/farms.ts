@@ -36,10 +36,14 @@ import { createAuditLog, AuditAction } from "@/src/lib/audit"
 import {
   canPerformAction,
   canAccessFarm,
-  parseFarmPermissions,
 } from "@/src/lib/permissions"
 import { requiredIdSchema, positiveIntSchema } from "@/src/lib/validators"
 import { BatchStatus } from "@/src/generated/prisma/client"
+import {
+  getFeatureUpgradeMessage,
+  getOrganizationSubscription,
+  hasPlanFeature,
+} from "@/src/lib/subscriptions"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -289,6 +293,21 @@ export async function createFarm(
 
     if (!canPerformAction(membershipResult.data.role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
+    }
+
+    const subscription = await getOrganizationSubscription(organizationId)
+    const activeFarmCount = await prisma.farm.count({
+      where: { organizationId, deletedAt: null },
+    })
+
+    if (
+      !hasPlanFeature(subscription.plan, "MULTI_FARM")
+      && activeFarmCount >= subscription.maxFarms
+    ) {
+      return {
+        success: false,
+        error: `${getFeatureUpgradeMessage("MULTI_FARM")} Votre plan actuel est limite a ${subscription.maxFarms} ferme.`,
+      }
     }
 
     const farm = await prisma.farm.create({

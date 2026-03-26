@@ -15,11 +15,13 @@
 
 import { useState, useRef, useEffect } from "react"
 import { signOut } from "next-auth/react"
+import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Bell, LogOut, User, ChevronDown } from "lucide-react"
 import { cn } from "@/src/lib/utils"
 
 interface HeaderProps {
   orgName:        string
+  plan:           SubscriptionPlan
   userName:       string
   userEmail:      string
   /** Nombre de notifications non lues — 0 si aucune */
@@ -28,6 +30,7 @@ interface HeaderProps {
 
 export function Header({
   orgName,
+  plan,
   userName,
   userEmail,
   unreadCount = 0,
@@ -81,7 +84,11 @@ export function Header({
       </div>
 
       {/* Espace vide sur desktop (la sidebar occupe la gauche) */}
-      <div className="hidden lg:block" />
+      <div className="hidden lg:flex lg:items-center lg:gap-3">
+        <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-green-700">
+          Plan {plan}
+        </span>
+      </div>
 
       {/* Droite : notifications + avatar */}
       <div className="flex items-center gap-2">

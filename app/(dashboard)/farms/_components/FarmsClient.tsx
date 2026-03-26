@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 import { Plus, ChevronDown, ChevronUp, Pencil, Trash2, Warehouse, Building2 } from "lucide-react"
+import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
 import { Label } from "@/src/components/ui/label"
@@ -64,6 +65,9 @@ const BUILDING_TYPE_LABELS: Record<string, string> = {
 interface Props {
   organizationId: string
   userRole: string
+  subscriptionPlan: SubscriptionPlan
+  maxFarms: number
+  canCreateFarm: boolean
   initialFarms: FarmSummary[]
 }
 
@@ -71,7 +75,14 @@ interface Props {
 // Composant
 // ---------------------------------------------------------------------------
 
-export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
+export function FarmsClient({
+  organizationId,
+  userRole,
+  subscriptionPlan,
+  maxFarms,
+  canCreateFarm,
+  initialFarms,
+}: Props) {
   const [farms, setFarms] = useState<FarmSummary[]>(initialFarms)
   const [expandedFarm, setExpanded] = useState<string | null>(null)
   const [buildings, setBuildings] = useState<Record<string, BuildingSummary[]>>({})
@@ -263,7 +274,7 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
             {farms.length} ferme{farms.length !== 1 ? "s" : ""}
           </p>
         </div>
-        {canEdit && (
+        {canEdit && canCreateFarm && (
           <Button
             variant="primary"
             size="sm"
@@ -277,6 +288,19 @@ export function FarmsClient({ organizationId, userRole, initialFarms }: Props) {
           </Button>
         )}
       </div>
+
+      {canEdit && !canCreateFarm && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="py-4">
+            <p className="text-sm font-medium text-amber-800">
+              Plan actuel : {subscriptionPlan}. Cette organisation a atteint sa limite de {maxFarms} ferme.
+            </p>
+            <p className="mt-1 text-sm text-amber-700">
+              Passez au plan Business pour gerer plusieurs fermes.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {showFarmForm && canEdit && (
         <Card>

@@ -34,6 +34,11 @@ import {
 import { canAccessFarm }              from "@/src/lib/permissions"
 import { requiredIdSchema }           from "@/src/lib/validators"
 import { netMargin, mortalityRate, livingCount } from "@/src/lib/kpi"
+import {
+  getFeatureUpgradeMessage,
+  getOrganizationSubscription,
+  hasPlanFeature,
+} from "@/src/lib/subscriptions"
 
 // ---------------------------------------------------------------------------
 // Schéma
@@ -103,6 +108,14 @@ export async function getBatchProfitability(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!hasPlanFeature(subscription.plan, "PROFITABILITY")) {
+      return {
+        success: false,
+        error: getFeatureUpgradeMessage("PROFITABILITY"),
+      }
+    }
 
     // ── Fetch parallèle ────────────────────────────────────────────────────
     const [batch, saleItemsAgg, expensesAgg, mortalityAgg] = await Promise.all([

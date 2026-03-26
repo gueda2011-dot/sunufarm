@@ -50,6 +50,7 @@ import {
   optionalDateSchema,
 } from "@/src/lib/validators"
 import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -97,13 +98,6 @@ const updateBatchSchema = z.object({
   totalCostFcfa:  amountFcfaSchema.optional(),
   notes:          z.string().max(1000).optional(),
 })
-
-// Statuts autorisés à la clôture — ACTIVE n'est pas une destination
-const CLOSE_STATUSES = [
-  BatchStatus.CLOSED,
-  BatchStatus.SOLD,
-  BatchStatus.SLAUGHTERED,
-] as const
 
 const closeBatchSchema = z.object({
   organizationId: requiredIdSchema,
@@ -456,6 +450,22 @@ export async function createBatch(
 
     if (!canPerformAction(role, "CREATE_BATCH")) {
       return { success: false, error: "Permission refusée" }
+    }
+
+    const subscription = await getOrganizationSubscription(organizationId)
+    const activeBatchCount = await prisma.batch.count({
+      where: {
+        organizationId,
+        deletedAt: null,
+        status: BatchStatus.ACTIVE,
+      },
+    })
+
+    if (activeBatchCount >= subscription.maxActiveBatches) {
+      return {
+        success: false,
+        error: `Le plan ${subscription.label} est limite a ${subscription.maxActiveBatches} lot(s) actif(s). Passez au niveau superieur pour continuer.`,
+      }
     }
 
     // Valider que le bâtiment appartient à l'organisation et n'est pas soft-deleted

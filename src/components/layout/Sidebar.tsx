@@ -12,6 +12,9 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  type SubscriptionPlan,
+} from "@/src/generated/prisma/client"
+import {
   LayoutDashboard,
   ClipboardList,
   Bird,
@@ -27,6 +30,7 @@ import {
   Settings,
 } from "lucide-react"
 import { cn } from "@/src/lib/utils"
+import { hasPlanFeature } from "@/src/lib/subscriptions"
 
 // ---------------------------------------------------------------------------
 // Définition des liens de navigation
@@ -49,7 +53,7 @@ const navItems = [
 
 const bottomNavItems = [
   { href: "/team",     label: "Équipe",      icon: Users },
-  { href: "/settings", label: "Paramètres",  icon: Settings },
+  { href: "/settings", label: "Abonnement",  icon: Settings },
 ] as const
 
 // ---------------------------------------------------------------------------
@@ -58,10 +62,17 @@ const bottomNavItems = [
 
 interface SidebarProps {
   orgName: string
+  plan: SubscriptionPlan
 }
 
-export function Sidebar({ orgName }: SidebarProps) {
+export function Sidebar({ orgName, plan }: SidebarProps) {
   const pathname = usePathname()
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.href === "/reports") {
+      return hasPlanFeature(plan, "REPORTS")
+    }
+    return true
+  })
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard"
@@ -91,7 +102,7 @@ export function Sidebar({ orgName }: SidebarProps) {
       {/* Navigation principale */}
       <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-4">
         <ul className="flex flex-col gap-0.5">
-          {navItems.map(({ href, label, icon: Icon, ...rest }) => {
+          {visibleNavItems.map(({ href, label, icon: Icon, ...rest }) => {
             const active = isActive(href)
             const highlighted = "highlight" in rest && rest.highlight
 

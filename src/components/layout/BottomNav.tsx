@@ -14,6 +14,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import {
   LayoutDashboard,
   ClipboardList,
@@ -22,17 +23,28 @@ import {
   Menu,
 } from "lucide-react"
 import { cn } from "@/src/lib/utils"
+import { hasPlanFeature } from "@/src/lib/subscriptions"
 
 const tabs = [
   { href: "/dashboard", label: "Accueil",  icon: LayoutDashboard },
   { href: "/daily",    label: "Saisie",   icon: ClipboardList,   primary: true },
   { href: "/batches",  label: "Lots",     icon: Bird },
   { href: "/reports",  label: "Stats",    icon: BarChart3 },
-  { href: "/settings", label: "Menu",     icon: Menu },
+  { href: "/settings", label: "Forfait",  icon: Menu },
 ] as const
 
-export function BottomNav() {
+interface BottomNavProps {
+  plan: SubscriptionPlan
+}
+
+export function BottomNav({ plan }: BottomNavProps) {
   const pathname = usePathname()
+  const visibleTabs = tabs.filter((tab) => {
+    if (tab.href === "/reports") {
+      return hasPlanFeature(plan, "REPORTS")
+    }
+    return true
+  })
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard"
@@ -44,7 +56,7 @@ export function BottomNav() {
       className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-stretch border-t border-gray-200 bg-white lg:hidden"
       aria-label="Navigation mobile"
     >
-      {tabs.map(({ href, label, icon: Icon, ...rest }) => {
+      {visibleTabs.map(({ href, label, icon: Icon, ...rest }) => {
         const active    = isActive(href)
         const primary   = "primary" in rest && rest.primary
 

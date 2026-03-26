@@ -20,6 +20,12 @@ import { getDailyRecords }                from "@/src/actions/daily-records"
 import { getExpenses }                    from "@/src/actions/expenses"
 import { getVaccinations, getTreatments } from "@/src/actions/health"
 import { getBatchProfitability }          from "@/src/actions/profitability"
+import { PlanGuardCard }                  from "@/src/components/subscription/PlanGuardCard"
+import {
+  getFeatureUpgradeMessage,
+  getOrganizationSubscription,
+  hasPlanFeature,
+} from "@/src/lib/subscriptions"
 import { BatchHeader }                    from "./_components/BatchHeader"
 import { BatchKpis }                      from "./_components/BatchKpis"
 import { ProfitabilityCard }              from "./_components/ProfitabilityCard"
@@ -47,6 +53,8 @@ export default async function BatchDetailPage({
   if (!membership) redirect("/login?error=no-org")
 
   const { organizationId, role } = membership
+  const subscription = await getOrganizationSubscription(organizationId)
+  const canSeeProfitability = hasPlanFeature(subscription.plan, "PROFITABILITY")
 
   // ── Fetch parallèle ──────────────────────────────────────────────────────
   // getBatch doit réussir pour afficher la page.
@@ -64,7 +72,9 @@ export default async function BatchDetailPage({
     getExpenses({ organizationId, batchId: id, limit: 100 }),
     getVaccinations({ organizationId, batchId: id, limit: 10 }),
     getTreatments({ organizationId, batchId: id, limit: 10 }),
-    getBatchProfitability({ organizationId, batchId: id }),
+    canSeeProfitability
+      ? getBatchProfitability({ organizationId, batchId: id })
+      : Promise.resolve({ success: false, error: getFeatureUpgradeMessage("PROFITABILITY") }),
   ])
 
   if (!batchResult.success) notFound()
@@ -86,20 +96,22 @@ export default async function BatchDetailPage({
   // records est trié date desc par l'action getDailyRecords
   const lastRecordDate = records[0]?.date ?? null
 
+  const nowMs = new Date().getTime()
+
   // Alerte "saisie manquante" : ACTIVE + lot > 1 jour + aucune saisie récente
   const daysSinceEntry = Math.floor(
-    (Date.now() - new Date(batch.entryDate).getTime()) / 86_400_000,
+    (nowMs - new Date(batch.entryDate).getTime()) / 86_400_000,
   )
   const daysSinceLast = lastRecordDate
-    ? Math.floor((Date.now() - new Date(lastRecordDate).getTime()) / 86_400_000)
+    ? Math.floor((nowMs - new Date(lastRecordDate).getTime()) / 86_400_000)
     : Infinity
   const missingSaisie =
     batch.status === "ACTIVE" && daysSinceEntry > 1 && daysSinceLast > 1
 
   // Âge du lot : pour ACTIVE → aujourd'hui, pour terminé → à la date de clôture
   const endMs  = batch.status === "ACTIVE"
-    ? Date.now()
-    : new Date(batch.closedAt ?? new Date()).getTime()
+    ? nowMs
+    : new Date(batch.closedAt ?? nowMs).getTime()
   const ageDay = batch.entryAgeDay + Math.max(
     0,
     Math.floor((endMs - new Date(batch.entryDate).getTime()) / 86_400_000),
@@ -124,6 +136,15 @@ export default async function BatchDetailPage({
 
       {profitability && (
         <ProfitabilityCard profitability={profitability} />
+      )}
+
+      {!profitability && (
+        <PlanGuardCard
+          title="Debloquez la rentabilite par lot"
+          message={getFeatureUpgradeMessage("PROFITABILITY")}
+          requiredPlan="Pro"
+          currentPlan={subscription.plan}
+        />
       )}
 
       <RecentDailyRecords

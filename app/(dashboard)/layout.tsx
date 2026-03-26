@@ -21,6 +21,7 @@ import prisma          from "@/src/lib/prisma"
 import { Sidebar }     from "@/src/components/layout/Sidebar"
 import { Header }      from "@/src/components/layout/Header"
 import { BottomNav }   from "@/src/components/layout/BottomNav"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions"
 
 export default async function DashboardLayout({
   children,
@@ -63,6 +64,9 @@ export default async function DashboardLayout({
 
   const activeMembership = memberships[0]
   const orgName          = activeMembership.organization.name
+  const subscription     = await getOrganizationSubscription(
+    activeMembership.organizationId,
+  )
 
   // -------------------------------------------------------------------------
   // 4. Données utilisateur pour le Header
@@ -78,13 +82,14 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-full min-h-screen bg-gray-50">
       {/* Sidebar — uniquement visible en desktop (lg+) */}
-      <Sidebar orgName={orgName} />
+      <Sidebar orgName={orgName} plan={subscription.plan} />
 
       {/* Zone principale */}
       <div className="flex flex-1 flex-col lg:pl-64">
         {/* Header */}
         <Header
           orgName={orgName}
+          plan={subscription.plan}
           userName={userName}
           userEmail={userEmail}
         />
@@ -100,7 +105,7 @@ export default async function DashboardLayout({
       </div>
 
       {/* BottomNav — uniquement visible sur mobile (< lg) */}
-      <BottomNav />
+      <BottomNav plan={subscription.plan} />
     </div>
   )
 }
