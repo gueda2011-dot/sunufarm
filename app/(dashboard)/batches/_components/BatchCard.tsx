@@ -113,6 +113,11 @@ export function BatchCard({ batch }: BatchCardProps) {
             <div className="text-sm text-gray-500 mt-0.5 truncate">
               {typeLabel}
             </div>
+            {batch.breed && (
+              <div className="text-xs text-gray-400 mt-1 truncate">
+                Souche : {batch.breed.name}
+              </div>
+            )}
           </div>
 
           {/* Badge statut */}

@@ -1,28 +1,34 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
-import { useForm, type SubmitHandler } from "react-hook-form"
+import { useEffect, useMemo, useState, useTransition } from "react"
+import { useForm, useWatch, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
-import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import { ArrowLeft } from "lucide-react"
+import { toast } from "sonner"
+import { createBatch } from "@/src/actions/batches"
+import { getBuildings, type BuildingSummary } from "@/src/actions/buildings"
+import type { FarmSummary } from "@/src/actions/farms"
 import { Button } from "@/src/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
 import { Input } from "@/src/components/ui/input"
 import { Label } from "@/src/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
-import { getBuildings, type BuildingSummary } from "@/src/actions/buildings"
-import { createBatch } from "@/src/actions/batches"
-import type { FarmSummary } from "@/src/actions/farms"
+import {
+  getDefaultSpeciesCodeForBatchType,
+  isBreedSuggestedForBatchType,
+  SENEGAL_BREED_HINTS,
+} from "@/src/lib/breeds"
 import { formatMoneyFCFA } from "@/src/lib/formatters"
 
 const schema = z.object({
   farmId: z.string().min(1, "Ferme requise"),
-  buildingId: z.string().min(1, "Bâtiment requis"),
+  buildingId: z.string().min(1, "Batiment requis"),
   type: z.enum(["CHAIR", "PONDEUSE", "REPRODUCTEUR"]),
-  speciesId: z.string().min(1, "Espèce requise"),
-  entryDate: z.string().min(1, "Date d'entrée requise"),
+  speciesId: z.string().min(1, "Espece requise"),
+  breedId: z.string().optional(),
+  entryDate: z.string().min(1, "Date d'entree requise"),
   entryCount: z.coerce.number().int().positive("Effectif requis"),
   entryAgeDay: z.coerce.number().int().nonnegative(),
   entryWeightG: z.union([z.literal(""), z.coerce.number().int().positive()]).optional(),
@@ -45,6 +51,16 @@ interface Props {
   organizationId: string
   initialFarms: FarmSummary[]
   species: { id: string; name: string; code: string }[]
+  breeds: Array<{
+    id: string
+    name: string
+    code: string
+    speciesId: string
+    species: {
+      code: string
+      name: string
+    }
+  }>
   suppliers: { id: string; name: string }[]
 }
 
@@ -52,6 +68,7 @@ export function CreateBatchForm({
   organizationId,
   initialFarms,
   species,
+  breeds,
   suppliers,
 }: Props) {
   const router = useRouter()
@@ -60,18 +77,19 @@ export function CreateBatchForm({
   const [loadingBldgs, setLoadingBldgs] = useState(false)
 
   const {
+    control,
     register,
     handleSubmit,
-    watch,
     setValue,
     formState: { errors },
-  } = useForm<FormValues, any, SubmitValues>({
+  } = useForm<FormValues, unknown, SubmitValues>({
     resolver: zodResolver(schema),
     defaultValues: {
       farmId: "",
       buildingId: "",
       type: "CHAIR",
       speciesId: "",
+      breedId: "",
       entryDate: new Date().toISOString().split("T")[0],
       entryCount: "" as unknown as number,
       entryAgeDay: 0,
@@ -83,36 +101,72 @@ export function CreateBatchForm({
     },
   })
 
-  const farmId = watch("farmId")
-  const entryCount = watch("entryCount")
-  const unitCost = watch("unitCostFcfa")
+  const farmId = useWatch({ control, name: "farmId" })
+  const batchType = useWatch({ control, name: "type" })
+  const speciesId = useWatch({ control, name: "speciesId" })
+  const breedId = useWatch({ control, name: "breedId" })
+  const entryCount = useWatch({ control, name: "entryCount" })
+  const unitCost = useWatch({ control, name: "unitCostFcfa" })
+
+  const suggestedSpecies = useMemo(() => {
+    const defaultCode = getDefaultSpeciesCodeForBatchType(batchType)
+    return species.find((item) => item.code === defaultCode) ?? null
+  }, [batchType, species])
+
+  const filteredBreeds = useMemo(() => {
+    return breeds.filter((breed) => {
+      if (speciesId && breed.speciesId !== speciesId) return false
+      return isBreedSuggestedForBatchType(breed.code, batchType)
+    })
+  }, [breeds, speciesId, batchType])
+
+  const farmField = register("farmId")
 
   useEffect(() => {
     const count = Number(entryCount || 0)
     const cost = Number(unitCost || 0)
 
     if (count > 0 && cost >= 0) {
-      setValue("totalCostFcfa", count * cost as FormValues["totalCostFcfa"])
+      setValue("totalCostFcfa", (count * cost) as FormValues["totalCostFcfa"])
     }
   }, [entryCount, unitCost, setValue])
 
   useEffect(() => {
-    if (!farmId) {
+    if (!suggestedSpecies) return
+    if (speciesId === suggestedSpecies.id) return
+
+    setValue("speciesId", suggestedSpecies.id as FormValues["speciesId"], {
+      shouldDirty: true,
+    })
+  }, [setValue, speciesId, suggestedSpecies])
+
+  useEffect(() => {
+    if (!breedId) return
+    if (filteredBreeds.some((breed) => breed.id === breedId)) return
+    setValue("breedId", "")
+  }, [breedId, filteredBreeds, setValue])
+
+  async function handleFarmChange(nextFarmId: string) {
+    setValue("buildingId", "")
+
+    if (!nextFarmId) {
       setBuildings([])
-      setValue("buildingId", "")
+      setLoadingBldgs(false)
       return
     }
 
     setLoadingBldgs(true)
-    getBuildings({ organizationId, farmId }).then((res) => {
-      if (res.success) {
-        setBuildings(res.data)
-        if (res.data.length === 1) setValue("buildingId", res.data[0].id)
-        else setValue("buildingId", "")
+    const res = await getBuildings({ organizationId, farmId: nextFarmId })
+    if (res.success) {
+      setBuildings(res.data)
+      if (res.data.length === 1) {
+        setValue("buildingId", res.data[0].id)
       }
-      setLoadingBldgs(false)
-    })
-  }, [farmId, organizationId, setValue])
+    } else {
+      setBuildings([])
+    }
+    setLoadingBldgs(false)
+  }
 
   const onSubmit: SubmitHandler<SubmitValues> = async (data) => {
     startTransition(async () => {
@@ -121,6 +175,7 @@ export function CreateBatchForm({
         buildingId: data.buildingId,
         type: data.type,
         speciesId: data.speciesId,
+        breedId: data.breedId || undefined,
         entryDate: new Date(data.entryDate),
         entryCount: data.entryCount,
         entryAgeDay: data.entryAgeDay,
@@ -135,7 +190,7 @@ export function CreateBatchForm({
       })
 
       if (res.success) {
-        toast.success(`Lot ${res.data.number} créé`)
+        toast.success(`Lot ${res.data.number} cree`)
         router.push(`/batches/${res.data.id}`)
       } else {
         toast.error(res.error)
@@ -155,7 +210,7 @@ export function CreateBatchForm({
         <div>
           <h1 className="text-xl font-bold text-gray-900">Nouveau lot</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            Enregistrer l&apos;entrée d&apos;un nouveau lot d&apos;élevage.
+            Enregistrer l&apos;entree d&apos;un nouveau lot d&apos;elevage.
           </p>
         </div>
       </div>
@@ -173,12 +228,16 @@ export function CreateBatchForm({
               <select
                 id="farmId"
                 className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                {...register("farmId")}
+                {...farmField}
+                onChange={(event) => {
+                  farmField.onChange(event)
+                  void handleFarmChange(event.target.value)
+                }}
               >
-                <option value="">Sélectionner une ferme</option>
-                {initialFarms.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
+                <option value="">Selectionner une ferme</option>
+                {initialFarms.map((farm) => (
+                  <option key={farm.id} value={farm.id}>
+                    {farm.name}
                   </option>
                 ))}
               </select>
@@ -189,7 +248,7 @@ export function CreateBatchForm({
 
             <div>
               <Label htmlFor="buildingId" required>
-                Bâtiment
+                Batiment
               </Label>
               <select
                 id="buildingId"
@@ -202,14 +261,14 @@ export function CreateBatchForm({
                     ? "Chargement..."
                     : farmId
                       ? buildings.length === 0
-                        ? "Aucun bâtiment"
-                        : "Sélectionner un bâtiment"
-                      : "Sélectionner d'abord une ferme"}
+                        ? "Aucun batiment"
+                        : "Selectionner un batiment"
+                      : "Selectionner d'abord une ferme"}
                 </option>
-                {buildings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} — {b.capacity.toLocaleString("fr-SN")} sujets
-                    {b._count.batches > 0 ? ` (${b._count.batches} lot actif)` : ""}
+                {buildings.map((building) => (
+                  <option key={building.id} value={building.id}>
+                    {building.name} - {building.capacity.toLocaleString("fr-SN")} sujets
+                    {building._count.batches > 0 ? ` (${building._count.batches} lot actif)` : ""}
                   </option>
                 ))}
               </select>
@@ -222,7 +281,7 @@ export function CreateBatchForm({
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Type d&apos;élevage</CardTitle>
+            <CardTitle className="text-base">Type d&apos;elevage</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -235,9 +294,9 @@ export function CreateBatchForm({
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                   {...register("type")}
                 >
-                  {Object.entries(BATCH_TYPE_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {l}
+                  {Object.entries(BATCH_TYPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
                     </option>
                   ))}
                 </select>
@@ -245,23 +304,55 @@ export function CreateBatchForm({
 
               <div>
                 <Label htmlFor="speciesId" required>
-                  Espèce
+                  Espece
                 </Label>
                 <select
                   id="speciesId"
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                   {...register("speciesId")}
                 >
-                  <option value="">Sélectionner</option>
-                  {species.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
+                  <option value="">Selectionner</option>
+                  {species.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
                     </option>
                   ))}
                 </select>
                 {errors.speciesId && (
                   <p className="mt-1 text-xs text-red-600">{errors.speciesId.message}</p>
                 )}
+                {suggestedSpecies && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Type {BATCH_TYPE_LABELS[batchType].toLowerCase()} : espece recommandee{" "}
+                    <span className="font-medium text-gray-700">{suggestedSpecies.name}</span>.
+                  </p>
+                )}
+              </div>
+
+              <div className="col-span-2">
+                <Label htmlFor="breedId">Race / souche</Label>
+                <select
+                  id="breedId"
+                  disabled={!speciesId}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  {...register("breedId")}
+                >
+                  <option value="">
+                    {speciesId
+                      ? filteredBreeds.length > 0
+                        ? "Selectionner une race"
+                        : "Aucune race recommandee"
+                      : "Choisir d'abord une espece"}
+                  </option>
+                  {filteredBreeds.map((breed) => (
+                    <option key={breed.id} value={breed.id}>
+                      {breed.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  {SENEGAL_BREED_HINTS[batchType]}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -269,13 +360,13 @@ export function CreateBatchForm({
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Entrée du lot</CardTitle>
+            <CardTitle className="text-base">Entree du lot</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="entryDate" required>
-                  Date d&apos;entrée
+                  Date d&apos;entree
                 </Label>
                 <Input
                   id="entryDate"
@@ -299,7 +390,7 @@ export function CreateBatchForm({
               </div>
 
               <div>
-                <Label htmlFor="entryAgeDay">Âge à l&apos;entrée (jours)</Label>
+                <Label htmlFor="entryAgeDay">Age a l&apos;entree (jours)</Label>
                 <Input
                   id="entryAgeDay"
                   type="number"
@@ -309,7 +400,7 @@ export function CreateBatchForm({
               </div>
 
               <div>
-                <Label htmlFor="entryWeightG">Poids moyen à l&apos;entrée (g)</Label>
+                <Label htmlFor="entryWeightG">Poids moyen a l&apos;entree (g)</Label>
                 <Input
                   id="entryWeightG"
                   type="number"
@@ -334,9 +425,9 @@ export function CreateBatchForm({
                 {...register("supplierId")}
               >
                 <option value="">Sans fournisseur</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
                   </option>
                 ))}
               </select>
@@ -354,16 +445,16 @@ export function CreateBatchForm({
               </div>
 
               <div>
-                <Label htmlFor="totalCostFcfa">Coût total (FCFA)</Label>
+                <Label htmlFor="totalCostFcfa">Cout total (FCFA)</Label>
                 <Input
                   id="totalCostFcfa"
                   type="number"
-                  placeholder="175 000"
+                  placeholder="175000"
                   {...register("totalCostFcfa")}
                 />
                 {Number(entryCount || 0) > 0 && Number(unitCost || 0) > 0 && (
                   <p className="mt-1 text-xs text-green-600">
-                    Calculé : {formatMoneyFCFA(Math.round(Number(entryCount) * Number(unitCost)))}
+                    Calcule : {formatMoneyFCFA(Math.round(Number(entryCount) * Number(unitCost)))}
                   </p>
                 )}
               </div>
@@ -383,7 +474,7 @@ export function CreateBatchForm({
         </Card>
 
         <Button type="submit" variant="primary" loading={isPending} className="w-full">
-          Créer le lot
+          Creer le lot
         </Button>
       </form>
     </div>

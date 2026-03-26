@@ -97,6 +97,9 @@ export function BatchHeader({
               {batch.number}
             </h1>
             <p className="text-sm text-gray-500 mt-0.5">{typeLabel}</p>
+            {batch.breed && (
+              <p className="text-xs text-gray-400 mt-1">Souche : {batch.breed.name}</p>
+            )}
           </div>
           <span
             className={cn(

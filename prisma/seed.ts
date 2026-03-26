@@ -116,14 +116,30 @@ async function main() {
     prisma.species.create({ data: { name: "Pondeuse", code: "PONDEUSE" } }),
     prisma.species.create({ data: { name: "Pintade", code: "PINTADE" } }),
   ])
+  void pintade
 
-  // Races
-  const [cobb500, ross308, isaBrown, lohmann] = await Promise.all([
-    prisma.breed.create({ data: { name: "Cobb 500",       code: "COBB500",  speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "Ross 308",       code: "ROSS308",  speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "ISA Brown",      code: "ISA_BROWN", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Lohmann Brown",  code: "LOHMANN",  speciesId: pondeuse.id } }),
+  // Races / souches courantes au Senegal
+  const createdBreeds = await Promise.all([
+    prisma.breed.create({ data: { name: "Cobb 500", code: "COBB500", speciesId: poulet.id } }),
+    prisma.breed.create({ data: { name: "Hubbard", code: "HUBBARD", speciesId: poulet.id } }),
+    prisma.breed.create({ data: { name: "Ross 208", code: "ROSS208", speciesId: poulet.id } }),
+    prisma.breed.create({ data: { name: "Ross 308", code: "ROSS308", speciesId: poulet.id } }),
+    prisma.breed.create({ data: { name: "Vedette", code: "VEDETTE", speciesId: poulet.id } }),
+    prisma.breed.create({ data: { name: "ISA Brown", code: "ISA_BROWN", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Lohmann Brown", code: "LOHMANN_BROWN", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Lohmann Blanche", code: "LOHMANN_BLANCHE", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Lohmann Rouge", code: "LOHMANN_ROUGE", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Hy-Line Blanche", code: "HY_LINE_BLANCHE", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Hy-Line Rouge", code: "HY_LINE_ROUGE", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Harco", code: "HARCO", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Gold Line", code: "GOLD_LINE", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Shaver", code: "SHAVER", speciesId: pondeuse.id } }),
+    prisma.breed.create({ data: { name: "Star Cross", code: "STAR_CROSS", speciesId: pondeuse.id } }),
   ])
+  const cobb500 = createdBreeds.find((breed) => breed.code === "COBB500")!
+  const ross308 = createdBreeds.find((breed) => breed.code === "ROSS308")!
+  const isaBrown = createdBreeds.find((breed) => breed.code === "ISA_BROWN")!
+  const lohmann = createdBreeds.find((breed) => breed.code === "LOHMANN_BROWN")!
 
   // Types d'aliment
   const [feedPreDemarrage, feedDemarrage, feedCroissance, feedFinition] = await Promise.all([
@@ -133,6 +149,7 @@ async function main() {
     prisma.feedType.create({ data: { name: "Finition",      code: "FINITION"     } }),
   ])
   const feedPonteType = await prisma.feedType.create({ data: { name: "Ponte", code: "PONTE" } })
+  void [feedPreDemarrage, feedDemarrage, feedFinition, feedPonteType]
 
   // Motifs de mortalité globaux
   await Promise.all([
@@ -404,6 +421,7 @@ async function main() {
       expiryDate:      dt(addDays(today, 90)),
     },
   })
+  void medStock2
 
   await prisma.medicineStock.create({
     data: {

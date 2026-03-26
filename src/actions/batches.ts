@@ -136,6 +136,11 @@ export interface BatchSummary {
   totalCostFcfa:  number
   closedAt:       Date | null
   createdAt:      Date
+  breed: {
+    id: string
+    name: string
+    code: string
+  } | null
   building: {
     id:     string
     name:   string
@@ -205,6 +210,13 @@ const batchSummarySelect = {
   totalCostFcfa:  true,
   closedAt:       true,
   createdAt:      true,
+  breed: {
+    select: {
+      id: true,
+      name: true,
+      code: true,
+    },
+  },
   building: { select: buildingWithFarmSelect },
   _count: {
     select: { dailyRecords: true },

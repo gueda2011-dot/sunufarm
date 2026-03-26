@@ -57,9 +57,24 @@ export default async function NewBatchPage() {
   }
 
   // Charger les fermes + espèces + fournisseurs en parallèle
-  const [farmsResult, species, suppliers] = await Promise.all([
+  const [farmsResult, species, breeds, suppliers] = await Promise.all([
     getFarms({ organizationId }),
     prisma.species.findMany({ orderBy: { name: "asc" } }),
+    prisma.breed.findMany({
+      orderBy: [{ species: { name: "asc" } }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        speciesId: true,
+        species: {
+          select: {
+            code: true,
+            name: true,
+          },
+        },
+      },
+    }),
     prisma.supplier.findMany({
       where:   { organizationId },
       orderBy: { name: "asc" },
@@ -74,6 +89,7 @@ export default async function NewBatchPage() {
       organizationId={organizationId}
       initialFarms={farms}
       species={species}
+      breeds={breeds}
       suppliers={suppliers}
     />
   )
