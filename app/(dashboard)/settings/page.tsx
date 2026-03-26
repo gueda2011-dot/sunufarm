@@ -40,6 +40,7 @@ const FEATURE_LABELS = [
   { key: "ALERTS", label: "Alertes intelligentes" },
   { key: "MULTI_FARM", label: "Plusieurs fermes" },
   { key: "TEAM_MANAGEMENT", label: "Gestion d'equipe" },
+  { key: "ADVANCED_EXPORTS", label: "Exports avances" },
 ] as const
 
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
@@ -159,8 +160,8 @@ export default async function SettingsPage() {
           Choisir le bon niveau pour faire grandir {membership.organization.name}
         </h1>
         <p className="mt-3 max-w-2xl text-sm text-green-50 sm:text-base">
-          Le plan ne change pas au moment de la demande. L&apos;acces est debloque seulement apres
-          confirmation du paiement par le proprietaire.
+          SunuFarm ne vend pas juste des fonctions. Chaque plan aide a mieux organiser,
+          mieux decider ou mieux piloter l&apos;exploitation selon votre taille.
         </p>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -174,6 +175,11 @@ export default async function SettingsPage() {
                 ? `Acces ${subscription.label} temporaire pendant ${subscription.trialDaysRemaining ?? 0} jour(s).`
                 : `${formatMoneyFCFA(subscription.amountFcfa)} par mois`}
             </p>
+            {!subscription.isTrialActive && (
+              <p className="mt-1 text-xs text-green-100">
+                {subscription.valueHeadline}
+              </p>
+            )}
           </div>
           <div className="rounded-2xl bg-white/12 px-4 py-4 backdrop-blur-sm">
             <p className="text-xs uppercase tracking-wide text-green-100">Usage fermes</p>
@@ -197,15 +203,15 @@ export default async function SettingsPage() {
           <CardHeader>
             <CardTitle>Comment fonctionne l&apos;activation</CardTitle>
             <CardDescription>
-              Le changement de plan suit un circuit simple et controle.
+              Le changement de plan suit un circuit simple, trace et controle.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {[
-              "1. L'utilisateur choisit un plan et declare son paiement.",
-              "2. Le paiement est enregistre en attente.",
-              "3. Le proprietaire confirme ou refuse la preuve de paiement.",
-              "4. Le plan est active seulement apres confirmation.",
+              "1. L'utilisateur choisit le bon plan selon sa taille et declare son paiement.",
+              "2. Une transaction interne est creee pour garder une trace claire.",
+              "3. La preuve de paiement est verifiee avant toute activation.",
+              "4. Le plan est debloque seulement apres confirmation.",
             ].map((step) => (
               <div key={step} className="rounded-2xl border border-gray-100 px-4 py-3 text-sm text-gray-700">
                 {step}
@@ -218,7 +224,7 @@ export default async function SettingsPage() {
           <CardHeader>
             <CardTitle>Moyens de paiement acceptes</CardTitle>
             <CardDescription>
-              Utilise la methode la plus simple pour le client, puis confirme dans l&apos;app.
+              Aujourd&apos;hui nous gardons un controle fort pour proteger les abonnements et les encaissements.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -231,6 +237,9 @@ export default async function SettingsPage() {
                 {method}
               </div>
             ))}
+            <div className="rounded-2xl border border-dashed border-gray-200 px-4 py-3 text-sm text-gray-600">
+              L&apos;activation automatique mobile money est en preparation sur une base securisee.
+            </div>
           </CardContent>
         </Card>
       </section>
@@ -322,6 +331,12 @@ export default async function SettingsPage() {
                     {formatMoneyFCFA(plan.monthlyPriceFcfa)}
                   </p>
                   <p className="mt-1 text-sm text-gray-500">par mois</p>
+                  <p className="mt-2 text-sm font-medium text-gray-700">
+                    {plan.valueHeadline}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {plan.audience}
+                  </p>
                 </div>
 
                 <div className="rounded-2xl bg-gray-50 p-4 text-sm text-gray-700">
@@ -415,7 +430,7 @@ export default async function SettingsPage() {
             <div className="rounded-2xl bg-amber-50 p-4">
               <p className="font-semibold text-amber-900">Business</p>
               <p className="mt-1 text-amber-800">
-                Pour coordonner plusieurs fermes avec analyses AI plus poussées et plus de capacite.
+                Pour piloter une structure multi-sites avec equipe, exports avances et analyses plus profondes.
               </p>
             </div>
             <div className="rounded-2xl border border-dashed border-gray-200 p-4 text-gray-600">

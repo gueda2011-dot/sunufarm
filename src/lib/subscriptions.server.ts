@@ -38,6 +38,8 @@ export interface OrganizationSubscriptionSummary {
   label:              string
   billingLabel:       string
   promise:            string
+  audience:           string
+  valueHeadline:      string
   maxActiveBatches:   number
   maxFarms:           number
   recommended?:       boolean
@@ -148,6 +150,8 @@ export async function getOrganizationSubscription(
     label:              definition.label,
     billingLabel,
     promise:            definition.promise,
+    audience:           definition.audience,
+    valueHeadline:      definition.valueHeadline,
     maxActiveBatches:   definition.maxActiveBatches,
     maxFarms:           definition.maxFarms,
     recommended:        definition.recommended,

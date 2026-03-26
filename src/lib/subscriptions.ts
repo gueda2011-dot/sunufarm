@@ -32,6 +32,8 @@ interface PlanDefinition {
   label: string
   monthlyPriceFcfa: number
   promise: string
+  audience: string
+  valueHeadline: string
   maxActiveBatches: number
   maxFarms: number
   recommended?: boolean
@@ -44,6 +46,8 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
     label: "Basic",
     monthlyPriceFcfa: 5_000,
     promise: "Mettre de l'ordre dans l'elevage au quotidien.",
+    audience: "Petits eleveurs et exploitations en demarrage",
+    valueHeadline: "Commencer a suivre proprement son elevage",
     maxActiveBatches: 2,
     maxFarms: 1,
     highlights: [
@@ -65,6 +69,8 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
     label: "Pro",
     monthlyPriceFcfa: 10_000,
     promise: "Piloter la rentabilite et reduire les pertes.",
+    audience: "Eleveurs serieux qui veulent decider avec les chiffres",
+    valueHeadline: "Savoir vite si un lot est rentable ou en danger",
     maxActiveBatches: 20,
     maxFarms: 1,
     recommended: true,
@@ -85,14 +91,16 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
   },
   BUSINESS: {
     label: "Business",
-    monthlyPriceFcfa: 20_000,
-    promise: "Gerer plusieurs fermes et structurer les operations.",
+    monthlyPriceFcfa: 25_000,
+    promise: "Piloter plusieurs operations avec plus de controle.",
+    audience: "Grosses fermes, entreprises et structures multi-sites",
+    valueHeadline: "Coordonner equipes, fermes et analyses avancees",
     maxActiveBatches: 100,
     maxFarms: 20,
     highlights: [
       "Piloter plusieurs fermes sans confusion",
-      "Structurer le travail des equipes",
-      "Avoir une base solide pour grandir",
+      "Structurer le travail des equipes et responsables de site",
+      "Comparer les performances et prendre des decisions plus profondes",
     ],
     features: {
       REPORTS: true,

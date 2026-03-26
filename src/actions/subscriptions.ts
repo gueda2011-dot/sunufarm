@@ -23,6 +23,7 @@ import {
   UNLIMITED_AI,
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { createPaymentTransaction } from "@/src/lib/payments"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -50,9 +51,13 @@ const consumeAiCreditSchema = z.object({
   organizationId: requiredIdSchema,
 })
 
+const managePaymentTransactionSchema = z.object({
+  transactionId: requiredIdSchema,
+})
+
 export async function createSubscriptionPaymentRequest(
   data: unknown,
-): Promise<ActionResult<{ paymentId: string }>> {
+): Promise<ActionResult<{ paymentId: string; transactionId: string; checkoutToken: string | null }>> {
   try {
     const sessionResult = await requireSession()
     if (!sessionResult.success) return sessionResult
@@ -109,6 +114,15 @@ export async function createSubscriptionPaymentRequest(
       select: { id: true },
     })
 
+    const transaction = await createPaymentTransaction({
+      organizationId,
+      userId: actorId,
+      subscriptionPaymentId: payment.id,
+      requestedPlan,
+      amountFcfa: PLAN_DEFINITIONS[requestedPlan].monthlyPriceFcfa,
+      paymentMethod,
+    })
+
     await createAuditLog({
       userId: actorId,
       organizationId,
@@ -119,6 +133,7 @@ export async function createSubscriptionPaymentRequest(
         requestedPlan,
         paymentMethod,
         paymentReference: paymentReference || null,
+        transactionId: transaction.id,
       },
     })
 
@@ -126,7 +141,11 @@ export async function createSubscriptionPaymentRequest(
 
     return {
       success: true,
-      data: { paymentId: payment.id },
+      data: {
+        paymentId: payment.id,
+        transactionId: transaction.id,
+        checkoutToken: transaction.checkoutToken ?? null,
+      },
     }
   } catch {
     return {
@@ -600,5 +619,139 @@ export async function adminUpdateOrganizationSubscription(
     }
   } catch {
     return { success: false, error: "Impossible de mettre a jour l'abonnement." }
+  }
+}
+
+export async function adminConfirmPaymentTransaction(
+  data: unknown,
+): Promise<ActionResult<{ transactionId: string }>> {
+  try {
+    const sessionResult = await requireSession()
+    if (!sessionResult.success) return sessionResult
+
+    const parsed = managePaymentTransactionSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Donnees invalides" }
+    }
+
+    const actorId = sessionResult.data.user.id
+    const isSuperAdmin = await prisma.userOrganization.findFirst({
+      where: { userId: actorId, role: UserRole.SUPER_ADMIN },
+      select: { id: true },
+    })
+
+    if (!isSuperAdmin) {
+      return { success: false, error: "Seul un super admin peut confirmer une transaction." }
+    }
+
+    const transaction = await prisma.paymentTransaction.findUnique({
+      where: { id: parsed.data.transactionId },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+    })
+
+    if (!transaction) {
+      return { success: false, error: "Transaction introuvable." }
+    }
+
+    const { confirmPaymentTransaction } = await import("@/src/lib/payments")
+    await confirmPaymentTransaction({
+      transactionId: transaction.id,
+      providerStatus: "MANUAL_CONFIRMED",
+    })
+
+    await createAuditLog({
+      userId: actorId,
+      organizationId: transaction.organizationId,
+      action: AuditAction.UPDATE,
+      resourceType: "PAYMENT_TRANSACTION",
+      resourceId: transaction.id,
+      after: { status: "CONFIRMED_MANUALLY" },
+    })
+
+    revalidatePath("/admin")
+    revalidatePath(`/admin/organizations/${transaction.organizationId}`)
+    revalidatePath("/settings")
+
+    return { success: true, data: { transactionId: transaction.id } }
+  } catch {
+    return { success: false, error: "Impossible de confirmer cette transaction." }
+  }
+}
+
+export async function adminRejectPaymentTransaction(
+  data: unknown,
+): Promise<ActionResult<{ transactionId: string }>> {
+  try {
+    const sessionResult = await requireSession()
+    if (!sessionResult.success) return sessionResult
+
+    const parsed = managePaymentTransactionSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Donnees invalides" }
+    }
+
+    const actorId = sessionResult.data.user.id
+    const isSuperAdmin = await prisma.userOrganization.findFirst({
+      where: { userId: actorId, role: UserRole.SUPER_ADMIN },
+      select: { id: true },
+    })
+
+    if (!isSuperAdmin) {
+      return { success: false, error: "Seul un super admin peut refuser une transaction." }
+    }
+
+    const transaction = await prisma.paymentTransaction.findUnique({
+      where: { id: parsed.data.transactionId },
+      select: {
+        id: true,
+        organizationId: true,
+        subscriptionPaymentId: true,
+      },
+    })
+
+    if (!transaction) {
+      return { success: false, error: "Transaction introuvable." }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.paymentTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: "FAILED",
+          providerStatus: "MANUAL_REJECTED",
+          failedAt: new Date(),
+        },
+      })
+
+      if (transaction.subscriptionPaymentId) {
+        await tx.subscriptionPayment.update({
+          where: { id: transaction.subscriptionPaymentId },
+          data: {
+            status: "REJECTED",
+            rejectedAt: new Date(),
+          },
+        })
+      }
+    })
+
+    await createAuditLog({
+      userId: actorId,
+      organizationId: transaction.organizationId,
+      action: AuditAction.UPDATE,
+      resourceType: "PAYMENT_TRANSACTION",
+      resourceId: transaction.id,
+      after: { status: "REJECTED_MANUALLY" },
+    })
+
+    revalidatePath("/admin")
+    revalidatePath(`/admin/organizations/${transaction.organizationId}`)
+    revalidatePath("/settings")
+
+    return { success: true, data: { transactionId: transaction.id } }
+  } catch {
+    return { success: false, error: "Impossible de refuser cette transaction." }
   }
 }

@@ -12,8 +12,10 @@ import {
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
 import { formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
+import { PaymentTransactionStatus } from "@/src/generated/prisma/client"
 import { AdminSignOutButton } from "./_components/AdminSignOutButton"
 import { AdminSubscriptionControl } from "./_components/AdminSubscriptionControl"
+import { AdminPaymentTransactions } from "./_components/AdminPaymentTransactions"
 
 export const metadata: Metadata = { title: "Admin Plateforme" }
 
@@ -64,7 +66,13 @@ export default async function AdminPage() {
     redirect("/dashboard")
   }
 
-  const [organizations, usersCount, pendingPaymentsCount, pendingPayments] = await Promise.all([
+  const [
+    organizations,
+    usersCount,
+    pendingPaymentsCount,
+    pendingPayments,
+    pendingTransactions,
+  ] = await Promise.all([
     prisma.organization.findMany({
       where: {
         deletedAt: null,
@@ -114,6 +122,41 @@ export default async function AdminPage() {
       },
       orderBy: { requestedAt: "asc" },
       take: 5,
+    }),
+    prisma.paymentTransaction.findMany({
+      where: {
+        status: {
+          in: [
+            PaymentTransactionStatus.CREATED,
+            PaymentTransactionStatus.PENDING,
+            PaymentTransactionStatus.REQUIRES_ACTION,
+          ],
+        },
+      },
+      select: {
+        id: true,
+        provider: true,
+        status: true,
+        requestedPlan: true,
+        amountFcfa: true,
+        checkoutToken: true,
+        providerReference: true,
+        createdAt: true,
+        organization: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        user: {
+          select: {
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 8,
     }),
   ])
 
@@ -245,6 +288,22 @@ export default async function AdminPage() {
                 ))
               )}
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-6 py-5">
+            <h2 className="text-lg font-semibold text-gray-900">Transactions de paiement</h2>
+            <p className="text-sm text-gray-500">
+              A utiliser tant que les webhooks ne sont pas encore disponibles. Une confirmation ici active l&apos;abonnement.
+            </p>
+          </div>
+          <div className="px-6 py-5">
+            {pendingTransactions.length === 0 ? (
+              <p className="text-sm text-gray-400">Aucune transaction technique en attente.</p>
+            ) : (
+              <AdminPaymentTransactions transactions={pendingTransactions} />
+            )}
           </div>
         </section>
 

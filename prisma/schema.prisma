@@ -91,6 +91,24 @@ enum PaymentMethod {
   AUTRE
 }
 
+enum PaymentProvider {
+  MANUAL
+  WAVE
+  ORANGE_MONEY
+  FREE_MONEY
+  BANK_TRANSFER
+}
+
+enum PaymentTransactionStatus {
+  CREATED
+  PENDING
+  REQUIRES_ACTION
+  CONFIRMED
+  FAILED
+  CANCELED
+  EXPIRED
+}
+
 enum NotificationType {
   MORTALITE_ELEVEE
   TAUX_PONTE_BAS
@@ -258,6 +276,7 @@ model User {
   notifications Notification[]
   requestedSubscriptionPayments SubscriptionPayment[] @relation("RequestedBySubscriptionPayment")
   confirmedSubscriptionPayments SubscriptionPayment[] @relation("ConfirmedBySubscriptionPayment")
+  paymentTransactions PaymentTransaction[]
   aiBatchAnalyses AIBatchAnalysis[]
 }
 
@@ -293,6 +312,7 @@ model Organization {
   expenseCategories ExpenseCategory[]
   subscription      Subscription?
   subscriptionPayments SubscriptionPayment[]
+  paymentTransactions PaymentTransaction[]
   aiBatchAnalyses   AIBatchAnalysis[]
 
   @@index([slug])
@@ -347,10 +367,65 @@ model SubscriptionPayment {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   requestedBy  User         @relation("RequestedBySubscriptionPayment", fields: [requestedById], references: [id], onDelete: Cascade)
   confirmedBy  User?        @relation("ConfirmedBySubscriptionPayment", fields: [confirmedById], references: [id])
+  paymentTransactions PaymentTransaction[]
 
   @@index([organizationId, status])
   @@index([requestedById])
   @@index([confirmedById])
+}
+
+model PaymentTransaction {
+  id                    String                   @id @default(cuid())
+  organizationId        String
+  userId                String
+  subscriptionPaymentId String?
+  requestedPlan         SubscriptionPlan
+  provider              PaymentProvider         @default(MANUAL)
+  status                PaymentTransactionStatus @default(CREATED)
+  amountFcfa            Int
+  currency              String                   @default("XOF")
+  idempotencyKey        String                   @unique
+  checkoutToken         String?                  @unique
+  providerReference     String?                  @unique
+  providerTransactionId String?
+  providerStatus        String?
+  providerPayload       Json?
+  expiresAt             DateTime?
+  initiatedAt           DateTime?
+  confirmedAt           DateTime?
+  failedAt              DateTime?
+  canceledAt            DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionPayment SubscriptionPayment? @relation(fields: [subscriptionPaymentId], references: [id], onDelete: SetNull)
+  webhookEvents      PaymentWebhookEvent[]
+
+  @@index([organizationId, status])
+  @@index([subscriptionPaymentId])
+  @@index([provider, status])
+  @@index([userId, createdAt])
+}
+
+model PaymentWebhookEvent {
+  id                   String          @id @default(cuid())
+  paymentTransactionId String?
+  provider             PaymentProvider
+  eventType            String
+  providerEventId      String?         @unique
+  signature            String?
+  payload              Json
+  receivedAt           DateTime        @default(now())
+  processedAt          DateTime?
+  processingError      String?
+  createdAt            DateTime        @default(now())
+
+  paymentTransaction PaymentTransaction? @relation(fields: [paymentTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([provider, eventType])
+  @@index([paymentTransactionId])
 }
 
 // Lien User <-> Organization avec rôle et permissions fines par ferme

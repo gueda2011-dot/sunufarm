@@ -197,7 +197,7 @@ async function main() {
       organizationId: platformOrg.id,
       plan: SubscriptionPlan.BUSINESS,
       status: SubscriptionStatus.ACTIVE,
-      amountFcfa: 20_000,
+      amountFcfa: 25_000,
       currentPeriodStart: today,
       currentPeriodEnd: dt(addDays(today, 365)),
     },

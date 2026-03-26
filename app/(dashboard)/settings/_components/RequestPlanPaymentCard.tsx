@@ -34,6 +34,10 @@ export function RequestPlanPaymentCard({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MOBILE_MONEY")
   const [paymentReference, setPaymentReference] = useState("")
   const [notes, setNotes] = useState("")
+  const [createdTransaction, setCreatedTransaction] = useState<{
+    transactionId: string
+    checkoutToken: string | null
+  } | null>(null)
   const [isPending, startTransition] = useTransition()
 
   function handleSubmit() {
@@ -52,11 +56,50 @@ export function RequestPlanPaymentCard({
         }),
       })
 
-      const result = await response.json() as { success: boolean; error?: string }
+      const result = await response.json() as {
+        success: boolean
+        error?: string
+        data?: {
+          transactionId: string
+          checkoutToken: string | null
+        }
+      }
 
       if (result.success) {
+        const transactionId = result.data?.transactionId ?? ""
+        const checkoutToken = result.data?.checkoutToken ?? null
+
+        setCreatedTransaction({
+          transactionId,
+          checkoutToken,
+        })
+
+        if (paymentMethod === "MOBILE_MONEY" && transactionId) {
+          const checkoutResponse = await fetch(`/api/payments/transactions/${transactionId}/checkout`, {
+            method: "POST",
+          })
+
+          const checkoutResult = await checkoutResponse.json() as {
+            success: boolean
+            error?: string
+            data?: {
+              checkoutUrl: string
+            }
+          }
+
+          if (checkoutResult.success && checkoutResult.data?.checkoutUrl) {
+            toast.success("Redirection vers Wave pour finaliser le paiement.")
+            window.location.assign(checkoutResult.data.checkoutUrl)
+            return
+          }
+
+          toast.message(
+            checkoutResult.error ??
+            "La transaction est creee, mais la redirection Wave n'est pas encore disponible.",
+          )
+        }
+
         toast.success(`Demande de paiement envoyee pour ${requestedPlan}.`)
-        setIsOpen(false)
         setPaymentReference("")
         setNotes("")
         router.refresh()
@@ -142,6 +185,21 @@ export function RequestPlanPaymentCard({
           Annuler
         </Button>
       </div>
+
+      {createdTransaction && (
+        <div className="rounded-xl border border-green-200 bg-white px-4 py-3 text-sm text-green-900">
+          <p className="font-semibold">Trace de transaction creee</p>
+          {createdTransaction.checkoutToken && (
+            <p className="mt-1">
+              Reference securisee:{" "}
+              <span className="font-mono text-xs">{createdTransaction.checkoutToken}</span>
+            </p>
+          )}
+          <p className="mt-1 text-xs text-green-800">
+            Conservez cette reference. Elle servira au suivi du paiement mobile et a l&apos;automatisation de l&apos;activation.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
