@@ -5,10 +5,6 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { CheckCircle2, XCircle } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
-import {
-  confirmSubscriptionPayment,
-  rejectSubscriptionPayment,
-} from "@/src/actions/subscriptions"
 
 interface PendingPaymentItem {
   id: string
@@ -38,32 +34,44 @@ export function ManageSubscriptionPayments({
 
   function handleConfirm(paymentId: string) {
     startTransition(async () => {
-      const result = await confirmSubscriptionPayment({
-        organizationId,
-        paymentId,
+      const response = await fetch(`/api/subscriptions/payments/${paymentId}/confirm`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ organizationId }),
       })
+      const result = await response.json() as {
+        success: boolean
+        error?: string
+        data?: { plan: string }
+      }
 
       if (result.success) {
-        toast.success(`Plan ${result.data.plan} active.`)
+        toast.success(`Plan ${result.data?.plan ?? ""} active.`)
         router.refresh()
       } else {
-        toast.error(result.error)
+        toast.error(result.error ?? "Impossible de confirmer ce paiement.")
       }
     })
   }
 
   function handleReject(paymentId: string) {
     startTransition(async () => {
-      const result = await rejectSubscriptionPayment({
-        organizationId,
-        paymentId,
+      const response = await fetch(`/api/subscriptions/payments/${paymentId}/reject`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ organizationId }),
       })
+      const result = await response.json() as { success: boolean; error?: string }
 
       if (result.success) {
         toast.success("Paiement refuse.")
         router.refresh()
       } else {
-        toast.error(result.error)
+        toast.error(result.error ?? "Impossible de refuser ce paiement.")
       }
     })
   }

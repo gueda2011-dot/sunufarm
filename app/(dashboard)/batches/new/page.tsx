@@ -4,7 +4,7 @@ import { auth }           from "@/src/auth"
 import prisma             from "@/src/lib/prisma"
 import { PlanGuardCard }  from "@/src/components/subscription/PlanGuardCard"
 import { getFarms }       from "@/src/actions/farms"
-import { getOrganizationSubscription } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { CreateBatchForm } from "./_components/CreateBatchForm"
 
 export const metadata: Metadata = { title: "Nouveau lot" }

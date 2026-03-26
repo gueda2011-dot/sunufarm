@@ -41,9 +41,9 @@ import { requiredIdSchema, positiveIntSchema } from "@/src/lib/validators"
 import { BatchStatus } from "@/src/generated/prisma/client"
 import {
   getFeatureUpgradeMessage,
-  getOrganizationSubscription,
   hasPlanFeature,
 } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod

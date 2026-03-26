@@ -160,7 +160,7 @@ export async function createPurchase(
 
     const parsed = createPurchaseSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: parsed.error.errors[0]?.message ?? "Données invalides" }
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
     }
 
     const { organizationId, supplierId, purchaseDate, reference, notes, items } = parsed.data

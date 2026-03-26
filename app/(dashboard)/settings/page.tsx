@@ -12,9 +12,9 @@ import {
 } from "@/src/components/ui/card"
 import {
   PLAN_DEFINITIONS,
-  getOrganizationSubscription,
   hasPlanFeature,
 } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
 import {
   PaymentMethod,

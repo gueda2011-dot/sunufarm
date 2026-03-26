@@ -16,16 +16,14 @@ import type { Metadata }                  from "next"
 import { auth }                           from "@/src/auth"
 import prisma                             from "@/src/lib/prisma"
 import { getBatch }                       from "@/src/actions/batches"
+import type { ActionResult }             from "@/src/lib/auth"
 import { getDailyRecords }                from "@/src/actions/daily-records"
 import { getExpenses }                    from "@/src/actions/expenses"
 import { getVaccinations, getTreatments } from "@/src/actions/health"
-import { getBatchProfitability }          from "@/src/actions/profitability"
+import { getBatchProfitability, type BatchProfitability } from "@/src/actions/profitability"
 import { PlanGuardCard }                  from "@/src/components/subscription/PlanGuardCard"
-import {
-  getFeatureUpgradeMessage,
-  getOrganizationSubscription,
-  hasPlanFeature,
-} from "@/src/lib/subscriptions"
+import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { BatchHeader }                    from "./_components/BatchHeader"
 import { BatchKpis }                      from "./_components/BatchKpis"
 import { ProfitabilityCard }              from "./_components/ProfitabilityCard"
@@ -74,7 +72,10 @@ export default async function BatchDetailPage({
     getTreatments({ organizationId, batchId: id, limit: 10 }),
     canSeeProfitability
       ? getBatchProfitability({ organizationId, batchId: id })
-      : Promise.resolve({ success: false, error: getFeatureUpgradeMessage("PROFITABILITY") }),
+      : Promise.resolve<ActionResult<BatchProfitability>>({
+          success: false,
+          error: getFeatureUpgradeMessage("PROFITABILITY"),
+        }),
   ])
 
   if (!batchResult.success) notFound()
@@ -156,6 +157,10 @@ export default async function BatchDetailPage({
         vaccinations={vaccinations}
         treatments={treatments}
         batchId={batch.id}
+        organizationId={organizationId}
+        userRole={role}
+        entryDate={batch.entryDate}
+        entryCount={batch.entryCount}
       />
 
       <RecentExpenses

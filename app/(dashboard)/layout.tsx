@@ -21,7 +21,7 @@ import prisma          from "@/src/lib/prisma"
 import { Sidebar }     from "@/src/components/layout/Sidebar"
 import { Header }      from "@/src/components/layout/Header"
 import { BottomNav }   from "@/src/components/layout/BottomNav"
-import { getOrganizationSubscription } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 
 export default async function DashboardLayout({
   children,

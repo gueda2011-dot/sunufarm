@@ -2,11 +2,11 @@
 
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
+import { useRouter } from "next/navigation"
 import { ChevronDown, CreditCard } from "lucide-react"
 import type { PaymentMethod, SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
-import { createSubscriptionPaymentRequest } from "@/src/actions/subscriptions"
 
 interface RequestPlanPaymentCardProps {
   organizationId: string
@@ -29,6 +29,7 @@ export function RequestPlanPaymentCard({
   isCurrent,
   recommended = false,
 }: RequestPlanPaymentCardProps) {
+  const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MOBILE_MONEY")
   const [paymentReference, setPaymentReference] = useState("")
@@ -37,21 +38,30 @@ export function RequestPlanPaymentCard({
 
   function handleSubmit() {
     startTransition(async () => {
-      const result = await createSubscriptionPaymentRequest({
-        organizationId,
-        requestedPlan,
-        paymentMethod,
-        paymentReference: paymentReference || undefined,
-        notes: notes || undefined,
+      const response = await fetch("/api/subscriptions/payments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          organizationId,
+          requestedPlan,
+          paymentMethod,
+          paymentReference: paymentReference || undefined,
+          notes: notes || undefined,
+        }),
       })
+
+      const result = await response.json() as { success: boolean; error?: string }
 
       if (result.success) {
         toast.success(`Demande de paiement envoyee pour ${requestedPlan}.`)
         setIsOpen(false)
         setPaymentReference("")
         setNotes("")
+        router.refresh()
       } else {
-        toast.error(result.error)
+        toast.error(result.error ?? "Impossible d'envoyer la demande.")
       }
     })
   }

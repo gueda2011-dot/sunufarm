@@ -33,16 +33,16 @@ export default async function HealthPage() {
     getTreatments({ organizationId, limit: 30 }),
     prisma.batch.findMany({
       where:  { organizationId, deletedAt: null },
-      select: { id: true, batchNumber: true, status: true },
+      select: { id: true, number: true, status: true },
     }),
   ])
 
   const vaccinations = vaccinationsResult.success ? vaccinationsResult.data : []
   const treatments   = treatmentsResult.success   ? treatmentsResult.data   : []
 
-  // Map batchId → batchNumber pour l'affichage
+  // Map batchId → numéro de lot pour l'affichage
   const batchMap = Object.fromEntries(
-    batches.map((b) => [b.id, { number: b.batchNumber, status: b.status }])
+    batches.map((b) => [b.id, { number: b.number, status: b.status }])
   )
 
   // KPIs

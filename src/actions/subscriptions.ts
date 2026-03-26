@@ -18,8 +18,8 @@ import {
 import { requiredIdSchema } from "@/src/lib/validators"
 import {
   PLAN_DEFINITIONS,
-  getOrganizationSubscription,
 } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -174,7 +174,7 @@ export async function confirmSubscriptionPayment(
       && existingSubscription.currentPeriodEnd != null
       && existingSubscription.currentPeriodEnd > now
 
-    const periodStart = isRenewal
+    const periodStart = isRenewal && existingSubscription?.currentPeriodEnd
       ? existingSubscription.currentPeriodEnd
       : now
     const periodEnd = new Date(periodStart)

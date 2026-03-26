@@ -50,7 +50,7 @@ import {
   optionalDateSchema,
 } from "@/src/lib/validators"
 import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
-import { getOrganizationSubscription } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod

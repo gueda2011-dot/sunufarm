@@ -3,7 +3,7 @@ import type { Metadata }   from "next"
 import { auth }            from "@/src/auth"
 import prisma              from "@/src/lib/prisma"
 import { getFarms }        from "@/src/actions/farms"
-import { getOrganizationSubscription } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { FarmsClient }     from "./_components/FarmsClient"
 
 export const metadata: Metadata = { title: "Fermes & Bâtiments" }

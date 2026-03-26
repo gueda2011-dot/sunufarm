@@ -15,9 +15,9 @@ import prisma            from "@/src/lib/prisma"
 import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
 import {
   getFeatureUpgradeMessage,
-  getOrganizationSubscription,
   hasPlanFeature,
 } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { ReportsPageClient } from "./_components/ReportsPageClient"
 
 export const metadata: Metadata = { title: "Rapports" }

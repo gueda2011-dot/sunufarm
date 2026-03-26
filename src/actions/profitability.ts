@@ -36,9 +36,9 @@ import { requiredIdSchema }           from "@/src/lib/validators"
 import { netMargin, mortalityRate, livingCount } from "@/src/lib/kpi"
 import {
   getFeatureUpgradeMessage,
-  getOrganizationSubscription,
   hasPlanFeature,
 } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 
 // ---------------------------------------------------------------------------
 // Schéma
