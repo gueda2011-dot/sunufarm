@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import type { SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Button } from "@/src/components/ui/button"
 import { adminStartTrial } from "@/src/actions/subscriptions"
+import { PLAN_DEFINITIONS } from "@/src/lib/subscriptions"
 
 interface AdminSubscriptionControlProps {
   organizationId: string
@@ -87,7 +88,7 @@ export function AdminSubscriptionControl({
         >
           {PLAN_OPTIONS.map((plan) => (
             <option key={plan} value={plan}>
-              {plan}
+              {PLAN_DEFINITIONS[plan].label} - {PLAN_DEFINITIONS[plan].monthlyPriceFcfa.toLocaleString("fr-FR")} FCFA
             </option>
           ))}
         </select>

@@ -13,6 +13,7 @@ import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
 import { formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
 import { PaymentTransactionStatus } from "@/src/generated/prisma/client"
+import { PLAN_DEFINITIONS } from "@/src/lib/subscriptions"
 import { AdminSignOutButton } from "./_components/AdminSignOutButton"
 import { AdminSubscriptionControl } from "./_components/AdminSubscriptionControl"
 import { AdminPaymentTransactions } from "./_components/AdminPaymentTransactions"
@@ -375,10 +376,16 @@ export default async function AdminPage() {
                       {org.subscription?.status === "TRIAL"
                         ? "Essai gratuit"
                         : formatMoneyFCFA(
-                            org.subscription?.amountFcfa && org.subscription.amountFcfa > 0
-                              ? org.subscription.amountFcfa
-                              : 5_000,
+                            PLAN_DEFINITIONS[org.subscription?.plan ?? "BASIC"].monthlyPriceFcfa,
                           )}
+                      {org.subscription?.status !== "TRIAL" &&
+                        org.subscription?.amountFcfa != null &&
+                        org.subscription.amountFcfa > 0 &&
+                        org.subscription.amountFcfa !== PLAN_DEFINITIONS[org.subscription.plan].monthlyPriceFcfa && (
+                          <div className="mt-1 text-xs text-amber-600">
+                            Base: {formatMoneyFCFA(org.subscription.amountFcfa)}
+                          </div>
+                        )}
                     </td>
                     <td className="px-6 py-4 text-gray-700">{org._count.farms}</td>
                     <td className="px-6 py-4 text-gray-700">{org._count.users}</td>

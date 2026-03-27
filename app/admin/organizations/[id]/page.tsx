@@ -21,6 +21,7 @@ import {
   formatMoneyFCFA,
   formatNumber,
 } from "@/src/lib/formatters"
+import { PLAN_DEFINITIONS } from "@/src/lib/subscriptions"
 
 export const metadata: Metadata = { title: "Admin Organisation" }
 
@@ -348,12 +349,17 @@ export default async function AdminOrganizationDetailPage(
                     {organization.subscription?.status === "TRIAL"
                       ? "Essai gratuit"
                       : formatMoneyFCFA(
-                          organization.subscription?.amountFcfa &&
-                            organization.subscription.amountFcfa > 0
-                            ? organization.subscription.amountFcfa
-                            : 5_000,
+                          PLAN_DEFINITIONS[organization.subscription?.plan ?? "BASIC"].monthlyPriceFcfa,
                         )}
                   </p>
+                  {organization.subscription?.status !== "TRIAL" &&
+                    organization.subscription?.amountFcfa != null &&
+                    organization.subscription.amountFcfa > 0 &&
+                    organization.subscription.amountFcfa !== PLAN_DEFINITIONS[organization.subscription.plan].monthlyPriceFcfa && (
+                      <p className="mt-1 text-xs text-amber-600">
+                        Montant stocke en base: {formatMoneyFCFA(organization.subscription.amountFcfa)}
+                      </p>
+                    )}
                 </div>
                 <div className="rounded-2xl bg-gray-50 px-4 py-3">
                   <p className="text-gray-500">Periode active</p>
