@@ -23,6 +23,17 @@ const BASE_METADATA: Metadata = {
   },
 }
 
+function getConfiguredAppHost(): string | null {
+  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (!configuredUrl) return null
+
+  try {
+    return new URL(configuredUrl).host
+  } catch {
+    return null
+  }
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers()
   const currentHost =
@@ -30,13 +41,15 @@ export async function generateMetadata(): Promise<Metadata> {
     requestHeaders.get("host") ??
     ""
 
-  const configuredHost = process.env.NEXT_PUBLIC_APP_URL
-    ? new URL(process.env.NEXT_PUBLIC_APP_URL).host
-    : null
+  const configuredHost = getConfiguredAppHost()
+  const vercelEnv = process.env.VERCEL_ENV
 
   const isPreviewDeployment =
-    currentHost.endsWith(".vercel.app") &&
-    (!configuredHost || currentHost !== configuredHost)
+    vercelEnv === "preview" ||
+    (
+      currentHost.endsWith(".vercel.app") &&
+      (!configuredHost || currentHost !== configuredHost)
+    )
 
   return {
     ...BASE_METADATA,
