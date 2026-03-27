@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/src/auth"
 import { requireMembership } from "@/src/lib/auth"
+import {
+  applyRateLimit,
+  createRateLimitHeaders,
+  getClientIpFromHeaders,
+} from "@/src/lib/rate-limit"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import {
   analyzeBatchRequestSchema,
@@ -30,6 +35,19 @@ export async function POST(request: NextRequest) {
     }
 
     const { organizationId, batchId, batchData } = parsed.data
+    const rateLimit = applyRateLimit({
+      key: `ai:${session.user.id}:${organizationId}:${getClientIpFromHeaders(request.headers)}`,
+      limit: 10,
+      windowMs: 60_000,
+    })
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Trop de requetes AI. Reessayez dans un instant." },
+        { status: 429, headers: createRateLimitHeaders(rateLimit, 10) },
+      )
+    }
+
     const membershipResult = await requireMembership(session.user.id, organizationId)
     if (!membershipResult.success) {
       return NextResponse.json({ success: false, error: membershipResult.error }, { status: 403 })
@@ -73,7 +91,7 @@ export async function POST(request: NextRequest) {
           model: policy.model,
           usage,
         },
-      })
+      }, { headers: createRateLimitHeaders(rateLimit, 10) })
     }
 
     const analysis = await generateBatchAnalysisWithOpenAI(input, policy)
@@ -98,7 +116,7 @@ export async function POST(request: NextRequest) {
         model: policy.model,
         usage: refreshedUsage,
       },
-    })
+    }, { headers: createRateLimitHeaders(rateLimit, 10) })
   } catch (error) {
     console.error("[AI][analyze]", error)
     return NextResponse.json(

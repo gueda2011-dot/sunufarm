@@ -3,9 +3,14 @@ import { auth } from "@/src/auth"
 import { requireMembership } from "@/src/lib/auth"
 import prisma from "@/src/lib/prisma"
 import { createWaveCheckoutSessionForTransaction } from "@/src/lib/payments"
+import {
+  applyRateLimit,
+  createRateLimitHeaders,
+  getClientIpFromHeaders,
+} from "@/src/lib/rate-limit"
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ transactionId: string }> },
 ) {
   const session = await auth()
@@ -14,6 +19,18 @@ export async function POST(
   }
 
   const { transactionId } = await params
+  const rateLimit = applyRateLimit({
+    key: `checkout:${session.user.id}:${transactionId}:${getClientIpFromHeaders(request.headers)}`,
+    limit: 5,
+    windowMs: 60_000,
+  })
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Trop de tentatives de paiement. Reessayez dans un instant." },
+      { status: 429, headers: createRateLimitHeaders(rateLimit, 5) },
+    )
+  }
 
   const transaction = await prisma.paymentTransaction.findUnique({
     where: { id: transactionId },
@@ -49,7 +66,7 @@ export async function POST(
         checkoutId: checkout.checkoutId,
         expiresAt: checkout.expiresAt,
       },
-    })
+    }, { headers: createRateLimitHeaders(rateLimit, 5) })
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN_ERROR"
 
