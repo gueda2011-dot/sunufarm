@@ -154,6 +154,9 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           }
         } catch (err) {
           // Erreur DB ou réseau — logger pour debug, retourner null proprement
+          if (err instanceof EmailNotVerifiedError) {
+            throw err
+          }
           logger.error("auth.authorize_failed", { error: err })
           return null
         }
