@@ -467,7 +467,7 @@ export function PurchasesPageClient({
               disabled={isPending}
               className="w-full rounded-2xl bg-green-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
             >
-              {isPending ? "Enregistrement..." : "Enregistrer l&apos;achat"}
+              {isPending ? "Enregistrement..." : "Enregistrer l'achat"}
             </button>
           </aside>
         </form>

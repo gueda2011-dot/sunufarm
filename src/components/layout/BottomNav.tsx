@@ -41,6 +41,7 @@ const moreLinks = [
   { href: "/stock", label: "Stock", icon: Package, module: "STOCK" as const },
   { href: "/sales", label: "Ventes", icon: ShoppingCart, module: "SALES" as const },
   { href: "/customers", label: "Clients", icon: Users, module: "CUSTOMERS" as const },
+  { href: "/suppliers", label: "Fournisseurs", icon: Users, module: "SUPPLIERS" as const },
   { href: "/purchases", label: "Achats", icon: ShoppingBag, module: "PURCHASES" as const },
   { href: "/health", label: "Sante animale", icon: Syringe, module: "HEALTH" as const },
   { href: "/finances", label: "Finances", icon: DollarSign, module: "FINANCES" as const },
