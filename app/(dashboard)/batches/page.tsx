@@ -1,21 +1,13 @@
-/**
- * SunuFarm — Liste des lots d'élevage (Server Component)
- *
- * Charge tous les lots de l'organisation (toutes statuts confondus, limit 200)
- * et délègue le filtrage client-side à BatchListClient.
- * Le bouton "Nouveau lot" redirige vers /batches/new.
- */
-
-import Link             from "next/link"
-import { redirect }     from "next/navigation"
+import Link from "next/link"
+import { redirect } from "next/navigation"
 import type { Metadata } from "next"
-import { auth }         from "@/src/auth"
-import { getBatches }   from "@/src/actions/batches"
+import { auth } from "@/src/auth"
+import { getBatches } from "@/src/actions/batches"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { BatchListClient } from "./_components/BatchListClient"
 
-export const metadata: Metadata = { title: "Lots d'élevage" }
+export const metadata: Metadata = { title: "Lots d'elevage" }
 
 export default async function BatchesPage() {
   const session = await auth()
@@ -26,35 +18,28 @@ export default async function BatchesPage() {
   ensureModuleAccess(activeMembership, "BATCHES")
 
   const { organizationId } = activeMembership
-
-  // Charge tous les lots — le filtrage (statut / type / ferme) est côté client
   const result = await getBatches({ organizationId, limit: 200 })
   const batches = result.success ? result.data : []
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-
-      {/* ── En-tête : titre + bouton création ───────────────────────────── */}
-      <div className="flex items-center justify-between">
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Lots d&apos;élevage</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Suivi complet de vos cycles de production.
+          <h1 className="text-2xl font-bold text-gray-900">Lots d&apos;elevage</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Retrouver, filtrer et suivre tous les lots crees sur l&apos;exploitation.
           </p>
         </div>
+
         <Link
           href="/batches/new"
-          className="inline-flex items-center gap-2 rounded-xl bg-green-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-green-700 transition-colors whitespace-nowrap"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700"
         >
           + Nouveau lot
         </Link>
       </div>
 
-      {/* ── Liste avec filtres client-side ──────────────────────────────── */}
-      <BatchListClient
-        organizationId={organizationId}
-        initialBatches={batches}
-      />
+      <BatchListClient organizationId={organizationId} initialBatches={batches} />
     </div>
   )
 }
