@@ -19,6 +19,7 @@ import {
   hasPlanFeature,
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { buildMetricComparison } from "@/src/lib/reporting"
 import { ReportsPageClient } from "./_components/ReportsPageClient"
 
 export const metadata: Metadata = { title: "Rapports" }
@@ -65,6 +66,8 @@ export default async function ReportsPage({
 
   const fromDate = new Date(year, month - 1, 1)
   const toDate   = new Date(year, month, 0, 23, 59, 59) // dernier jour du mois
+  const previousFromDate = new Date(year, month - 2, 1)
+  const previousToDate = new Date(year, month - 1, 0, 23, 59, 59)
 
   // Fetch parallèle — toutes les agrégations de la période
   const [
@@ -75,6 +78,9 @@ export default async function ReportsPage({
     salesAgg,
     purchasesAgg,
     dailyRecordsAgg,
+    previousExpensesAgg,
+    previousSalesAgg,
+    previousMortalityAgg,
   ] = await Promise.all([
 
     // Lots actifs au cours de la période
@@ -153,6 +159,30 @@ export default async function ReportsPage({
         date:  { gte: fromDate, lte: toDate },
       },
     }),
+
+    prisma.expense.aggregate({
+      where: {
+        organizationId,
+        date: { gte: previousFromDate, lte: previousToDate },
+      },
+      _sum: { amountFcfa: true },
+    }),
+
+    prisma.sale.aggregate({
+      where: {
+        organizationId,
+        saleDate: { gte: previousFromDate, lte: previousToDate },
+      },
+      _sum: { totalFcfa: true },
+    }),
+
+    prisma.dailyRecord.aggregate({
+      where: {
+        batch: { organizationId },
+        date: { gte: previousFromDate, lte: previousToDate },
+      },
+      _sum: { mortality: true },
+    }),
   ])
 
   const totalMortality   = mortalityAgg._sum.mortality ?? 0
@@ -162,6 +192,11 @@ export default async function ReportsPage({
   const totalPaid        = salesAgg._sum.paidFcfa      ?? 0
   const totalPurchases   = purchasesAgg._sum.totalFcfa ?? 0
   const netResult        = totalSales - totalExpenses
+  const comparison = {
+    sales: buildMetricComparison(totalSales, previousSalesAgg._sum.totalFcfa ?? 0),
+    expenses: buildMetricComparison(totalExpenses, previousExpensesAgg._sum.amountFcfa ?? 0),
+    mortality: buildMetricComparison(totalMortality, previousMortalityAgg._sum.mortality ?? 0),
+  }
 
   return (
     <ReportsPageClient
@@ -180,6 +215,7 @@ export default async function ReportsPage({
       purchasesCount={purchasesAgg._count.id}
       dailyRecordsCount={dailyRecordsAgg}
       netResult={netResult}
+      comparison={comparison}
     />
   )
 }

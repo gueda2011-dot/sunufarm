@@ -9,6 +9,7 @@ import {
   formatNumber,
 } from "@/src/lib/formatters"
 import { FinancialChart } from "../../_components/FinancialChart"
+import { formatTrendLabel, type MetricComparison } from "@/src/lib/reporting"
 
 const MONTHS = [
   "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin",
@@ -40,6 +41,11 @@ interface Props {
   purchasesCount: number
   dailyRecordsCount: number
   netResult: number
+  comparison: {
+    sales: MetricComparison
+    expenses: MetricComparison
+    mortality: MetricComparison
+  }
 }
 
 function KpiCard({
@@ -85,6 +91,7 @@ export function ReportsPageClient({
   purchasesCount,
   dailyRecordsCount,
   netResult,
+  comparison,
 }: Props) {
   const router = useRouter()
 
@@ -148,6 +155,42 @@ export function ReportsPageClient({
         totalExpenses={totalExpenses}
         totalPurchases={totalPurchases}
       />
+
+      <section className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Ventes
+          </p>
+          <p className="mt-2 text-sm font-medium text-gray-900">
+            {formatTrendLabel(comparison.sales, "up")}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            Mois precedent : {formatMoneyFCFA(comparison.sales.previous)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Depenses
+          </p>
+          <p className="mt-2 text-sm font-medium text-gray-900">
+            {formatTrendLabel(comparison.expenses, "down")}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            Mois precedent : {formatMoneyFCFA(comparison.expenses.previous)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Mortalite
+          </p>
+          <p className="mt-2 text-sm font-medium text-gray-900">
+            {formatTrendLabel(comparison.mortality, "down")}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            Mois precedent : {formatNumber(comparison.mortality.previous)} sujets
+          </p>
+        </div>
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">

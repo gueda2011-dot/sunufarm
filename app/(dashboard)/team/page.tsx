@@ -15,6 +15,7 @@ import { formatDateTime } from "@/src/lib/formatters"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { UserRole } from "@/src/generated/prisma/client"
+import { TeamManagementClient } from "./_components/TeamManagementClient"
 
 export const metadata: Metadata = { title: "Equipe" }
 
@@ -60,10 +61,12 @@ export default async function TeamPage() {
       },
       select: {
         id: true,
+        userId: true,
         role: true,
         createdAt: true,
         user: {
           select: {
+            id: true,
             name: true,
             email: true,
           },
@@ -167,6 +170,34 @@ export default async function TeamPage() {
               </div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Administration de l&apos;equipe</CardTitle>
+          <CardDescription>
+            Ajouter un membre existant, ajuster les roles et retirer des acces.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TeamManagementClient
+            organizationId={activeMembership.organizationId}
+            actorUserId={session.user.id}
+            canManageTeam={canManageTeam}
+            initialMembers={members.map((member) => ({
+              id: member.id,
+              userId: member.userId,
+              role: member.role,
+              farmPermissions: [],
+              createdAt: member.createdAt,
+              user: {
+                id: member.user.id,
+                name: member.user.name,
+                email: member.user.email,
+              },
+            }))}
+          />
         </CardContent>
       </Card>
     </div>

@@ -76,6 +76,12 @@ const addUserToOrganizationSchema = z.object({
   role:           orgRoleSchema.default("VIEWER"),
 })
 
+const addUserToOrganizationByEmailSchema = z.object({
+  organizationId: requiredIdSchema,
+  email:          z.string().trim().toLowerCase().email("Email invalide"),
+  role:           orgRoleSchema.default("VIEWER"),
+})
+
 const updateUserRoleSchema = z.object({
   organizationId: requiredIdSchema,
   targetUserId:   requiredIdSchema,
@@ -250,6 +256,47 @@ export async function addUserToOrganization(
   } catch {
     return { success: false, error: "Impossible d'ajouter le membre" }
   }
+}
+
+// ---------------------------------------------------------------------------
+// 2.b addUserToOrganizationByEmail
+// ---------------------------------------------------------------------------
+
+/**
+ * Ajoute un utilisateur existant à partir de son email.
+ *
+ * Ce helper évite à l'UI d'avoir à résoudre manuellement le userId.
+ * Si l'email n'existe pas, on retourne un message explicite pour inviter
+ * l'utilisateur à créer d'abord son compte.
+ */
+export async function addUserToOrganizationByEmail(
+  data: unknown,
+): Promise<ActionResult<OrgMember>> {
+  const parsed = addUserToOrganizationByEmailSchema.safeParse(data)
+  if (!parsed.success) {
+    return { success: false, error: "Donnees invalides" }
+  }
+
+  const targetUser = await prisma.user.findFirst({
+    where: {
+      email: parsed.data.email,
+      deletedAt: null,
+    },
+    select: { id: true },
+  })
+
+  if (!targetUser) {
+    return {
+      success: false,
+      error: "Aucun compte actif ne correspond a cet email. Demandez d'abord a cette personne de creer son compte.",
+    }
+  }
+
+  return addUserToOrganization({
+    organizationId: parsed.data.organizationId,
+    userId: targetUser.id,
+    role: parsed.data.role,
+  })
 }
 
 // ---------------------------------------------------------------------------

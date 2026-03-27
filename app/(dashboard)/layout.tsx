@@ -20,6 +20,8 @@ import { auth }        from "@/src/auth"
 import { Sidebar }     from "@/src/components/layout/Sidebar"
 import { Header }      from "@/src/components/layout/Header"
 import { BottomNav }   from "@/src/components/layout/BottomNav"
+import { ConnectionBanner } from "@/src/components/pwa/ConnectionBanner"
+import { InstallPrompt } from "@/src/components/pwa/InstallPrompt"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { ImpersonationBanner } from "./_components/ImpersonationBanner"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
@@ -110,6 +112,13 @@ export default async function DashboardLayout({
           trialDaysRemaining={subscription.trialDaysRemaining}
           aiCreditsRemaining={subscription.aiCreditsRemaining}
         />
+
+        <div className="px-4 pt-4 sm:px-6 lg:px-8">
+          <div className="space-y-3">
+            <ConnectionBanner />
+            <InstallPrompt />
+          </div>
+        </div>
 
         {/*
           Contenu de la page

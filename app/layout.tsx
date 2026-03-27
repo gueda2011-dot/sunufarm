@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import { Toaster } from "sonner"
 import { QueryProvider } from "@/src/components/providers/QueryProvider"
+import { ServiceWorkerRegistration } from "@/src/components/pwa/ServiceWorkerRegistration"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -38,6 +39,7 @@ export default function RootLayout({
     <html lang="fr" className="h-full antialiased">
       <body className="h-full bg-gray-50 text-gray-900">
         <QueryProvider>{children}</QueryProvider>
+        <ServiceWorkerRegistration />
 
         <Toaster
           position="top-right"
