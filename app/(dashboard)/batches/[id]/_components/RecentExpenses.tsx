@@ -6,6 +6,7 @@
  * Total visible en pied de liste.
  */
 
+import Link from "next/link"
 import { formatDate, formatMoneyFCFA } from "@/src/lib/formatters"
 import type { ExpenseSummary }          from "@/src/actions/expenses"
 
@@ -66,6 +67,12 @@ export function RecentExpenses({ expenses }: RecentExpensesProps) {
                       {expense.category && (
                         <div className="text-xs text-gray-400">{expense.category.name}</div>
                       )}
+                      <Link
+                        href={`/finances/${expense.id}`}
+                        className="mt-1 inline-flex text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        Details
+                      </Link>
                     </td>
                     <td className="px-4 py-2.5 text-right text-gray-700 font-medium tabular-nums whitespace-nowrap">
                       {formatMoneyFCFA(expense.amountFcfa)}

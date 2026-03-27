@@ -196,6 +196,8 @@ export default async function BatchDetailPage({
         userRole={role}
         entryDate={batch.entryDate}
         entryCount={batch.entryCount}
+        batchType={batch.type}
+        ageDay={ageDay}
       />
 
       <RecentExpenses

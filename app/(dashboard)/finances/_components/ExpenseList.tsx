@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
 import { formatMoneyFCFA, formatDate }              from "@/src/lib/formatters"
 import type { ExpenseSummary }                      from "@/src/actions/expenses"
@@ -48,7 +49,13 @@ export function ExpenseList({ expenses }: ExpenseListProps) {
                 </div>
 
                 <div className="shrink-0 text-sm font-semibold text-gray-900 tabular-nums">
-                  {formatMoneyFCFA(expense.amountFcfa)}
+                  <div>{formatMoneyFCFA(expense.amountFcfa)}</div>
+                  <Link
+                    href={`/finances/${expense.id}`}
+                    className="mt-2 inline-flex text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                  >
+                    Details
+                  </Link>
                 </div>
               </div>
             ))}

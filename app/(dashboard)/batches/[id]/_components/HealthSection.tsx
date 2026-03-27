@@ -11,8 +11,10 @@
  */
 
 import { useState, useTransition } from "react"
+import type { BatchType } from "@/src/generated/prisma/client"
 import { formatDate }              from "@/src/lib/formatters"
 import { createVaccination, createTreatment } from "@/src/actions/health"
+import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
 import type {
   VaccinationSummary,
   TreatmentSummary,
@@ -30,6 +32,8 @@ interface HealthSectionProps {
   userRole:       string
   entryDate:      Date
   entryCount:     number
+  batchType:      BatchType
+  ageDay:         number
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +50,8 @@ export function HealthSection({
   userRole,
   entryDate,
   entryCount,
+  batchType,
+  ageDay,
 }: HealthSectionProps) {
   const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER", "VET"].includes(userRole)
 
@@ -56,6 +62,12 @@ export function HealthSection({
   const [isPending,    startTransition]  = useTransition()
 
   const today = new Date().toISOString().slice(0, 10)
+  const vaccinationSuggestions = getVaccinationSuggestions({
+    batchType,
+    ageDay,
+    recordedVaccines: vaccinations.map((item) => item.vaccineName),
+  })
+  const dueSuggestions = vaccinationSuggestions.filter((item) => item.status === "due" || item.status === "overdue")
 
   // ---------------------------------------------------------------------------
   // Création vaccination
@@ -187,6 +199,65 @@ export function HealthSection({
       {error && (
         <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
       )}
+
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-blue-900">Suggestions vaccinales</p>
+            <p className="mt-1 text-xs text-blue-700">
+              Recommandations indicatives selon le type de lot et l&apos;age actuel. A valider avec votre veterinaire et votre couvoir.
+            </p>
+          </div>
+          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-blue-700">
+            Jour {ageDay}
+          </span>
+        </div>
+
+        {dueSuggestions.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {dueSuggestions.length} vaccination(s) a surveiller maintenant sur ce lot.
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {vaccinationSuggestions.map((suggestion) => (
+            <div
+              key={suggestion.key}
+              className="rounded-lg bg-white px-3 py-3 text-sm text-gray-700"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium text-gray-900">{suggestion.vaccineName}</p>
+                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                  suggestion.status === "done"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : suggestion.status === "due"
+                      ? "bg-amber-100 text-amber-700"
+                      : suggestion.status === "overdue"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-gray-100 text-gray-600"
+                }`}>
+                  {suggestion.status === "done"
+                    ? "Deja fait"
+                    : suggestion.status === "due"
+                      ? "A faire"
+                      : suggestion.status === "overdue"
+                        ? "En retard"
+                        : "Plus tard"}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Fenetre conseillee : J{suggestion.windowStartDay} a J{suggestion.windowEndDay} - {suggestion.route}
+              </p>
+              <p className="mt-1 text-xs text-gray-600">{suggestion.note}</p>
+              {suggestion.matchedRecordName && (
+                <p className="mt-1 text-xs text-emerald-700">
+                  Enregistre comme : {suggestion.matchedRecordName}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* ── Formulaire vaccination ───────────────────────────────────────── */}
       {panel === "vaccination" && (
