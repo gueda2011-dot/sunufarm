@@ -16,8 +16,8 @@
  *   "Une saisie existe déjà pour ce lot à cette date" — affiché en erreur inline.
  */
 
-import { useState }                    from "react"
-import { useForm, type Resolver }      from "react-hook-form"
+import { useEffect, useState }         from "react"
+import { useForm, useWatch, type Resolver } from "react-hook-form"
 import { zodResolver }                 from "@hookform/resolvers/zod"
 import { z }                           from "zod"
 import { toast }                       from "sonner"
@@ -129,17 +129,21 @@ export function DailyForm({
   defaultValues,
   onSuccess,
 }: DailyFormProps) {
+  const draftStorageKey = `sunufarm:draft:daily:${organizationId}:${batchId}:${selectedDate}`
   // Ouvrir la section détails si des valeurs optionnelles existent déjà
   const [detailsOpen, setDetailsOpen] = useState(
     !!(defaultValues.waterLiters || defaultValues.avgWeightG || defaultValues.observations),
   )
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [draftReady, setDraftReady] = useState(false)
 
   const schema = buildFormSchema(entryCount)
 
   const {
     register,
     handleSubmit,
+    control,
+    reset,
     formState: { errors, isSubmitting },
   } = useForm<ParsedValues>({
     // Cast nécessaire : zodResolver retourne Resolver<z.input<Schema>> où les
@@ -154,6 +158,57 @@ export function DailyForm({
       observations: defaultValues.observations ?? "",
     },
   })
+  const draftValues = useWatch({ control })
+
+  useEffect(() => {
+    if (isEditMode || typeof window === "undefined") {
+      setDraftReady(true)
+      return
+    }
+
+    const rawDraft = window.localStorage.getItem(draftStorageKey)
+    if (!rawDraft) {
+      setDraftReady(true)
+      return
+    }
+
+    try {
+      const parsedDraft = JSON.parse(rawDraft) as Partial<ParsedValues>
+      reset({
+        mortality: parsedDraft.mortality ?? defaultValues.mortality,
+        feedKg: parsedDraft.feedKg ?? defaultValues.feedKg,
+        waterLiters: parsedDraft.waterLiters ?? defaultValues.waterLiters ?? undefined,
+        avgWeightG: parsedDraft.avgWeightG ?? defaultValues.avgWeightG ?? undefined,
+        observations: parsedDraft.observations ?? defaultValues.observations ?? "",
+      })
+
+      if (
+        parsedDraft.waterLiters !== undefined ||
+        parsedDraft.avgWeightG !== undefined ||
+        !!parsedDraft.observations
+      ) {
+        setDetailsOpen(true)
+      }
+    } catch {
+      window.localStorage.removeItem(draftStorageKey)
+    } finally {
+      setDraftReady(true)
+    }
+  }, [
+    defaultValues.avgWeightG,
+    defaultValues.feedKg,
+    defaultValues.mortality,
+    defaultValues.observations,
+    defaultValues.waterLiters,
+    draftStorageKey,
+    isEditMode,
+    reset,
+  ])
+
+  useEffect(() => {
+    if (isEditMode || !draftReady || typeof window === "undefined") return
+    window.localStorage.setItem(draftStorageKey, JSON.stringify(draftValues))
+  }, [draftReady, draftStorageKey, draftValues, isEditMode])
 
   const onSubmit = async (data: ParsedValues) => {
     setSubmitError(null)
@@ -172,6 +227,9 @@ export function DailyForm({
       })
 
       if (result.success) {
+        if (!isEditMode && typeof window !== "undefined") {
+          window.localStorage.removeItem(draftStorageKey)
+        }
         toast.success("Saisie corrigée")
         onSuccess()
       } else {
@@ -194,6 +252,9 @@ export function DailyForm({
       })
 
       if (result.success) {
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem(draftStorageKey)
+        }
         toast.success("Saisie enregistrée")
         onSuccess()
       } else {
@@ -204,6 +265,11 @@ export function DailyForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
+      {!isEditMode && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          Brouillon automatique actif pour ce lot et cette date sur cet appareil.
+        </div>
+      )}
 
       {/* ── Mortalité ────────────────────────────────────────────────────── */}
       <NumericField

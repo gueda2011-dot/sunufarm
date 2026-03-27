@@ -83,6 +83,7 @@ export function FarmsClient({
   canCreateFarm,
   initialFarms,
 }: Props) {
+  const EMPTY_BUILDING_CAPACITY = "" as unknown as number
   const [farms, setFarms] = useState<FarmSummary[]>(initialFarms)
   const [expandedFarm, setExpanded] = useState<string | null>(null)
   const [buildings, setBuildings] = useState<Record<string, BuildingSummary[]>>({})
@@ -111,7 +112,7 @@ export function FarmsClient({
       name: "",
       code: "",
       type: "POULAILLER_FERME",
-      capacity: 0,
+      capacity: EMPTY_BUILDING_CAPACITY,
     },
   })
 
@@ -206,7 +207,7 @@ export function FarmsClient({
       name: "",
       code: "",
       type: "POULAILLER_FERME",
-      capacity: 0,
+      capacity: EMPTY_BUILDING_CAPACITY,
     })
   }
 
@@ -239,7 +240,7 @@ export function FarmsClient({
           name: "",
           code: "",
           type: "POULAILLER_FERME",
-          capacity: 0,
+          capacity: EMPTY_BUILDING_CAPACITY,
         })
       } else {
         toast.error(res.error)
@@ -466,7 +467,7 @@ export function FarmsClient({
                       className="bg-white rounded-lg p-3 shadow-sm space-y-3 mt-2"
                     >
                       <p className="text-sm font-medium text-gray-900">Nouveau bâtiment</p>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <div>
                           <Label htmlFor="bldg-name" required>Nom</Label>
                           <Input
@@ -507,7 +508,7 @@ export function FarmsClient({
                           />
                         </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         <Button type="submit" variant="primary" size="sm" loading={isPending}>
                           Créer
                         </Button>
@@ -518,13 +519,16 @@ export function FarmsClient({
                     </form>
                   ) : (
                     canEdit && (
-                      <button
-                        className="flex items-center gap-1.5 text-sm text-green-600 hover:text-green-700 font-medium mt-1"
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 w-full justify-center sm:w-auto"
                         onClick={() => openAddBuilding(farm.id)}
                       >
                         <Plus className="h-4 w-4" />
                         Ajouter un bâtiment
-                      </button>
+                      </Button>
                     )
                   )}
                 </div>

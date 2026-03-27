@@ -71,15 +71,18 @@ export function CreateBatchForm({
   breeds,
   suppliers,
 }: Props) {
+  const draftStorageKey = `sunufarm:draft:create-batch:${organizationId}`
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [buildings, setBuildings] = useState<BuildingSummary[]>([])
   const [loadingBldgs, setLoadingBldgs] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
 
   const {
     control,
     register,
     handleSubmit,
+    reset,
     setValue,
     formState: { errors },
   } = useForm<FormValues, unknown, SubmitValues>({
@@ -107,6 +110,7 @@ export function CreateBatchForm({
   const breedId = useWatch({ control, name: "breedId" })
   const entryCount = useWatch({ control, name: "entryCount" })
   const unitCost = useWatch({ control, name: "unitCostFcfa" })
+  const draftValues = useWatch({ control })
 
   const suggestedSpecies = useMemo(() => {
     const defaultCode = getDefaultSpeciesCodeForBatchType(batchType)
@@ -146,7 +150,10 @@ export function CreateBatchForm({
     setValue("breedId", "")
   }, [breedId, filteredBreeds, setValue])
 
-  async function handleFarmChange(nextFarmId: string) {
+  async function handleFarmChange(
+    nextFarmId: string,
+    preferredBuildingId?: string,
+  ) {
     setValue("buildingId", "")
 
     if (!nextFarmId) {
@@ -159,7 +166,12 @@ export function CreateBatchForm({
     const res = await getBuildings({ organizationId, farmId: nextFarmId })
     if (res.success) {
       setBuildings(res.data)
-      if (res.data.length === 1) {
+      if (
+        preferredBuildingId &&
+        res.data.some((building) => building.id === preferredBuildingId)
+      ) {
+        setValue("buildingId", preferredBuildingId as FormValues["buildingId"])
+      } else if (res.data.length === 1) {
         setValue("buildingId", res.data[0].id)
       }
     } else {
@@ -167,6 +179,48 @@ export function CreateBatchForm({
     }
     setLoadingBldgs(false)
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const rawDraft = window.localStorage.getItem(draftStorageKey)
+    if (!rawDraft) {
+      setDraftReady(true)
+      return
+    }
+
+    try {
+      const parsedDraft = JSON.parse(rawDraft) as Partial<FormValues>
+      reset({
+        farmId: parsedDraft.farmId ?? "",
+        buildingId: parsedDraft.buildingId ?? "",
+        type: parsedDraft.type ?? "CHAIR",
+        speciesId: parsedDraft.speciesId ?? "",
+        breedId: parsedDraft.breedId ?? "",
+        entryDate: parsedDraft.entryDate ?? new Date().toISOString().split("T")[0],
+        entryCount: parsedDraft.entryCount ?? ("" as unknown as number),
+        entryAgeDay: parsedDraft.entryAgeDay ?? 0,
+        entryWeightG: parsedDraft.entryWeightG ?? "",
+        supplierId: parsedDraft.supplierId ?? "",
+        unitCostFcfa: parsedDraft.unitCostFcfa ?? 0,
+        totalCostFcfa: parsedDraft.totalCostFcfa ?? 0,
+        notes: parsedDraft.notes ?? "",
+      })
+
+      if (parsedDraft.farmId) {
+        void handleFarmChange(parsedDraft.farmId, parsedDraft.buildingId)
+      }
+    } catch {
+      window.localStorage.removeItem(draftStorageKey)
+    } finally {
+      setDraftReady(true)
+    }
+  }, [draftStorageKey, reset])
+
+  useEffect(() => {
+    if (!draftReady || typeof window === "undefined") return
+    window.localStorage.setItem(draftStorageKey, JSON.stringify(draftValues))
+  }, [draftReady, draftStorageKey, draftValues])
 
   const onSubmit: SubmitHandler<SubmitValues> = async (data) => {
     startTransition(async () => {
@@ -191,7 +245,11 @@ export function CreateBatchForm({
 
       if (res.success) {
         toast.success(`Lot ${res.data.number} cree`)
-        router.push(`/batches/${res.data.id}`)
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem(draftStorageKey)
+        }
+        router.push("/batches")
+        router.refresh()
       } else {
         toast.error(res.error)
       }
@@ -213,6 +271,10 @@ export function CreateBatchForm({
             Enregistrer l&apos;entree d&apos;un nouveau lot d&apos;elevage.
           </p>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+        Brouillon automatique actif sur cet appareil. Si vous quittez l&apos;ecran, les informations restent memorisees jusqu&apos;a la creation du lot.
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
