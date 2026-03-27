@@ -2,16 +2,24 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { toast } from "sonner"
-import { Mail, ShieldCheck, Trash2, UserPlus2 } from "lucide-react"
+import { Mail, RotateCcw, ShieldCheck, Trash2, UserPlus2 } from "lucide-react"
 import {
   addUserToOrganizationByEmail,
   removeUserFromOrganization,
+  updateUserModulePermissions,
   updateUserRole,
   type OrgMember,
 } from "@/src/actions/organizations"
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
 import type { UserRole } from "@/src/generated/prisma/client"
+import {
+  APP_MODULES,
+  APP_MODULE_LABELS,
+  getEffectiveModulePermissions,
+  parseModulePermissions,
+  type AppModule,
+} from "@/src/lib/permissions"
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
   { value: "OWNER", label: "Proprietaire" },
@@ -106,6 +114,51 @@ export function TeamManagementClient({
     })
   }
 
+  const handleToggleModule = (member: OrgMember, module: AppModule) => {
+    const currentModules = getEffectiveModulePermissions(member.role, member.modulePermissions)
+    const nextModules = currentModules.includes(module)
+      ? currentModules.filter((item) => item !== module && item !== "DASHBOARD")
+      : [...currentModules, module]
+
+    startTransition(async () => {
+      const result = await updateUserModulePermissions({
+        organizationId,
+        targetUserId: member.userId,
+        modulePermissions: nextModules,
+      })
+
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+
+      setMembers((previous) => previous.map((item) => (
+        item.userId === member.userId ? result.data : item
+      )))
+      toast.success("Acces modules mis a jour")
+    })
+  }
+
+  const handleResetModules = (targetUserId: string) => {
+    startTransition(async () => {
+      const result = await updateUserModulePermissions({
+        organizationId,
+        targetUserId,
+        modulePermissions: null,
+      })
+
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+
+      setMembers((previous) => previous.map((item) => (
+        item.userId === targetUserId ? result.data : item
+      )))
+      toast.success("Acces du role reappliques")
+    })
+  }
+
   return (
     <div className="space-y-4">
       <div className={`rounded-2xl border p-4 ${
@@ -159,7 +212,7 @@ export function TeamManagementClient({
 
             {!canManageTeam && (
               <p className="text-xs text-gray-500">
-                Le plan actuel permet la consultation, mais pas encore l&apos;administration de l&apos;equipe.
+                Seul le proprietaire de l&apos;organisation peut gerer les roles et les modules visibles.
               </p>
             )}
           </div>
@@ -169,6 +222,8 @@ export function TeamManagementClient({
       <div className="space-y-3">
         {sortedMembers.map((member) => {
           const isSelf = member.userId === actorUserId
+          const usesDefaultModules = parseModulePermissions(member.modulePermissions) === null
+          const enabledModules = getEffectiveModulePermissions(member.role, member.modulePermissions)
 
           return (
             <div
@@ -213,6 +268,63 @@ export function TeamManagementClient({
                   Votre propre role ne peut pas etre modifie depuis cette page.
                 </p>
               )}
+
+              <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Acces modules</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {usesDefaultModules
+                        ? "Ce membre utilise actuellement les acces par defaut de son role."
+                        : "Ce membre utilise un jeu d'acces personnalise."}
+                    </p>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!canManageTeam || isPending || isSelf || member.role === "OWNER"}
+                    onClick={() => handleResetModules(member.userId)}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Revenir au role
+                  </Button>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  {APP_MODULES.map((module) => {
+                    const checked = enabledModules.includes(module)
+                    const disabled =
+                      !canManageTeam ||
+                      isPending ||
+                      isSelf ||
+                      member.role === "OWNER" ||
+                      module === "DASHBOARD"
+
+                    return (
+                      <label
+                        key={`${member.id}-${module}`}
+                        className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-sm ${
+                          checked
+                            ? "border-green-200 bg-green-50 text-green-900"
+                            : "border-gray-200 bg-white text-gray-700"
+                        } ${
+                          disabled ? "opacity-70" : "cursor-pointer"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => handleToggleModule(member, module)}
+                          className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600"
+                        />
+                        <span>{APP_MODULE_LABELS[module]}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           )
         })}

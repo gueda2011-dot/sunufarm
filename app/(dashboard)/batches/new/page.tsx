@@ -2,6 +2,8 @@ import { redirect }       from "next/navigation"
 import type { Metadata }  from "next"
 import { auth }           from "@/src/auth"
 import prisma             from "@/src/lib/prisma"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { PlanGuardCard }  from "@/src/components/subscription/PlanGuardCard"
 import { getFarms }       from "@/src/actions/farms"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
@@ -13,14 +15,11 @@ export default async function NewBatchPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true, role: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "BATCHES")
 
-  const { organizationId, role } = membership
+  const { organizationId, role } = activeMembership
   const [subscription, activeBatchCount] = await Promise.all([
     getOrganizationSubscription(organizationId),
     prisma.batch.count({

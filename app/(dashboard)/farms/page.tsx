@@ -5,6 +5,7 @@ import prisma              from "@/src/lib/prisma"
 import { getFarms }        from "@/src/actions/farms"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { FarmsClient }     from "./_components/FarmsClient"
 
 export const metadata: Metadata = { title: "Fermes & Bâtiments" }
@@ -15,6 +16,7 @@ export default async function FarmsPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "FARMS")
 
   const { organizationId, role } = activeMembership
   const [subscription, activeFarmCount] = await Promise.all([

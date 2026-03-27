@@ -7,6 +7,7 @@ export const ACTIVE_ORG_COOKIE = "sunufarm_active_org"
 export interface OrganizationMembershipSummary {
   organizationId: string
   role: UserRole
+  modulePermissions: unknown
   organization: {
     id: string
     name: string
@@ -37,6 +38,7 @@ export async function getUserMemberships(
     select: {
       organizationId: true,
       role: true,
+      modulePermissions: true,
       organization: {
         select: {
           id: true,

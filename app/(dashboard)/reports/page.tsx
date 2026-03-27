@@ -13,6 +13,7 @@ import type { Metadata } from "next"
 import { auth }          from "@/src/auth"
 import prisma            from "@/src/lib/prisma"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
 import {
   getFeatureUpgradeMessage,
@@ -34,6 +35,7 @@ export default async function ReportsPage({
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "REPORTS")
 
   const { organizationId } = activeMembership
   const subscription = await getOrganizationSubscription(organizationId)

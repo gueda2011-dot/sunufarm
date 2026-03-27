@@ -12,8 +12,8 @@ import {
   CardTitle,
 } from "@/src/components/ui/card"
 import { formatDateTime } from "@/src/lib/formatters"
-import { hasPlanFeature } from "@/src/lib/subscriptions"
-import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
+import { APP_MODULE_LABELS, getEffectiveModulePermissions } from "@/src/lib/permissions"
 import { UserRole } from "@/src/generated/prisma/client"
 import { TeamManagementClient } from "./_components/TeamManagementClient"
 
@@ -47,39 +47,38 @@ export default async function TeamPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "TEAM")
 
   if (activeMembership.role === UserRole.SUPER_ADMIN) {
     redirect("/admin")
   }
 
-  const [subscription, members] = await Promise.all([
-    getOrganizationSubscription(activeMembership.organizationId),
-    prisma.userOrganization.findMany({
-      where: {
-        organizationId: activeMembership.organizationId,
-        user: { deletedAt: null },
-      },
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        createdAt: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
+  const members = await prisma.userOrganization.findMany({
+    where: {
+      organizationId: activeMembership.organizationId,
+      user: { deletedAt: null },
+    },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      modulePermissions: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
         },
       },
-      orderBy: [
-        { role: "asc" },
-        { createdAt: "asc" },
-      ],
-    }),
-  ])
+    },
+    orderBy: [
+      { role: "asc" },
+      { createdAt: "asc" },
+    ],
+  })
 
-  const canManageTeam = hasPlanFeature(subscription.plan, "TEAM_MANAGEMENT")
+  const canManageTeam = activeMembership.role === UserRole.OWNER
   const ownerCount = members.filter((member) => member.role === UserRole.OWNER).length
 
   return (
@@ -123,13 +122,13 @@ export default async function TeamPage() {
           <div>
             <p className={`text-sm font-semibold ${canManageTeam ? "text-green-900" : "text-amber-900"}`}>
               {canManageTeam
-                ? "La gestion d'equipe est prevue sur ce plan"
-                : "La page equipe est visible, mais la gestion avancee n'est pas incluse"}
+                ? "Le proprietaire peut gerer les roles et acces"
+                : "Seul le proprietaire de l'organisation peut gerer les acces"}
             </p>
             <p className={`mt-1 text-sm ${canManageTeam ? "text-green-800" : "text-amber-800"}`}>
               {canManageTeam
-                ? "La structure de roles est deja en place. Les actions d'administration peuvent ensuite etre branchees ici."
-                : "Le plan actuel permet de consulter les membres. Les fonctions completes d'invitation et de gestion sont reservees au plan Business."}
+                ? "Vous pouvez ajouter un membre existant, modifier son role et personnaliser les modules visibles."
+                : "Les autres membres peuvent consulter l'equipe, mais seuls les proprietaires peuvent inviter, retirer ou ajuster les modules."}
             </p>
           </div>
         </CardContent>
@@ -161,6 +160,11 @@ export default async function TeamPage() {
                 <p className="mt-1 text-xs text-gray-400">
                   Ajoute le {formatDateTime(member.createdAt)}
                 </p>
+                <p className="mt-2 text-xs text-gray-500">
+                  Modules: {getEffectiveModulePermissions(member.role, member.modulePermissions)
+                    .map((module) => APP_MODULE_LABELS[module])
+                    .join(", ")}
+                </p>
               </div>
 
               <div className="flex items-center">
@@ -189,6 +193,7 @@ export default async function TeamPage() {
               id: member.id,
               userId: member.userId,
               role: member.role,
+              modulePermissions: member.modulePermissions,
               farmPermissions: [],
               createdAt: member.createdAt,
               user: {

@@ -14,9 +14,10 @@
 import { notFound, redirect }             from "next/navigation"
 import type { Metadata }                  from "next"
 import { auth }                           from "@/src/auth"
-import prisma                             from "@/src/lib/prisma"
 import { getBatch }                       from "@/src/actions/batches"
 import type { ActionResult }             from "@/src/lib/auth"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getDailyRecords }                from "@/src/actions/daily-records"
 import { getExpenses }                    from "@/src/actions/expenses"
 import { getVaccinations, getTreatments } from "@/src/actions/health"
@@ -45,14 +46,11 @@ export default async function BatchDetailPage({
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true, role: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "BATCHES")
 
-  const { organizationId, role } = membership
+  const { organizationId, role } = activeMembership
   const subscription = await getOrganizationSubscription(organizationId)
   const canSeeProfitability = hasPlanFeature(subscription.plan, "PROFITABILITY")
   const aiPolicy = getAIPolicy(subscription)

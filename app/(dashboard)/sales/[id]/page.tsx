@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation"
 import type { Metadata } from "next"
 import { ArrowLeft } from "lucide-react"
 import { auth } from "@/src/auth"
-import prisma from "@/src/lib/prisma"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getSale } from "@/src/actions/sales"
 import { formatDate, formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
 
@@ -25,16 +26,12 @@ export default async function SaleDetailPage({
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
-    select: { organizationId: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "SALES")
 
   const saleResult = await getSale({
-    organizationId: membership.organizationId,
+    organizationId: activeMembership.organizationId,
     saleId: id,
   })
 

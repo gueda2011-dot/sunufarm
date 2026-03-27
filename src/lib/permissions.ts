@@ -93,6 +93,144 @@ export function canPerformAction(userRole: UserRole, action: Action): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Permissions par module applicatif
+// ---------------------------------------------------------------------------
+
+export const APP_MODULES = [
+  "DASHBOARD",
+  "DAILY",
+  "BATCHES",
+  "FARMS",
+  "EGGS",
+  "STOCK",
+  "SALES",
+  "CUSTOMERS",
+  "PURCHASES",
+  "HEALTH",
+  "FINANCES",
+  "REPORTS",
+  "TEAM",
+  "SETTINGS",
+] as const
+
+export type AppModule = (typeof APP_MODULES)[number]
+
+export const APP_MODULE_LABELS: Record<AppModule, string> = {
+  DASHBOARD: "Tableau de bord",
+  DAILY: "Saisie journaliere",
+  BATCHES: "Lots",
+  FARMS: "Fermes et batiments",
+  EGGS: "Production oeufs",
+  STOCK: "Stock",
+  SALES: "Ventes",
+  CUSTOMERS: "Clients",
+  PURCHASES: "Achats",
+  HEALTH: "Sante animale",
+  FINANCES: "Finances",
+  REPORTS: "Rapports",
+  TEAM: "Equipe",
+  SETTINGS: "Abonnement",
+}
+
+const ROLE_DEFAULT_MODULES: Record<UserRole, readonly AppModule[]> = {
+  SUPER_ADMIN: APP_MODULES,
+  OWNER: APP_MODULES,
+  MANAGER: [
+    "DASHBOARD",
+    "DAILY",
+    "BATCHES",
+    "FARMS",
+    "EGGS",
+    "STOCK",
+    "SALES",
+    "CUSTOMERS",
+    "PURCHASES",
+    "HEALTH",
+    "FINANCES",
+    "REPORTS",
+    "TEAM",
+  ],
+  TECHNICIAN: [
+    "DASHBOARD",
+    "DAILY",
+    "BATCHES",
+    "FARMS",
+    "EGGS",
+    "STOCK",
+    "HEALTH",
+  ],
+  DATA_ENTRY: [
+    "DASHBOARD",
+    "DAILY",
+    "BATCHES",
+    "FARMS",
+  ],
+  ACCOUNTANT: [
+    "DASHBOARD",
+    "SALES",
+    "CUSTOMERS",
+    "PURCHASES",
+    "FINANCES",
+    "REPORTS",
+  ],
+  VET: [
+    "DASHBOARD",
+    "BATCHES",
+    "FARMS",
+    "HEALTH",
+    "REPORTS",
+  ],
+  VIEWER: [
+    "DASHBOARD",
+    "BATCHES",
+    "FARMS",
+    "REPORTS",
+  ],
+}
+
+export function isAppModule(value: unknown): value is AppModule {
+  return typeof value === "string" && APP_MODULES.includes(value as AppModule)
+}
+
+function normalizeModules(modules: readonly AppModule[]): AppModule[] {
+  return [...new Set(modules)]
+}
+
+export function getDefaultModulesForRole(role: UserRole): AppModule[] {
+  return normalizeModules(ROLE_DEFAULT_MODULES[role] ?? ["DASHBOARD"])
+}
+
+export function parseModulePermissions(raw: unknown): AppModule[] | null {
+  if (raw === null || raw === undefined) return null
+  if (!Array.isArray(raw)) return []
+  return normalizeModules(raw.filter(isAppModule))
+}
+
+export function getEffectiveModulePermissions(
+  userRole: UserRole,
+  modulePermissions: unknown,
+): AppModule[] {
+  if (userRole === "SUPER_ADMIN" || userRole === "OWNER") {
+    return [...APP_MODULES]
+  }
+
+  const customPermissions = parseModulePermissions(modulePermissions)
+  if (customPermissions === null) {
+    return getDefaultModulesForRole(userRole)
+  }
+
+  return normalizeModules(["DASHBOARD", ...customPermissions])
+}
+
+export function hasModuleAccess(
+  userRole: UserRole,
+  modulePermissions: unknown,
+  module: AppModule,
+): boolean {
+  return getEffectiveModulePermissions(userRole, modulePermissions).includes(module)
+}
+
+// ---------------------------------------------------------------------------
 // Permissions par ferme
 // ---------------------------------------------------------------------------
 

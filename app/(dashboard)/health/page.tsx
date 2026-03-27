@@ -11,6 +11,7 @@ import { auth }          from "@/src/auth"
 import prisma            from "@/src/lib/prisma"
 import { getVaccinationPlans, getVaccinations, getTreatments } from "@/src/actions/health"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
@@ -24,6 +25,7 @@ export default async function HealthPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "HEALTH")
 
   const { organizationId } = activeMembership
   const subscription = await getOrganizationSubscription(organizationId)

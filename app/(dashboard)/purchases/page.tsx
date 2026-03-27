@@ -7,6 +7,7 @@ import type { Metadata } from "next"
 import { auth }          from "@/src/auth"
 import { getPurchases, getSuppliers } from "@/src/actions/purchases"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { PurchasesPageClient }        from "./_components/PurchasesPageClient"
 
 export const metadata: Metadata = { title: "Achats" }
@@ -17,6 +18,7 @@ export default async function PurchasesPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "PURCHASES")
 
   const { organizationId, role } = activeMembership
 

@@ -4,6 +4,7 @@ import { auth }          from "@/src/auth"
 import { getBatches }    from "@/src/actions/batches"
 import { getEggRecords } from "@/src/actions/eggs"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { EggsClient }    from "./_components/EggsClient"
 
 export const metadata: Metadata = { title: "Production d'œufs" }
@@ -14,6 +15,7 @@ export default async function EggsPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "EGGS")
 
   const { organizationId, role } = activeMembership
 

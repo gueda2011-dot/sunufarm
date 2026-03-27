@@ -4,6 +4,7 @@ import type { Metadata } from "next"
 import { auth } from "@/src/auth"
 import { getSales } from "@/src/actions/sales"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { SalesPageClient } from "./_components/SalesPageClient"
 
 export const metadata: Metadata = { title: "Ventes" }
@@ -14,6 +15,7 @@ export default async function SalesPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "SALES")
 
   const { organizationId } = activeMembership
 

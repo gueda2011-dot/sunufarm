@@ -11,6 +11,7 @@ import { auth }               from "@/src/auth"
 import { getExpenses }        from "@/src/actions/expenses"
 import { getSales }           from "@/src/actions/sales"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { ExpenseForm }        from "./_components/ExpenseForm"
 import { ExpenseList }        from "./_components/ExpenseList"
 import { ExpenseSummaryCards } from "./_components/ExpenseSummaryCards"
@@ -23,6 +24,7 @@ export default async function FinancesPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "FINANCES")
 
   const { organizationId } = activeMembership
 

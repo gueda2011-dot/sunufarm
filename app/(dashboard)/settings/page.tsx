@@ -4,6 +4,7 @@ import { Check, Crown, Sprout, Building2 } from "lucide-react"
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import {
   Card,
   CardContent,
@@ -72,6 +73,7 @@ export default async function SettingsPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "SETTINGS")
 
   const organizationName = (
     await prisma.organization.findUnique({

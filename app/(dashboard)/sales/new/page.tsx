@@ -3,7 +3,8 @@ import type { Metadata } from "next"
 import { auth } from "@/src/auth"
 import { getBatches } from "@/src/actions/batches"
 import { getCustomers } from "@/src/actions/customers"
-import prisma from "@/src/lib/prisma"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { CreateSaleForm } from "./_components/CreateSaleForm"
 
 export const metadata: Metadata = { title: "Nouvelle vente" }
@@ -12,17 +13,13 @@ export default async function NewSalePage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
-    select: { organizationId: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "SALES")
 
   const [customersResult, batchesResult] = await Promise.all([
-    getCustomers({ organizationId: membership.organizationId }),
-    getBatches({ organizationId: membership.organizationId, limit: 100 }),
+    getCustomers({ organizationId: activeMembership.organizationId }),
+    getBatches({ organizationId: activeMembership.organizationId, limit: 100 }),
   ])
 
   const customers = customersResult.success
@@ -52,7 +49,7 @@ export default async function NewSalePage() {
       </div>
 
       <CreateSaleForm
-        organizationId={membership.organizationId}
+        organizationId={activeMembership.organizationId}
         customers={customers}
         batches={batches}
       />

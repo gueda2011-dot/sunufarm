@@ -8,6 +8,7 @@ import {
   getMedicineStocks,
 } from "@/src/actions/stock"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { StockPageClient } from "./_components/StockPageClient"
 
 export const metadata: Metadata = { title: "Stock" }
@@ -23,6 +24,7 @@ export default async function StockPage() {
   if (!activeMembership) {
     redirect("/start")
   }
+  ensureModuleAccess(activeMembership, "STOCK")
 
   const { organizationId } = activeMembership
 

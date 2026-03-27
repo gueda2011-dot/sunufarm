@@ -15,6 +15,7 @@ import type { Metadata }     from "next"
 import { auth }              from "@/src/auth"
 import { getBatches }        from "@/src/actions/batches"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { DailyEntryClient }  from "./_components/DailyEntryClient"
 
 export const metadata: Metadata = {
@@ -31,6 +32,7 @@ export default async function DailyPage({
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "DAILY")
 
   const { organizationId, role } = activeMembership
 

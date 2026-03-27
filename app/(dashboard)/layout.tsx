@@ -88,7 +88,12 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-full min-h-screen bg-gray-50">
       {/* Sidebar — uniquement visible en desktop (lg+) */}
-      <Sidebar orgName={orgName} plan={subscription.plan} />
+      <Sidebar
+        orgName={orgName}
+        plan={subscription.plan}
+        role={activeMembership.role}
+        modulePermissions={activeMembership.modulePermissions}
+      />
 
       {/* Zone principale */}
       <div className="flex flex-1 flex-col lg:pl-64">
@@ -131,7 +136,11 @@ export default async function DashboardLayout({
       </div>
 
       {/* BottomNav — uniquement visible sur mobile (< lg) */}
-      <BottomNav plan={subscription.plan} />
+      <BottomNav
+        plan={subscription.plan}
+        role={activeMembership.role}
+        modulePermissions={activeMembership.modulePermissions}
+      />
     </div>
   )
 }

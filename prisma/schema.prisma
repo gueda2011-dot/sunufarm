@@ -454,6 +454,8 @@ model UserOrganization {
   userId          String
   organizationId  String
   role            UserRole @default(VIEWER)
+  // null = modules par defaut du role, tableau JSON = acces personnalises
+  modulePermissions Json?
   // Tableau JSON : [{farmId: string, canRead: bool, canWrite: bool, canDelete: bool}]
   farmPermissions Json     @default("[]")
   createdAt       DateTime @default(now())

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+  getEffectiveModulePermissions,
+  hasModuleAccess,
   canAccessFarm,
   canPerformAction,
   parseFarmPermissions,
@@ -29,5 +31,23 @@ describe("permissions", () => {
 
     expect(canAccessFarm("TECHNICIAN", permissions, "farm-1", "canWrite")).toBe(true)
     expect(canAccessFarm("TECHNICIAN", permissions, "farm-2", "canWrite")).toBe(false)
+  })
+
+  it("applique les modules par defaut du role data entry", () => {
+    expect(getEffectiveModulePermissions("DATA_ENTRY", null)).toEqual([
+      "DASHBOARD",
+      "DAILY",
+      "BATCHES",
+      "FARMS",
+    ])
+    expect(hasModuleAccess("DATA_ENTRY", null, "PURCHASES")).toBe(false)
+  })
+
+  it("respecte une personnalisation explicite des modules", () => {
+    const customModules = ["DASHBOARD", "DAILY", "CUSTOMERS"]
+
+    expect(getEffectiveModulePermissions("DATA_ENTRY", customModules)).toEqual(customModules)
+    expect(hasModuleAccess("DATA_ENTRY", customModules, "CUSTOMERS")).toBe(true)
+    expect(hasModuleAccess("DATA_ENTRY", customModules, "PURCHASES")).toBe(false)
   })
 })

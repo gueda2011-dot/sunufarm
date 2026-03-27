@@ -1,20 +1,11 @@
 "use client"
 
-/**
- * SunuFarm — Navigation mobile (bottom bar)
- *
- * 5 onglets : Accueil | Saisie | Lots | Stats | Menu
- * - Visible uniquement sur mobile (< lg), cachée sur desktop
- * - Ancrée en bas de l'écran, pleine largeur
- * - Touch targets 44×44px minimum (règle SunuFarm)
- * - usePathname() pour l'état actif
- *
- * Saisie est mis en avant (couleur primaire) car c'est l'écran principal terrain.
- */
-
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { type SubscriptionPlan } from "@/src/generated/prisma/client"
+import {
+  type SubscriptionPlan,
+  type UserRole,
+} from "@/src/generated/prisma/client"
 import {
   LayoutDashboard,
   ClipboardList,
@@ -34,40 +25,50 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/src/lib/utils"
+import { hasModuleAccess } from "@/src/lib/permissions"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 
 const tabs = [
-  { href: "/dashboard", label: "Accueil",  icon: LayoutDashboard },
-  { href: "/daily",    label: "Saisie",   icon: ClipboardList,   primary: true },
-  { href: "/batches",  label: "Lots",     icon: Bird },
-  { href: "/farms",    label: "Fermes",   icon: Warehouse },
+  { href: "/dashboard", label: "Accueil", icon: LayoutDashboard, module: "DASHBOARD" as const },
+  { href: "/daily", label: "Saisie", icon: ClipboardList, primary: true, module: "DAILY" as const },
+  { href: "/batches", label: "Lots", icon: Bird, module: "BATCHES" as const },
+  { href: "/farms", label: "Fermes", icon: Warehouse, module: "FARMS" as const },
 ] as const
 
 const moreLinks = [
-  { href: "/eggs",      label: "Production oeufs",    icon: Egg },
-  { href: "/reports",   label: "Rapports",            icon: BarChart3, feature: "REPORTS" as const },
-  { href: "/stock",     label: "Stock",               icon: Package },
-  { href: "/sales",     label: "Ventes",              icon: ShoppingCart },
-  { href: "/customers", label: "Clients",             icon: Users },
-  { href: "/purchases", label: "Achats",              icon: ShoppingBag },
-  { href: "/health",    label: "Sante animale",       icon: Syringe },
-  { href: "/finances",  label: "Finances",            icon: DollarSign },
-  { href: "/team",      label: "Equipe",              icon: Users },
-  { href: "/settings",  label: "Abonnement",          icon: Settings },
+  { href: "/eggs", label: "Production oeufs", icon: Egg, module: "EGGS" as const },
+  { href: "/reports", label: "Rapports", icon: BarChart3, module: "REPORTS" as const, feature: "REPORTS" as const },
+  { href: "/stock", label: "Stock", icon: Package, module: "STOCK" as const },
+  { href: "/sales", label: "Ventes", icon: ShoppingCart, module: "SALES" as const },
+  { href: "/customers", label: "Clients", icon: Users, module: "CUSTOMERS" as const },
+  { href: "/purchases", label: "Achats", icon: ShoppingBag, module: "PURCHASES" as const },
+  { href: "/health", label: "Sante animale", icon: Syringe, module: "HEALTH" as const },
+  { href: "/finances", label: "Finances", icon: DollarSign, module: "FINANCES" as const },
+  { href: "/team", label: "Equipe", icon: Users, module: "TEAM" as const },
+  { href: "/settings", label: "Abonnement", icon: Settings, module: "SETTINGS" as const },
 ] as const
 
 interface BottomNavProps {
   plan: SubscriptionPlan
+  role: UserRole
+  modulePermissions: unknown
 }
 
-export function BottomNav({ plan }: BottomNavProps) {
+export function BottomNav({ plan, role, modulePermissions }: BottomNavProps) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
-  const visibleTabs = tabs
+  const visibleTabs = tabs.filter((item) => (
+    hasModuleAccess(role, modulePermissions, item.module)
+  ))
   const visibleMoreLinks = moreLinks.filter((item) => {
+    if (!hasModuleAccess(role, modulePermissions, item.module)) {
+      return false
+    }
+
     if ("feature" in item && item.feature === "REPORTS") {
       return hasPlanFeature(plan, "REPORTS")
     }
+
     return true
   })
 
@@ -78,16 +79,16 @@ export function BottomNav({ plan }: BottomNavProps) {
 
   return (
     <>
-      {menuOpen && (
+      {menuOpen && visibleMoreLinks.length > 0 && (
         <div className="fixed inset-0 z-40 bg-black/30 lg:hidden" onClick={() => setMenuOpen(false)} />
       )}
 
-      {menuOpen && (
+      {menuOpen && visibleMoreLinks.length > 0 && (
         <div className="fixed inset-x-0 bottom-16 z-50 rounded-t-3xl border-t border-gray-200 bg-white px-4 pb-5 pt-4 shadow-2xl lg:hidden">
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-base font-semibold text-gray-900">Plus d&apos;actions</p>
-              <p className="text-sm text-gray-500">Accedez aux autres modules de l&apos;application.</p>
+              <p className="text-sm text-gray-500">Accedez aux modules autorises pour ce compte.</p>
             </div>
             <button
               type="button"
@@ -167,22 +168,24 @@ export function BottomNav({ plan }: BottomNavProps) {
           )
         })}
 
-        <button
-          type="button"
-          onClick={() => setMenuOpen((value) => !value)}
-          className={cn(
-            "flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors",
-            menuOpen ? "text-green-600" : "text-gray-500 hover:text-gray-700",
-          )}
-          aria-expanded={menuOpen}
-          aria-label="Plus"
-        >
-          <Menu
-            className={cn("h-5 w-5", menuOpen ? "text-green-600" : "text-gray-400")}
-            aria-hidden="true"
-          />
-          <span>Plus</span>
-        </button>
+        {visibleMoreLinks.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setMenuOpen((value) => !value)}
+            className={cn(
+              "flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors",
+              menuOpen ? "text-green-600" : "text-gray-500 hover:text-gray-700",
+            )}
+            aria-expanded={menuOpen}
+            aria-label="Plus"
+          >
+            <Menu
+              className={cn("h-5 w-5", menuOpen ? "text-green-600" : "text-gray-400")}
+              aria-hidden="true"
+            />
+            <span>Plus</span>
+          </button>
+        )}
       </nav>
     </>
   )

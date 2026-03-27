@@ -26,6 +26,7 @@ import prisma                  from "@/src/lib/prisma"
 import { getBatches }          from "@/src/actions/batches"
 import { getExpenses }         from "@/src/actions/expenses"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess }  from "@/src/lib/dashboard-access"
 import { AlertBanner }         from "../_components/AlertBanner"
 import { DashboardKpis }       from "../_components/DashboardKpis"
 import { ActiveBatchList }     from "../_components/ActiveBatchList"
@@ -41,6 +42,7 @@ export default async function DashboardPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "DASHBOARD")
 
   const { organizationId } = activeMembership
 

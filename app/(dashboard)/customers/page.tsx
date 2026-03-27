@@ -10,6 +10,7 @@ import type { Metadata } from "next"
 import { auth }        from "@/src/auth"
 import { getCustomers } from "@/src/actions/customers"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { CustomersPageClient } from "./_components/CustomersPageClient"
 
 export const metadata: Metadata = { title: "Clients" }
@@ -20,6 +21,7 @@ export default async function CustomersPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "CUSTOMERS")
 
   const { organizationId, role } = activeMembership
 

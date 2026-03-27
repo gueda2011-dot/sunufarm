@@ -12,6 +12,7 @@ import type { Metadata } from "next"
 import { auth }         from "@/src/auth"
 import { getBatches }   from "@/src/actions/batches"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { BatchListClient } from "./_components/BatchListClient"
 
 export const metadata: Metadata = { title: "Lots d'élevage" }
@@ -22,6 +23,7 @@ export default async function BatchesPage() {
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) redirect("/start")
+  ensureModuleAccess(activeMembership, "BATCHES")
 
   const { organizationId } = activeMembership
 

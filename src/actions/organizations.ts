@@ -32,13 +32,19 @@
 
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
+import { Prisma } from "@/src/generated/prisma/client"
 import {
   requireSession,
   requireMembership,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { canPerformAction } from "@/src/lib/permissions"
+import {
+  APP_MODULES,
+  canPerformAction,
+  parseModulePermissions,
+  type AppModule,
+} from "@/src/lib/permissions"
 import { requiredIdSchema } from "@/src/lib/validators"
 import { UserRole } from "@/src/generated/prisma/client"
 
@@ -88,6 +94,14 @@ const updateUserRoleSchema = z.object({
   role:           orgRoleSchema,
 })
 
+const appModuleSchema = z.enum(APP_MODULES)
+
+const updateUserModulePermissionsSchema = z.object({
+  organizationId: requiredIdSchema,
+  targetUserId: requiredIdSchema,
+  modulePermissions: z.array(appModuleSchema).nullable(),
+})
+
 const removeUserFromOrganizationSchema = z.object({
   organizationId: requiredIdSchema,
   targetUserId:   requiredIdSchema,
@@ -101,6 +115,7 @@ export interface OrgMember {
   id:              string
   userId:          string
   role:            UserRole
+  modulePermissions: unknown
   farmPermissions: unknown
   createdAt:       Date
   user: {
@@ -130,6 +145,7 @@ const memberSelect = {
   id:              true,
   userId:          true,
   role:            true,
+  modulePermissions: true,
   farmPermissions: true,
   createdAt:       true,
   user: {
@@ -239,7 +255,12 @@ export async function addUserToOrganization(
     }
 
     const membership = await prisma.userOrganization.create({
-      data:   { userId, organizationId, role },
+      data:   {
+        userId,
+        organizationId,
+        role,
+        modulePermissions: Prisma.JsonNull,
+      },
       select: memberSelect,
     })
 
@@ -363,7 +384,10 @@ export async function updateUserRole(
       }
       return tx.userOrganization.update({
         where: { userId_organizationId: { userId: targetUserId, organizationId } },
-        data:   { role },
+        data:   {
+          role,
+          modulePermissions: Prisma.JsonNull,
+        },
         select: memberSelect,
       })
     })
@@ -385,6 +409,81 @@ export async function updateUserRole(
     }
     return { success: false, error: "Impossible de modifier le rôle" }
   }
+}
+
+// ---------------------------------------------------------------------------
+// 3.b updateUserModulePermissions
+// ---------------------------------------------------------------------------
+
+export async function updateUserModulePermissions(
+  data: unknown,
+): Promise<ActionResult<OrgMember>> {
+  const sessionResult = await requireSession()
+  if (!sessionResult.success) return sessionResult
+
+  const parsed = updateUserModulePermissionsSchema.safeParse(data)
+  if (!parsed.success) {
+    return { success: false, error: "Donnees invalides" }
+  }
+
+  const { organizationId, targetUserId, modulePermissions } = parsed.data
+  const actorId = sessionResult.data.user.id
+
+  const membershipResult = await requireMembership(actorId, organizationId)
+  if (!membershipResult.success) return membershipResult
+
+  if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
+    return { success: false, error: "Permission refusee" }
+  }
+
+  if (targetUserId === actorId) {
+    return { success: false, error: "Vous ne pouvez pas modifier vos propres acces ici" }
+  }
+
+  const targetMembership = await prisma.userOrganization.findUnique({
+    where: { userId_organizationId: { userId: targetUserId, organizationId } },
+    select: {
+      id: true,
+      role: true,
+      modulePermissions: true,
+    },
+  })
+
+  if (!targetMembership) {
+    return { success: false, error: "Membre introuvable dans cette organisation" }
+  }
+
+  if (targetMembership.role === UserRole.OWNER) {
+    return { success: false, error: "Le proprietaire conserve deja un acces complet" }
+  }
+
+  const normalizedPermissions = modulePermissions === null
+    ? Prisma.JsonNull
+    : [...new Set(["DASHBOARD", ...modulePermissions])] as AppModule[]
+
+  const updated = await prisma.userOrganization.update({
+    where: { userId_organizationId: { userId: targetUserId, organizationId } },
+    data: {
+      modulePermissions: normalizedPermissions,
+    },
+    select: memberSelect,
+  })
+
+  await createAuditLog({
+    userId: actorId,
+    organizationId,
+    action: AuditAction.UPDATE,
+    resourceType: "ORGANIZATION_MEMBER_ACCESS",
+    resourceId: updated.id,
+    before: {
+      modulePermissions: parseModulePermissions(targetMembership.modulePermissions),
+    },
+    after: {
+      modulePermissions: modulePermissions,
+    },
+  })
+
+  return { success: true, data: updated }
 }
 
 // ---------------------------------------------------------------------------
