@@ -52,6 +52,8 @@ const credentialsSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const { auth, signIn, signOut, handlers } = NextAuth({
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  trustHost: true,
   // -------------------------------------------------------------------------
   // Provider Credentials
   // -------------------------------------------------------------------------
