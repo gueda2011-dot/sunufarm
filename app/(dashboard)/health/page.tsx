@@ -11,6 +11,8 @@ import { auth }          from "@/src/auth"
 import prisma            from "@/src/lib/prisma"
 import { getVaccinationPlans, getVaccinations, getTreatments } from "@/src/actions/health"
 import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
+import { hasPlanFeature } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { HealthPageClient }               from "./_components/HealthPageClient"
 
 export const metadata: Metadata = { title: "Santé animale" }
@@ -27,12 +29,16 @@ export default async function HealthPage() {
   if (!membership) redirect("/login?error=no-org")
 
   const { organizationId } = membership
+  const subscription = await getOrganizationSubscription(organizationId)
+  const canViewAdvancedHealth = hasPlanFeature(subscription.plan, "ADVANCED_HEALTH")
 
   // Fetch parallèle : vaccinations + traitements + map lots actifs
   const [vaccinationsResult, treatmentsResult, vaccinationPlansResult, batches] = await Promise.all([
     getVaccinations({ organizationId, limit: 30 }),
     getTreatments({ organizationId, limit: 30 }),
-    getVaccinationPlans({ organizationId }),
+    canViewAdvancedHealth
+      ? getVaccinationPlans({ organizationId })
+      : Promise.resolve({ success: true as const, data: [] }),
     prisma.batch.findMany({
       where:  { organizationId, deletedAt: null },
       select: {
@@ -66,43 +72,47 @@ export default async function HealthPage() {
   const weekAgo   = new Date(now.getTime() - 7 * 86_400_000)
   const recentVax = vaccinations.filter((v) => new Date(v.date) >= weekAgo).length
   const activeTreatments = treatments.filter((t) => !t.endDate || new Date(t.endDate) >= now).length
-  const batchAlerts = batches
-    .filter((batch) => batch.status === "ACTIVE")
-    .map((batch) => {
-      const ageDay = batch.entryAgeDay + Math.max(
-        0,
-        Math.floor((now.getTime() - new Date(batch.entryDate).getTime()) / 86_400_000),
-      )
-      const suggestions = getVaccinationSuggestions({
-        batchType: batch.type,
-        ageDay,
-        recordedVaccines: batch.vaccinationRecords.map((item) => item.vaccineName),
-      })
-      const overdueItems = suggestions.filter((item) => item.status === "overdue")
-      const dueItems = suggestions.filter((item) => item.status === "due")
+  const batchAlerts = canViewAdvancedHealth
+    ? batches
+      .filter((batch) => batch.status === "ACTIVE")
+      .map((batch) => {
+        const ageDay = batch.entryAgeDay + Math.max(
+          0,
+          Math.floor((now.getTime() - new Date(batch.entryDate).getTime()) / 86_400_000),
+        )
+        const suggestions = getVaccinationSuggestions({
+          batchType: batch.type,
+          ageDay,
+          recordedVaccines: batch.vaccinationRecords.map((item) => item.vaccineName),
+        })
+        const overdueItems = suggestions.filter((item) => item.status === "overdue")
+        const dueItems = suggestions.filter((item) => item.status === "due")
 
-      return {
-        batchId: batch.id,
-        batchNumber: batch.number,
-        ageDay,
-        overdueCount: overdueItems.length,
-        dueCount: dueItems.length,
-        items: [...overdueItems, ...dueItems].slice(0, 3).map((item) => ({
-          vaccineName: item.vaccineName,
-          status: item.status as "due" | "overdue",
-          windowLabel: `J${item.windowStartDay} a J${item.windowEndDay}`,
-        })),
-      }
-    })
-    .filter((item) => item.overdueCount > 0 || item.dueCount > 0)
-    .sort((left, right) => (
-      right.overdueCount - left.overdueCount ||
-      right.dueCount - left.dueCount ||
-      right.ageDay - left.ageDay
-    ))
+        return {
+          batchId: batch.id,
+          batchNumber: batch.number,
+          ageDay,
+          overdueCount: overdueItems.length,
+          dueCount: dueItems.length,
+          items: [...overdueItems, ...dueItems].slice(0, 3).map((item) => ({
+            vaccineName: item.vaccineName,
+            status: item.status as "due" | "overdue",
+            windowLabel: `J${item.windowStartDay} a J${item.windowEndDay}`,
+          })),
+        }
+      })
+      .filter((item) => item.overdueCount > 0 || item.dueCount > 0)
+      .sort((left, right) => (
+        right.overdueCount - left.overdueCount ||
+        right.dueCount - left.dueCount ||
+        right.ageDay - left.ageDay
+      ))
+    : []
 
   return (
     <HealthPageClient
+      currentPlan={subscription.plan}
+      canViewAdvancedHealth={canViewAdvancedHealth}
       vaccinations={vaccinations}
       treatments={treatments}
       vaccinationPlans={vaccinationPlans}

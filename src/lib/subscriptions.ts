@@ -23,6 +23,7 @@ export type SubscriptionFeature =
   | "REPORTS"
   | "PROFITABILITY"
   | "ALERTS"
+  | "ADVANCED_HEALTH"
   | "MULTI_FARM"
   | "TEAM_MANAGEMENT"
   | "ADVANCED_EXPORTS"
@@ -59,6 +60,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       REPORTS: false,
       PROFITABILITY: false,
       ALERTS: false,
+      ADVANCED_HEALTH: false,
       MULTI_FARM: false,
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
@@ -83,6 +85,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       REPORTS: true,
       PROFITABILITY: true,
       ALERTS: true,
+      ADVANCED_HEALTH: true,
       MULTI_FARM: false,
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
@@ -106,6 +109,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       REPORTS: true,
       PROFITABILITY: true,
       ALERTS: true,
+      ADVANCED_HEALTH: true,
       MULTI_FARM: true,
       TEAM_MANAGEMENT: true,
       ADVANCED_EXPORTS: true,
@@ -165,6 +169,8 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
       return "L'analyse de rentabilite est disponible a partir du plan Pro."
     case "ALERTS":
       return "Les alertes intelligentes sont disponibles a partir du plan Pro."
+    case "ADVANCED_HEALTH":
+      return "La surveillance sanitaire avancee est disponible a partir du plan Pro."
     case "MULTI_FARM":
       return "La gestion de plusieurs fermes est reservee au plan Business."
     case "TEAM_MANAGEMENT":

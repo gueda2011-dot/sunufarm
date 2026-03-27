@@ -2,12 +2,14 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import type { SubscriptionPlan } from "@/src/generated/prisma/client"
 import { formatDate } from "@/src/lib/formatters"
 import type {
   TreatmentSummary,
   VaccinationPlanSummary,
   VaccinationSummary,
 } from "@/src/actions/health"
+import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
 
 interface BatchInfo {
   number: string
@@ -15,6 +17,8 @@ interface BatchInfo {
 }
 
 interface Props {
+  currentPlan: SubscriptionPlan
+  canViewAdvancedHealth: boolean
   vaccinations: VaccinationSummary[]
   treatments: TreatmentSummary[]
   vaccinationPlans: VaccinationPlanSummary[]
@@ -69,6 +73,8 @@ function KpiCard({
 type Tab = "vaccinations" | "traitements"
 
 export function HealthPageClient({
+  currentPlan,
+  canViewAdvancedHealth,
   vaccinations,
   treatments,
   vaccinationPlans,
@@ -114,111 +120,126 @@ export function HealthPageClient({
           value={String(totalTreatmentsCount)}
           sub="historique"
         />
-        <KpiCard
-          label="Lots a surveiller"
-          value={String(batchAlerts.length)}
-          sub="vaccinations dues"
-          accent={batchAlerts.length > 0 ? "orange" : undefined}
-        />
-        <KpiCard
-          label="Plans vaccinaux"
-          value={String(vaccinationPlans.length)}
-          sub="templates actifs"
-          accent="blue"
-        />
+        {canViewAdvancedHealth ? (
+          <>
+            <KpiCard
+              label="Lots a surveiller"
+              value={String(batchAlerts.length)}
+              sub="vaccinations dues"
+              accent={batchAlerts.length > 0 ? "orange" : undefined}
+            />
+            <KpiCard
+              label="Plans vaccinaux"
+              value={String(vaccinationPlans.length)}
+              sub="templates actifs"
+              accent="blue"
+            />
+          </>
+        ) : null}
       </div>
 
-      {batchAlerts.length > 0 && (
-        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
-          <h2 className="text-sm font-semibold text-amber-900">Lots a surveiller</h2>
-          <p className="mt-1 text-xs text-amber-800">
-            Ces lots ont des vaccinations a faire maintenant ou deja en retard.
-          </p>
+      {canViewAdvancedHealth ? (
+        <>
+          {batchAlerts.length > 0 && (
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+              <h2 className="text-sm font-semibold text-amber-900">Lots a surveiller</h2>
+              <p className="mt-1 text-xs text-amber-800">
+                Ces lots ont des vaccinations a faire maintenant ou deja en retard.
+              </p>
 
-          <div className="mt-3 space-y-3">
-            {batchAlerts.map((alert) => (
-              <div key={alert.batchId} className="rounded-lg bg-white px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <Link
-                      href={`/batches/${alert.batchId}`}
-                      className="text-sm font-semibold text-gray-900 hover:text-blue-600"
-                    >
-                      {alert.batchNumber}
-                    </Link>
-                    <p className="mt-1 text-xs text-gray-500">Jour {alert.ageDay}</p>
+              <div className="mt-3 space-y-3">
+                {batchAlerts.map((alert) => (
+                  <div key={alert.batchId} className="rounded-lg bg-white px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <Link
+                          href={`/batches/${alert.batchId}`}
+                          className="text-sm font-semibold text-gray-900 hover:text-blue-600"
+                        >
+                          {alert.batchNumber}
+                        </Link>
+                        <p className="mt-1 text-xs text-gray-500">Jour {alert.ageDay}</p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                        {alert.overdueCount > 0 && (
+                          <span className="rounded-full bg-red-100 px-2 py-1 text-red-700">
+                            {alert.overdueCount} en retard
+                          </span>
+                        )}
+                        {alert.dueCount > 0 && (
+                          <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700">
+                            {alert.dueCount} a faire
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-2 space-y-1">
+                      {alert.items.map((item) => (
+                        <p key={`${alert.batchId}-${item.vaccineName}`} className="text-xs text-gray-600">
+                          {item.vaccineName} - {item.windowLabel} - {item.status === "overdue" ? "en retard" : "a faire"}
+                        </p>
+                      ))}
+                    </div>
                   </div>
-
-                  <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                    {alert.overdueCount > 0 && (
-                      <span className="rounded-full bg-red-100 px-2 py-1 text-red-700">
-                        {alert.overdueCount} en retard
-                      </span>
-                    )}
-                    {alert.dueCount > 0 && (
-                      <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700">
-                        {alert.dueCount} a faire
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-2 space-y-1">
-                  {alert.items.map((item) => (
-                    <p key={`${alert.batchId}-${item.vaccineName}`} className="text-xs text-gray-600">
-                      {item.vaccineName} - {item.windowLabel} - {item.status === "overdue" ? "en retard" : "a faire"}
-                    </p>
-                  ))}
-                </div>
+                ))}
               </div>
-            ))}
+            </div>
+          )}
+
+          <div className="rounded-xl border border-green-100 bg-green-50 p-4">
+            <h2 className="text-sm font-semibold text-green-900">Plans vaccinaux actifs</h2>
+            <p className="mt-1 text-xs text-green-800">
+              Modeles organisationnels pour standardiser les protocoles par type de lot.
+            </p>
+
+            {vaccinationPlans.length === 0 ? (
+              <p className="mt-3 rounded-lg bg-white px-4 py-3 text-sm text-gray-500">
+                Aucun plan vaccinal actif pour le moment.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {vaccinationPlans.map((plan) => (
+                  <div key={plan.id} className="rounded-lg bg-white px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{plan.name}</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {plan.batchType === "PONDEUSE"
+                            ? "Pondeuse"
+                            : plan.batchType === "CHAIR"
+                              ? "Chair"
+                              : "Reproducteur"}{" "}
+                          - {plan.items.length} etape(s)
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {plan.items.map((item) => (
+                        <span
+                          key={item.id}
+                          className="rounded-full bg-green-100 px-2.5 py-1 text-xs text-green-800"
+                        >
+                          J{item.dayOfAge} - {item.vaccineName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
+        </>
+      ) : (
+        <PlanGuardCard
+          title="Surveillance sanitaire avancee"
+          message="Le suivi detaille des lots a surveiller et les plans vaccinaux organisationnels sont disponibles a partir du plan Pro."
+          requiredPlan="Pro"
+          currentPlan={currentPlan}
+        />
       )}
-
-      <div className="rounded-xl border border-green-100 bg-green-50 p-4">
-        <h2 className="text-sm font-semibold text-green-900">Plans vaccinaux actifs</h2>
-        <p className="mt-1 text-xs text-green-800">
-          Modeles organisationnels pour standardiser les protocoles par type de lot.
-        </p>
-
-        {vaccinationPlans.length === 0 ? (
-          <p className="mt-3 rounded-lg bg-white px-4 py-3 text-sm text-gray-500">
-            Aucun plan vaccinal actif pour le moment.
-          </p>
-        ) : (
-          <div className="mt-3 space-y-3">
-            {vaccinationPlans.map((plan) => (
-              <div key={plan.id} className="rounded-lg bg-white px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{plan.name}</p>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {plan.batchType === "PONDEUSE"
-                        ? "Pondeuse"
-                        : plan.batchType === "CHAIR"
-                          ? "Chair"
-                          : "Reproducteur"}{" "}
-                      - {plan.items.length} etape(s)
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {plan.items.map((item) => (
-                    <span
-                      key={item.id}
-                      className="rounded-full bg-green-100 px-2.5 py-1 text-xs text-green-800"
-                    >
-                      J{item.dayOfAge} - {item.vaccineName}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
         Pour enregistrer une vaccination ou un traitement, rendez-vous sur le{" "}
