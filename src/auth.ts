@@ -17,13 +17,14 @@
  *   adapter: PrismaAdapter(prisma) dans la config — les modèles DB sont prêts.
  */
 
-import NextAuth, { type DefaultSession } from "next-auth"
+import NextAuth, { CredentialsSignin, type DefaultSession } from "next-auth"
 import type { JWT } from "next-auth/jwt"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import { logger } from "@/src/lib/logger"
+import { normalizePhoneNumber } from "@/src/lib/validators"
 
 // ---------------------------------------------------------------------------
 // TypeScript — Extension du type Session NextAuth
@@ -70,9 +71,13 @@ declare module "next-auth/jwt" {
 // ---------------------------------------------------------------------------
 
 const credentialsSchema = z.object({
-  email:    z.string().email("Email invalide"),
+  identifier: z.string().trim().min(3, "Email ou numero requis"),
   password: z.string().min(1, "Mot de passe requis"),
 })
+
+class EmailNotVerifiedError extends CredentialsSignin {
+  code = "email_not_verified"
+}
 
 function clearImpersonation(token: JWT) {
   token.impersonatedUserId = null
@@ -104,15 +109,24 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           if (!parsed.success) return null
 
           // 2. Chercher l'utilisateur actif (non soft-deleted)
+          const identifier = parsed.data.identifier.trim()
+          const normalizedEmail = identifier.toLowerCase()
+          const normalizedPhone = normalizePhoneNumber(identifier)
+
           const user = await prisma.user.findFirst({
             where: {
-              email:     parsed.data.email.trim().toLowerCase(),
               deletedAt: null,            // exclut les comptes supprimés
+              OR: [
+                { email: normalizedEmail },
+                { phone: normalizedPhone || "__never__" },
+              ],
             },
             select: {
               id:           true,
               email:        true,
+              phone:        true,
               name:         true,
+              emailVerified: true,
               passwordHash: true,
             },
           })
@@ -127,6 +141,10 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
             user.passwordHash,
           )
           if (!passwordValid) return null
+
+          if (!user.emailVerified) {
+            throw new EmailNotVerifiedError()
+          }
 
           // 5. Retourner uniquement ce qui doit aller dans le token
           return {

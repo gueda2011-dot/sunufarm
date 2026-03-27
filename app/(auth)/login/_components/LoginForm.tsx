@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { signIn } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useState } from "react"
+import { useState, useTransition } from "react"
 import { Eye, EyeOff, AlertCircle } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
@@ -18,9 +18,10 @@ import {
   CardTitle,
   CardDescription,
 } from "@/src/components/ui/card"
+import { requestEmailVerification } from "@/src/actions/auth-recovery"
 
 const loginSchema = z.object({
-  email: z.string().email("Adresse email invalide"),
+  identifier: z.string().trim().min(3, "Email ou numero requis"),
   password: z.string().min(1, "Mot de passe requis"),
 })
 
@@ -28,6 +29,7 @@ type LoginFormValues = z.infer<typeof loginSchema>
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   CredentialsSignin: "Email ou mot de passe incorrect.",
+  email_not_verified: "Votre adresse email n'est pas encore confirmee.",
   "no-org": "Votre compte n'est associe a aucune organisation.",
   OAuthSignin: "Erreur lors de la connexion. Reessayez.",
   OAuthCallback: "Erreur lors de la connexion. Reessayez.",
@@ -40,35 +42,56 @@ export function LoginForm() {
   const searchParams = useSearchParams()
 
   const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard"
-  const urlErrorCode = searchParams.get("error") ?? ""
+  const urlErrorCode = searchParams.get("code") ?? searchParams.get("error") ?? ""
   const urlErrorMsg = AUTH_ERROR_MESSAGES[urlErrorCode] ?? ""
+  const successMessage =
+    searchParams.get("verified") === "success"
+      ? "Votre adresse email est maintenant confirmee. Vous pouvez vous connecter."
+      : searchParams.get("reset") === "success"
+        ? "Votre mot de passe a ete reinitialise. Connectez-vous avec le nouveau."
+        : searchParams.get("verification") === "resent"
+          ? "Un nouvel email de confirmation a ete envoye."
+          : ""
 
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
+  const [submitErrorCode, setSubmitErrorCode] = useState("")
+  const [resendMessage, setResendMessage] = useState("")
+  const [isResending, startResendTransition] = useTransition()
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
   })
 
+  const typedIdentifier = watch("identifier") ?? ""
+  const canResendVerification =
+    (submitErrorCode || urlErrorCode) === "email_not_verified"
+    && typedIdentifier.includes("@")
+
   const onSubmit = async (data: LoginFormValues) => {
     setSubmitting(true)
     setSubmitError("")
+    setSubmitErrorCode("")
+    setResendMessage("")
 
     try {
       const result = await signIn("credentials", {
-        email: data.email.trim().toLowerCase(),
+        identifier: data.identifier.trim(),
         password: data.password,
         redirect: false,
       })
 
       if (result?.error) {
+        const code = result.code ?? result.error
+        setSubmitErrorCode(code)
         setSubmitError(
-          AUTH_ERROR_MESSAGES[result.error] ?? AUTH_ERROR_MESSAGES.Default,
+          AUTH_ERROR_MESSAGES[code] ?? AUTH_ERROR_MESSAGES.Default,
         )
         return
       }
@@ -84,6 +107,23 @@ export function LoginForm() {
 
   const errorMessage = submitError || urlErrorMsg
 
+  const handleResendVerification = () => {
+    setResendMessage("")
+
+    startResendTransition(async () => {
+      const result = await requestEmailVerification({
+        email: typedIdentifier.trim().toLowerCase(),
+      })
+
+      if (!result.success) {
+        setResendMessage(result.error)
+        return
+      }
+
+      setResendMessage("Un email de confirmation vient d'etre renvoye.")
+    })
+  }
+
   return (
     <Card>
       <CardHeader className="pb-4">
@@ -94,6 +134,12 @@ export function LoginForm() {
       </CardHeader>
 
       <CardContent>
+        {successMessage && (
+          <div className="mb-4 rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">
+            {successMessage}
+          </div>
+        )}
+
         {errorMessage && (
           <div
             role="alert"
@@ -104,19 +150,36 @@ export function LoginForm() {
           </div>
         )}
 
+        {canResendVerification && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <p>
+              Confirmez d&apos;abord votre adresse email pour activer votre compte.
+            </p>
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={isResending}
+              className="mt-2 font-medium text-amber-900 underline underline-offset-2 disabled:cursor-not-allowed disabled:no-underline"
+            >
+              {isResending ? "Renvoi..." : "Renvoyer l'email de confirmation"}
+            </button>
+            {resendMessage ? <p className="mt-2">{resendMessage}</p> : null}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
           <div>
-            <Label htmlFor="email" required>
-              Adresse email
+            <Label htmlFor="identifier" required>
+              Email ou telephone
             </Label>
             <Input
-              id="email"
-              type="email"
-              placeholder="vous@exemple.com"
-              autoComplete="email"
+              id="identifier"
+              type="text"
+              placeholder="vous@exemple.com ou 77 123 45 67"
+              autoComplete="username"
               autoFocus
-              error={errors.email?.message}
-              {...register("email")}
+              error={errors.identifier?.message}
+              {...register("identifier")}
             />
           </div>
 
@@ -160,6 +223,12 @@ export function LoginForm() {
             Se connecter
           </Button>
         </form>
+
+        <p className="mt-4 text-center text-sm text-gray-600">
+          <Link href="/forgot-password" className="font-medium text-green-700 hover:text-green-800">
+            Mot de passe oublie ?
+          </Link>
+        </p>
 
         <p className="mt-5 text-center text-sm text-gray-600">
           Nouveau sur SunuFarm ?{" "}

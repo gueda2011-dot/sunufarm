@@ -19,7 +19,12 @@ const BASE_METADATA: Metadata = {
   appleWebApp: {
     capable: true,
     title: "SunuFarm",
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: {
+    telephone: false,
+    email: false,
+    address: false,
   },
 }
 
@@ -62,6 +67,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   themeColor: "#16a34a",
+  viewportFit: "cover",
 }
 
 export default function RootLayout({

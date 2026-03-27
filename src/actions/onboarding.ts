@@ -10,8 +10,9 @@ import {
   requireSession,
   type ActionResult,
 } from "@/src/lib/auth"
+import { sendVerificationEmailForAddress } from "@/src/actions/auth-recovery"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { phoneSchema } from "@/src/lib/validators"
+import { normalizePhoneNumber, phoneSchema } from "@/src/lib/validators"
 import { slugify } from "@/src/lib/utils"
 import {
   SubscriptionPlan,
@@ -27,6 +28,7 @@ import { logger } from "@/src/lib/logger"
 const registerUserSchema = z.object({
   name: z.string().trim().min(2, "Nom requis").max(120, "Nom trop long"),
   email: z.string().trim().email("Adresse email invalide"),
+  phone: phoneSchema,
   password: z
     .string()
     .min(8, "Le mot de passe doit contenir au moins 8 caracteres")
@@ -74,7 +76,7 @@ async function buildUniqueOrganizationSlug(name: string): Promise<string> {
 
 export async function registerUserAccount(
   data: unknown,
-): Promise<ActionResult<{ userId: string }>> {
+): Promise<ActionResult<{ userId: string; verificationSent: boolean }>> {
   try {
     const session = await auth()
     if (session?.user?.id) {
@@ -94,6 +96,10 @@ export async function registerUserAccount(
     }
 
     const email = parsed.data.email.trim().toLowerCase()
+    const phone = parsed.data.phone
+      ? normalizePhoneNumber(parsed.data.phone)
+      : null
+
     const existingUser = await prisma.user.findUnique({
       where: { email },
       select: { id: true, deletedAt: true },
@@ -106,18 +112,66 @@ export async function registerUserAccount(
       }
     }
 
+    if (phone) {
+      const existingPhoneUser = await prisma.user.findFirst({
+        where: {
+          phone,
+          deletedAt: null,
+        },
+        select: { id: true },
+      })
+
+      if (existingPhoneUser) {
+        return {
+          success: false,
+          error: "Un compte existe deja avec ce numero de telephone.",
+          fieldErrors: {
+            phone: ["Ce numero est deja utilise."],
+          },
+        }
+      }
+    }
+
     const passwordHash = await bcrypt.hash(parsed.data.password, 12)
     const user = await prisma.user.create({
       data: {
         name: parsed.data.name.trim(),
         email,
+        phone,
         passwordHash,
       },
       select: { id: true },
     })
 
-    return { success: true, data: { userId: user.id } }
-  } catch {
+    const emailResult = await sendVerificationEmailForAddress(email)
+    if (!emailResult.success) {
+      await prisma.user.delete({ where: { id: user.id } })
+
+      return {
+        success: false,
+        error: emailResult.error,
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        userId: user.id,
+        verificationSent: true,
+      },
+    }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError
+      && error.code === "P2002"
+    ) {
+      return {
+        success: false,
+        error: "Un compte existe deja avec ces informations.",
+      }
+    }
+
+    logger.error("onboarding.register_failed", { error })
     return {
       success: false,
       error: "Impossible de creer votre compte pour le moment.",
@@ -164,6 +218,7 @@ export async function completeOnboarding(
     const organizationName = parsed.data.organizationName.trim()
     const farmName = parsed.data.farmName.trim()
     const phone = parsed.data.phone?.trim() || null
+    const normalizedUserPhone = phone ? normalizePhoneNumber(phone) : null
     const address = parsed.data.address?.trim() || null
     const slug = await buildUniqueOrganizationSlug(organizationName)
 
@@ -199,6 +254,13 @@ export async function completeOnboarding(
           role: UserRole.OWNER,
         },
       })
+
+      if (normalizedUserPhone) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { phone: normalizedUserPhone },
+        })
+      }
 
       const subscription = await tx.subscription.create({
         data: {

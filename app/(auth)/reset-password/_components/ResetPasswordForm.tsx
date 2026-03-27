@@ -1,12 +1,12 @@
 "use client"
 
-import Link from "next/link"
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { useForm, type SubmitHandler } from "react-hook-form"
+import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { Eye, EyeOff, AlertCircle } from "lucide-react"
+import { resetPasswordWithToken } from "@/src/actions/auth-recovery"
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
 import { Label } from "@/src/components/ui/label"
@@ -17,12 +17,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/src/components/ui/card"
-import { registerUserAccount } from "@/src/actions/onboarding"
 
-const registerSchema = z.object({
-  name: z.string().trim().min(2, "Nom requis").max(120),
-  email: z.string().trim().email("Adresse email invalide"),
-  phone: z.string().trim().optional(),
+const resetPasswordSchema = z.object({
   password: z
     .string()
     .min(8, "8 caracteres minimum")
@@ -31,13 +27,19 @@ const registerSchema = z.object({
     .regex(/[0-9]/, "Ajoutez un chiffre"),
   confirmPassword: z.string().min(1, "Confirmation requise"),
 }).refine((data) => data.password === data.confirmPassword, {
-  message: "Les mots de passe ne correspondent pas",
   path: ["confirmPassword"],
+  message: "Les mots de passe ne correspondent pas",
 })
 
-type RegisterFormValues = z.infer<typeof registerSchema>
+type ResetPasswordValues = z.infer<typeof resetPasswordSchema>
 
-export function RegisterForm() {
+export function ResetPasswordForm({
+  token,
+  email,
+}: {
+  token: string
+  email: string
+}) {
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
@@ -49,25 +51,20 @@ export function RegisterForm() {
     handleSubmit,
     setError,
     formState: { errors },
-  } = useForm<RegisterFormValues>({
-    resolver: zodResolver(registerSchema),
+  } = useForm<ResetPasswordValues>({
+    resolver: zodResolver(resetPasswordSchema),
     defaultValues: {
-      name: "",
-      email: "",
-      phone: "",
       password: "",
       confirmPassword: "",
     },
   })
 
-  const onSubmit: SubmitHandler<RegisterFormValues> = (data) => {
+  const onSubmit = (data: ResetPasswordValues) => {
     setSubmitError("")
 
     startTransition(async () => {
-      const result = await registerUserAccount({
-        name: data.name,
-        email: data.email,
-        phone: data.phone,
+      const result = await resetPasswordWithToken({
+        token,
         password: data.password,
         confirmPassword: data.confirmPassword,
       })
@@ -77,7 +74,7 @@ export function RegisterForm() {
           for (const [field, messages] of Object.entries(result.fieldErrors)) {
             const message = messages?.[0]
             if (message) {
-              setError(field as keyof RegisterFormValues, { message })
+              setError(field as keyof ResetPasswordValues, { message })
             }
           }
         }
@@ -86,7 +83,7 @@ export function RegisterForm() {
         return
       }
 
-      router.push(`/verify-email?sent=1&email=${encodeURIComponent(data.email.trim().toLowerCase())}`)
+      router.push("/login?reset=success")
       router.refresh()
     })
   }
@@ -94,14 +91,14 @@ export function RegisterForm() {
   return (
     <Card>
       <CardHeader className="pb-4">
-        <CardTitle>Creer un compte</CardTitle>
+        <CardTitle>Nouveau mot de passe</CardTitle>
         <CardDescription>
-          Ouvrez votre espace SunuFarm puis configurez votre premiere exploitation.
+          Choisissez un nouveau mot de passe pour {email}.
         </CardDescription>
       </CardHeader>
 
       <CardContent>
-        {submitError && (
+        {submitError ? (
           <div
             role="alert"
             className="mb-4 flex items-start gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700"
@@ -109,57 +106,12 @@ export function RegisterForm() {
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             <span>{submitError}</span>
           </div>
-        )}
+        ) : null}
 
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div>
-            <Label htmlFor="name" required>
-              Nom complet
-            </Label>
-            <Input
-              id="name"
-              placeholder="Aminata Ndiaye"
-              autoComplete="name"
-              autoFocus
-              error={errors.name?.message}
-              {...register("name")}
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="email" required>
-              Adresse email
-            </Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="vous@exemple.com"
-              autoComplete="email"
-              error={errors.email?.message}
-              {...register("email")}
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="phone">
-              Telephone
-            </Label>
-            <Input
-              id="phone"
-              type="tel"
-              placeholder="77 123 45 67"
-              autoComplete="tel"
-              error={errors.phone?.message}
-              {...register("phone")}
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Optionnel, mais utile pour se connecter avec son numero.
-            </p>
-          </div>
-
-          <div>
             <Label htmlFor="password" required>
-              Mot de passe
+              Nouveau mot de passe
             </Label>
             <div className="relative">
               <Input
@@ -178,11 +130,7 @@ export function RegisterForm() {
                 aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                 tabIndex={-1}
               >
-                {showPassword ? (
-                  <EyeOff className="h-5 w-5" aria-hidden="true" />
-                ) : (
-                  <Eye className="h-5 w-5" aria-hidden="true" />
-                )}
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
             </div>
           </div>
@@ -208,26 +156,15 @@ export function RegisterForm() {
                 aria-label={showConfirmation ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                 tabIndex={-1}
               >
-                {showConfirmation ? (
-                  <EyeOff className="h-5 w-5" aria-hidden="true" />
-                ) : (
-                  <Eye className="h-5 w-5" aria-hidden="true" />
-                )}
+                {showConfirmation ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
             </div>
           </div>
 
-          <Button type="submit" className="mt-2 w-full" loading={isPending}>
-            Creer mon compte
+          <Button type="submit" className="w-full" loading={isPending}>
+            Enregistrer le nouveau mot de passe
           </Button>
         </form>
-
-        <p className="mt-5 text-center text-sm text-gray-600">
-          Vous avez deja un compte ?{" "}
-          <Link href="/login" className="font-medium text-green-700 hover:text-green-800">
-            Se connecter
-          </Link>
-        </p>
       </CardContent>
     </Card>
   )

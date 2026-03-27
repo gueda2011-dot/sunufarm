@@ -80,6 +80,33 @@ export const phoneSchema = z
   .regex(/^[\+\d][\d\s\-\.]{5,18}$/, "Numéro de téléphone invalide")
   .optional()
 
+export function normalizePhoneNumber(input: string) {
+  const trimmed = input.trim()
+  if (!trimmed) return ""
+
+  let normalized = trimmed.replace(/[^\d+]/g, "")
+
+  if (normalized.startsWith("00")) {
+    normalized = `+${normalized.slice(2)}`
+  }
+
+  const digitsOnly = normalized.replace(/\D/g, "")
+
+  if (normalized.startsWith("+")) {
+    return `+${digitsOnly}`
+  }
+
+  if (digitsOnly.length === 9) {
+    return `+221${digitsOnly}`
+  }
+
+  if (digitsOnly.length === 12 && digitsOnly.startsWith("221")) {
+    return `+${digitsOnly}`
+  }
+
+  return digitsOnly
+}
+
 // ---------------------------------------------------------------------------
 // Pagination (cursor-based)
 // ---------------------------------------------------------------------------
