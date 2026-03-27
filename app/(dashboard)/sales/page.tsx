@@ -18,7 +18,7 @@ export default async function SalesPage() {
     orderBy: { organization: { name: "asc" } },
   })
 
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const { organizationId } = membership
 

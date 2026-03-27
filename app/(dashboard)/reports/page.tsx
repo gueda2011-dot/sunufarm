@@ -35,7 +35,7 @@ export default async function ReportsPage({
     select:  { organizationId: true, role: true },
     orderBy: { organization: { name: "asc" } },
   })
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const { organizationId } = membership
   const subscription = await getOrganizationSubscription(organizationId)

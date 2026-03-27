@@ -7,7 +7,7 @@ export default async function OnboardingPage() {
   const session = await auth()
 
   if (!session?.user?.id) {
-    redirect("/login?callbackUrl=/onboarding")
+    redirect("/login")
   }
 
   const memberships = await prisma.userOrganization.findMany({

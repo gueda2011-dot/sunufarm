@@ -96,7 +96,7 @@ export function RegisterForm() {
         return
       }
 
-      router.push("/onboarding")
+      router.push("/start")
       router.refresh()
     })
   }

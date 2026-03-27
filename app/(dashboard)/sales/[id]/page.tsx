@@ -31,7 +31,7 @@ export default async function SaleDetailPage({
     orderBy: { organization: { name: "asc" } },
   })
 
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const saleResult = await getSale({
     organizationId: membership.organizationId,

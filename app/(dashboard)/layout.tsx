@@ -3,7 +3,7 @@
  *
  * Responsabilités :
  *   1. Auth guard : auth() → redirect /login si session null
- *   2. Org guard  : query memberships → redirect /login si aucune organisation
+ *   2. Org guard  : query memberships → redirect /start si aucune organisation
  *   3. Org active : première organisation alphab. (MVP — switcher en V2)
  *   4. Rendu      : Sidebar (desktop) + Header + BottomNav (mobile) + {children}
  *
@@ -55,7 +55,7 @@ export default async function DashboardLayout({
 
   if (memberships.length === 0) {
     // L'utilisateur existe mais n'appartient à aucune organisation
-    redirect("/onboarding")
+    redirect("/start")
   }
 
   const superAdminMembership = memberships.find((membership) => (

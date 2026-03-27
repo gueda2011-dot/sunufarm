@@ -81,7 +81,7 @@ export default async function SettingsPage() {
     orderBy: { organization: { name: "asc" } },
   })
 
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const { organizationId } = membership
   const isOwner = membership.role === UserRole.OWNER

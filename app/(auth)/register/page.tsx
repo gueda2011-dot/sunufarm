@@ -21,7 +21,7 @@ export default async function RegisterPage() {
       redirect("/dashboard")
     }
 
-    redirect("/onboarding")
+    redirect("/start")
   }
 
   return <RegisterForm />

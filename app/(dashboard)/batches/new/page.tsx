@@ -18,7 +18,7 @@ export default async function NewBatchPage() {
     select:  { organizationId: true, role: true },
     orderBy: { organization: { name: "asc" } },
   })
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const { organizationId, role } = membership
   const [subscription, activeBatchCount] = await Promise.all([

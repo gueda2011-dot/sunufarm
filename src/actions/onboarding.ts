@@ -3,6 +3,7 @@
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
+import { Prisma } from "@/src/generated/prisma"
 import prisma from "@/src/lib/prisma"
 import { auth } from "@/src/auth"
 import {
@@ -248,7 +249,25 @@ export async function completeOnboarding(
       success: true,
       data: { organizationId: created.organizationId },
     }
-  } catch {
+  } catch (error) {
+    console.error("[Onboarding] Echec de finalisation", error)
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2002") {
+        return {
+          success: false,
+          error: "Une exploitation avec des informations similaires existe deja. Reessayez avec un autre nom.",
+        }
+      }
+
+      if (error.code === "P2021" || error.code === "P2022") {
+        return {
+          success: false,
+          error: "La base de donnees de production n'est pas a jour pour terminer la configuration. Lancez les migrations Prisma puis reessayez.",
+        }
+      }
+    }
+
     return {
       success: false,
       error: "Impossible de finaliser votre configuration pour le moment.",

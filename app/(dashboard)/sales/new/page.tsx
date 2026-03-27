@@ -18,7 +18,7 @@ export default async function NewSalePage() {
     orderBy: { organization: { name: "asc" } },
   })
 
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const [customersResult, batchesResult] = await Promise.all([
     getCustomers({ organizationId: membership.organizationId }),

@@ -24,7 +24,7 @@ export default async function ExpenseDetailPage({
     select: { organizationId: true },
     orderBy: { organization: { name: "asc" } },
   })
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const expenseResult = await getExpense({
     organizationId: membership.organizationId,

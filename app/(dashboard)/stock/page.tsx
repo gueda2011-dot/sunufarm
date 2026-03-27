@@ -26,7 +26,7 @@ export default async function StockPage() {
   })
 
   if (!membership) {
-    redirect("/login?error=no-org")
+    redirect("/start")
   }
 
   const { organizationId } = membership

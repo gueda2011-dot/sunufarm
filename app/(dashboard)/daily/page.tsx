@@ -36,7 +36,7 @@ export default async function DailyPage({
     orderBy: { organization: { name: "asc" } },
   })
 
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const { organizationId, role } = membership
 

@@ -23,7 +23,7 @@ export default async function LoginPage() {
       redirect("/dashboard")
     }
 
-    redirect("/onboarding")
+    redirect("/start")
   }
 
   return (

@@ -43,7 +43,7 @@ export default async function DashboardPage() {
     select:  { organizationId: true },
     orderBy: { organization: { name: "asc" } },
   })
-  if (!membership) redirect("/login?error=no-org")
+  if (!membership) redirect("/start")
 
   const { organizationId } = membership
 
