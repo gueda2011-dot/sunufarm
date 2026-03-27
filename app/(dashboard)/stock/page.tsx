@@ -2,12 +2,12 @@ import { redirect } from "next/navigation"
 import type { Metadata } from "next"
 
 import { auth } from "@/src/auth"
-import prisma from "@/src/lib/prisma"
 import {
   getFeedMovements,
   getFeedStocks,
   getMedicineStocks,
 } from "@/src/actions/stock"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { StockPageClient } from "./_components/StockPageClient"
 
 export const metadata: Metadata = { title: "Stock" }
@@ -19,17 +19,12 @@ export default async function StockPage() {
     redirect("/login")
   }
 
-  const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
-    select: { organizationId: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-
-  if (!membership) {
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) {
     redirect("/start")
   }
 
-  const { organizationId } = membership
+  const { organizationId } = activeMembership
 
   const [feedStocksResult, feedMovementsResult, medicineStocksResult] =
     await Promise.all([

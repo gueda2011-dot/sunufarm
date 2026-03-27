@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { Check, Crown, Sprout, Building2 } from "lucide-react"
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import {
   Card,
   CardContent,
@@ -69,22 +70,18 @@ export default async function SettingsPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
-    select: {
-      organizationId: true,
-      role: true,
-      organization: {
-        select: { name: true },
-      },
-    },
-    orderBy: { organization: { name: "asc" } },
-  })
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  if (!membership) redirect("/start")
+  const organizationName = (
+    await prisma.organization.findUnique({
+      where: { id: activeMembership.organizationId },
+      select: { name: true },
+    })
+  )?.name ?? "votre organisation"
 
-  const { organizationId } = membership
-  const isOwner = membership.role === UserRole.OWNER
+  const { organizationId } = activeMembership
+  const isOwner = activeMembership.role === UserRole.OWNER
 
   const [subscription, farmCount, activeBatchCount, memberCount, myPaymentRequests, pendingPayments] = await Promise.all([
     getOrganizationSubscription(organizationId),
@@ -157,7 +154,7 @@ export default async function SettingsPage() {
           Abonnement
         </p>
         <h1 className="mt-2 text-3xl font-bold">
-          Choisir le bon niveau pour faire grandir {membership.organization.name}
+          Choisir le bon niveau pour faire grandir {organizationName}
         </h1>
         <p className="mt-3 max-w-2xl text-sm text-green-50 sm:text-base">
           SunuFarm ne vend pas juste des fonctions. Chaque plan aide a mieux organiser,

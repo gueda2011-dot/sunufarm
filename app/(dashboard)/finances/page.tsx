@@ -8,9 +8,9 @@
 import { redirect }           from "next/navigation"
 import type { Metadata }      from "next"
 import { auth }               from "@/src/auth"
-import prisma                 from "@/src/lib/prisma"
 import { getExpenses }        from "@/src/actions/expenses"
 import { getSales }           from "@/src/actions/sales"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ExpenseForm }        from "./_components/ExpenseForm"
 import { ExpenseList }        from "./_components/ExpenseList"
 import { ExpenseSummaryCards } from "./_components/ExpenseSummaryCards"
@@ -21,14 +21,10 @@ export default async function FinancesPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  const { organizationId } = membership
+  const { organizationId } = activeMembership
 
   const [expensesResult, salesResult] = await Promise.all([
     getExpenses({ organizationId, limit: 50 }),

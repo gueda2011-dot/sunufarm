@@ -10,8 +10,8 @@ import Link             from "next/link"
 import { redirect }     from "next/navigation"
 import type { Metadata } from "next"
 import { auth }         from "@/src/auth"
-import prisma           from "@/src/lib/prisma"
 import { getBatches }   from "@/src/actions/batches"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { BatchListClient } from "./_components/BatchListClient"
 
 export const metadata: Metadata = { title: "Lots d'élevage" }
@@ -20,14 +20,10 @@ export default async function BatchesPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  const { organizationId } = membership
+  const { organizationId } = activeMembership
 
   // Charge tous les lots — le filtrage (statut / type / ferme) est côté client
   const result = await getBatches({ organizationId, limit: 200 })

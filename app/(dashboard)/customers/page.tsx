@@ -8,8 +8,8 @@
 import { redirect }    from "next/navigation"
 import type { Metadata } from "next"
 import { auth }        from "@/src/auth"
-import prisma          from "@/src/lib/prisma"
 import { getCustomers } from "@/src/actions/customers"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { CustomersPageClient } from "./_components/CustomersPageClient"
 
 export const metadata: Metadata = { title: "Clients" }
@@ -18,14 +18,10 @@ export default async function CustomersPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true, role: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  const { organizationId, role } = membership
+  const { organizationId, role } = activeMembership
 
   const customersResult = await getCustomers({ organizationId })
   const customers = customersResult.success ? customersResult.data : []

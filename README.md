@@ -1,36 +1,141 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SunuFarm
 
-## Getting Started
+SunuFarm est une application Next.js pour le pilotage d'exploitations avicoles en Afrique francophone.
 
-First, run the development server:
+Le produit couvre deja :
+- authentification et onboarding
+- fermes et batiments
+- lots d'elevage
+- saisie journaliere
+- production d'oeufs
+- stock
+- ventes, achats, clients
+- finances
+- sante animale
+- abonnements, paiements admin et impersonation
+- rapports mensuels
+
+## Stack
+
+- Next.js 16.2
+- React 19
+- Prisma 7 + PostgreSQL
+- NextAuth v5 beta
+- Tailwind CSS 4
+- Zod + React Hook Form
+- Vitest pour les tests rapides
+
+## Demarrage local
+
+1. Installer les dependances
+
+```bash
+npm install
+```
+
+2. Configurer les variables d'environnement a partir de `.env.example`
+
+Variables importantes :
+- `DATABASE_URL`
+- `AUTH_SECRET` ou `NEXTAUTH_SECRET`
+- variables Resend si l'envoi d'email est active
+- variables paiements si les transactions sont activees
+
+3. Generer Prisma et appliquer les migrations
+
+```bash
+npx prisma migrate deploy
+npx prisma generate
+```
+
+4. Lancer l'application
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Scripts utiles
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run dev
+npm run build
+npm run lint
+npm run test
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Architecture rapide
 
-## Learn More
+- `app/`
+  Routes App Router, layouts, pages dashboard, auth, admin et API routes.
+- `src/actions/`
+  Server Actions metier.
+- `src/lib/`
+  Helpers transverses : auth, permissions, subscriptions, logger, contexte organisation.
+- `src/components/`
+  Composants UI et layout.
+- `prisma/`
+  Schema, seed et migrations.
+- `docs/`
+  Documentation d'exploitation.
 
-To learn more about Next.js, take a look at the following resources:
+## Flux importants
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Auth et organisation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- non connecte -> `/login`
+- connecte sans organisation -> `/start`
+- connecte avec organisation -> dashboard
+- super admin -> `/admin`
 
-## Deploy on Vercel
+L'organisation active est maintenant resolue via un cookie applicatif et peut etre changee depuis le header.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Brouillons
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Les formulaires critiques conservent un brouillon :
+- en local sur l'appareil
+- cote serveur sur le compte utilisateur
+
+Cela couvre actuellement :
+- creation de lot
+- saisie journaliere
+
+## Qualite et exploitation
+
+- journalisation structuree dans `src/lib/logger.ts`
+- audit log metier dans `src/lib/audit.ts`
+- checklist de deploiement dans [docs/OPERATIONS.md](./docs/OPERATIONS.md)
+- exports CSV mensuels disponibles dans les rapports
+- base PWA avec `manifest`, `icon` et `apple-icon`
+
+## Tests
+
+Le socle de tests couvre pour l'instant des helpers critiques :
+- selection de l'organisation active
+- permissions
+- sanitation/limites des brouillons serveur
+
+Le prochain niveau logique est d'ajouter des tests sur les Server Actions critiques.
+
+## Production
+
+Checklist courte avant mise en ligne :
+
+```bash
+npx prisma migrate deploy
+npm run test
+npm run build
+```
+
+Puis verifier manuellement :
+- connexion / deconnexion
+- onboarding
+- creation ferme / batiment
+- creation lot
+- saisie journaliere
+- rapports
+- paiement / admin si actif
+
+## Notes
+
+- Le projet contient encore des zones MVP ou V2, mais la base multi-tenant et metier est deja serieuse.
+- Les modules les plus sensibles a fiabiliser en continu sont auth, onboarding, lots, saisie et abonnements.

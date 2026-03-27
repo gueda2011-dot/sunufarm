@@ -17,12 +17,12 @@
 
 import { redirect }   from "next/navigation"
 import { auth }        from "@/src/auth"
-import prisma          from "@/src/lib/prisma"
 import { Sidebar }     from "@/src/components/layout/Sidebar"
 import { Header }      from "@/src/components/layout/Header"
 import { BottomNav }   from "@/src/components/layout/BottomNav"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { ImpersonationBanner } from "./_components/ImpersonationBanner"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 
 export default async function DashboardLayout({
   children,
@@ -42,17 +42,9 @@ export default async function DashboardLayout({
   // 2. Charger les organisations de l'utilisateur
   // -------------------------------------------------------------------------
 
-  const memberships = await prisma.userOrganization.findMany({
-    where: { userId: session.user.id },
-    select: {
-      organizationId: true,
-      role:           true,
-      organization: {
-        select: { id: true, name: true },
-      },
-    },
-    orderBy: { organization: { name: "asc" } },
-  })
+  const { memberships, activeMembership } = await getCurrentOrganizationContext(
+    session.user.id,
+  )
 
   if (memberships.length === 0) {
     // L'utilisateur existe mais n'appartient à aucune organisation
@@ -71,7 +63,10 @@ export default async function DashboardLayout({
   // 3. Organisation active (MVP : première alphabétiquement)
   // -------------------------------------------------------------------------
 
-  const activeMembership = memberships[0]
+  if (!activeMembership) {
+    redirect("/start")
+  }
+
   const orgName          = activeMembership.organization.name
   const subscription     = await getOrganizationSubscription(
     activeMembership.organizationId,
@@ -108,6 +103,8 @@ export default async function DashboardLayout({
         <Header
           orgName={orgName}
           plan={subscription.plan}
+          memberships={memberships}
+          activeOrganizationId={activeMembership.organizationId}
           userName={userName}
           userEmail={userEmail}
           trialDaysRemaining={subscription.trialDaysRemaining}

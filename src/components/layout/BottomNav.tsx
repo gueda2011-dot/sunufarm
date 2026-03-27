@@ -32,7 +32,7 @@ import {
   DollarSign,
   X,
 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { cn } from "@/src/lib/utils"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 
@@ -76,10 +76,6 @@ export function BottomNav({ plan }: BottomNavProps) {
     return pathname.startsWith(href)
   }
 
-  useEffect(() => {
-    setMenuOpen(false)
-  }, [pathname])
-
   return (
     <>
       {menuOpen && (
@@ -111,6 +107,7 @@ export function BottomNav({ plan }: BottomNavProps) {
                 <Link
                   key={href}
                   href={href}
+                  onClick={() => setMenuOpen(false)}
                   className={cn(
                     "flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-medium transition-colors",
                     active
@@ -145,6 +142,7 @@ export function BottomNav({ plan }: BottomNavProps) {
             <Link
               key={href}
               href={href}
+              onClick={() => setMenuOpen(false)}
               className={cn(
                 "flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors",
                 active

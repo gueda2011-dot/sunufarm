@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 import { useForm, useWatch, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -10,6 +10,11 @@ import { ArrowLeft } from "lucide-react"
 import { toast } from "sonner"
 import { createBatch } from "@/src/actions/batches"
 import { getBuildings, type BuildingSummary } from "@/src/actions/buildings"
+import {
+  clearFormDraft,
+  getFormDraft,
+  saveFormDraft,
+} from "@/src/actions/form-drafts"
 import type { FarmSummary } from "@/src/actions/farms"
 import { Button } from "@/src/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
@@ -72,6 +77,7 @@ export function CreateBatchForm({
   suppliers,
 }: Props) {
   const draftStorageKey = `sunufarm:draft:create-batch:${organizationId}`
+  const draftFormKey = `create-batch:${organizationId}`
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [buildings, setBuildings] = useState<BuildingSummary[]>([])
@@ -150,10 +156,10 @@ export function CreateBatchForm({
     setValue("breedId", "")
   }, [breedId, filteredBreeds, setValue])
 
-  async function handleFarmChange(
+  const handleFarmChange = useCallback(async (
     nextFarmId: string,
     preferredBuildingId?: string,
-  ) {
+  ) => {
     setValue("buildingId", "")
 
     if (!nextFarmId) {
@@ -178,49 +184,76 @@ export function CreateBatchForm({
       setBuildings([])
     }
     setLoadingBldgs(false)
-  }
+  }, [organizationId, setValue])
 
   useEffect(() => {
     if (typeof window === "undefined") return
 
-    const rawDraft = window.localStorage.getItem(draftStorageKey)
-    if (!rawDraft) {
-      setDraftReady(true)
-      return
-    }
+    async function loadDraft() {
+      try {
+        const serverDraftResult = await getFormDraft({
+          formKey: draftFormKey,
+          organizationId,
+        })
 
-    try {
-      const parsedDraft = JSON.parse(rawDraft) as Partial<FormValues>
-      reset({
-        farmId: parsedDraft.farmId ?? "",
-        buildingId: parsedDraft.buildingId ?? "",
-        type: parsedDraft.type ?? "CHAIR",
-        speciesId: parsedDraft.speciesId ?? "",
-        breedId: parsedDraft.breedId ?? "",
-        entryDate: parsedDraft.entryDate ?? new Date().toISOString().split("T")[0],
-        entryCount: parsedDraft.entryCount ?? ("" as unknown as number),
-        entryAgeDay: parsedDraft.entryAgeDay ?? 0,
-        entryWeightG: parsedDraft.entryWeightG ?? "",
-        supplierId: parsedDraft.supplierId ?? "",
-        unitCostFcfa: parsedDraft.unitCostFcfa ?? 0,
-        totalCostFcfa: parsedDraft.totalCostFcfa ?? 0,
-        notes: parsedDraft.notes ?? "",
-      })
+        const rawDraft = window.localStorage.getItem(draftStorageKey)
+        const serverDraft = serverDraftResult.success
+          ? serverDraftResult.data?.payload ?? null
+          : null
+        const parsedDraft = (
+          serverDraft ??
+          (rawDraft ? JSON.parse(rawDraft) : null)
+        ) as Partial<FormValues> | null
 
-      if (parsedDraft.farmId) {
-        void handleFarmChange(parsedDraft.farmId, parsedDraft.buildingId)
+        if (!parsedDraft) {
+          setDraftReady(true)
+          return
+        }
+
+        reset({
+          farmId: parsedDraft.farmId ?? "",
+          buildingId: parsedDraft.buildingId ?? "",
+          type: parsedDraft.type ?? "CHAIR",
+          speciesId: parsedDraft.speciesId ?? "",
+          breedId: parsedDraft.breedId ?? "",
+          entryDate: parsedDraft.entryDate ?? new Date().toISOString().split("T")[0],
+          entryCount: parsedDraft.entryCount ?? ("" as unknown as number),
+          entryAgeDay: parsedDraft.entryAgeDay ?? 0,
+          entryWeightG: parsedDraft.entryWeightG ?? "",
+          supplierId: parsedDraft.supplierId ?? "",
+          unitCostFcfa: parsedDraft.unitCostFcfa ?? 0,
+          totalCostFcfa: parsedDraft.totalCostFcfa ?? 0,
+          notes: parsedDraft.notes ?? "",
+        })
+
+        if (parsedDraft.farmId) {
+          await handleFarmChange(parsedDraft.farmId, parsedDraft.buildingId)
+        }
+      } catch {
+        window.localStorage.removeItem(draftStorageKey)
+      } finally {
+        setDraftReady(true)
       }
-    } catch {
-      window.localStorage.removeItem(draftStorageKey)
-    } finally {
-      setDraftReady(true)
     }
-  }, [draftStorageKey, reset])
+
+    void loadDraft()
+  }, [draftFormKey, draftStorageKey, handleFarmChange, organizationId, reset])
 
   useEffect(() => {
     if (!draftReady || typeof window === "undefined") return
     window.localStorage.setItem(draftStorageKey, JSON.stringify(draftValues))
-  }, [draftReady, draftStorageKey, draftValues])
+
+    const timeout = window.setTimeout(() => {
+      void saveFormDraft({
+        formKey: draftFormKey,
+        organizationId,
+        title: "Nouveau lot",
+        payload: draftValues as Record<string, unknown>,
+      })
+    }, 800)
+
+    return () => window.clearTimeout(timeout)
+  }, [draftFormKey, draftReady, draftStorageKey, draftValues, organizationId])
 
   const onSubmit: SubmitHandler<SubmitValues> = async (data) => {
     startTransition(async () => {
@@ -248,6 +281,7 @@ export function CreateBatchForm({
         if (typeof window !== "undefined") {
           window.localStorage.removeItem(draftStorageKey)
         }
+        await clearFormDraft({ formKey: draftFormKey, organizationId })
         router.push("/batches")
         router.refresh()
       } else {
@@ -274,7 +308,7 @@ export function CreateBatchForm({
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-        Brouillon automatique actif sur cet appareil. Si vous quittez l&apos;ecran, les informations restent memorisees jusqu&apos;a la creation du lot.
+        Brouillon automatique actif sur cet appareil et sur votre compte. Si vous quittez l&apos;ecran, les informations restent memorisees jusqu&apos;a la creation du lot.
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

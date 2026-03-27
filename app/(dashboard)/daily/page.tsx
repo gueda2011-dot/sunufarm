@@ -13,8 +13,8 @@
 import { redirect }          from "next/navigation"
 import type { Metadata }     from "next"
 import { auth }              from "@/src/auth"
-import prisma                from "@/src/lib/prisma"
 import { getBatches }        from "@/src/actions/batches"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { DailyEntryClient }  from "./_components/DailyEntryClient"
 
 export const metadata: Metadata = {
@@ -29,16 +29,10 @@ export default async function DailyPage({
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  // Même logique que le dashboard layout — première organisation alphabétiquement
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true, role: true },
-    orderBy: { organization: { name: "asc" } },
-  })
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  if (!membership) redirect("/start")
-
-  const { organizationId, role } = membership
+  const { organizationId, role } = activeMembership
 
   // ?batchId= transmis par le bouton "Saisir" de la liste des lots
   const { batchId: defaultBatchId } = await searchParams

@@ -28,6 +28,11 @@ import {
   createDailyRecord,
   updateDailyRecord,
 }                                      from "@/src/actions/daily-records"
+import {
+  clearFormDraft,
+  getFormDraft,
+  saveFormDraft,
+} from "@/src/actions/form-drafts"
 import { cn }                          from "@/src/lib/utils"
 
 // ---------------------------------------------------------------------------
@@ -130,6 +135,7 @@ export function DailyForm({
   onSuccess,
 }: DailyFormProps) {
   const draftStorageKey = `sunufarm:draft:daily:${organizationId}:${batchId}:${selectedDate}`
+  const draftFormKey = `daily:${organizationId}:${batchId}:${selectedDate}`
   // Ouvrir la section détails si des valeurs optionnelles existent déjà
   const [detailsOpen, setDetailsOpen] = useState(
     !!(defaultValues.waterLiters || defaultValues.avgWeightG || defaultValues.observations),
@@ -166,49 +172,77 @@ export function DailyForm({
       return
     }
 
-    const rawDraft = window.localStorage.getItem(draftStorageKey)
-    if (!rawDraft) {
-      setDraftReady(true)
-      return
-    }
+    async function loadDraft() {
+      try {
+        const serverDraftResult = await getFormDraft({
+          formKey: draftFormKey,
+          organizationId,
+        })
+        const rawDraft = window.localStorage.getItem(draftStorageKey)
+        const serverDraft = serverDraftResult.success
+          ? serverDraftResult.data?.payload ?? null
+          : null
+        const parsedDraft = (
+          serverDraft ??
+          (rawDraft ? JSON.parse(rawDraft) : null)
+        ) as Partial<ParsedValues> | null
 
-    try {
-      const parsedDraft = JSON.parse(rawDraft) as Partial<ParsedValues>
-      reset({
-        mortality: parsedDraft.mortality ?? defaultValues.mortality,
-        feedKg: parsedDraft.feedKg ?? defaultValues.feedKg,
-        waterLiters: parsedDraft.waterLiters ?? defaultValues.waterLiters ?? undefined,
-        avgWeightG: parsedDraft.avgWeightG ?? defaultValues.avgWeightG ?? undefined,
-        observations: parsedDraft.observations ?? defaultValues.observations ?? "",
-      })
+        if (!parsedDraft) {
+          setDraftReady(true)
+          return
+        }
 
-      if (
-        parsedDraft.waterLiters !== undefined ||
-        parsedDraft.avgWeightG !== undefined ||
-        !!parsedDraft.observations
-      ) {
-        setDetailsOpen(true)
+        reset({
+          mortality: parsedDraft.mortality ?? defaultValues.mortality,
+          feedKg: parsedDraft.feedKg ?? defaultValues.feedKg,
+          waterLiters: parsedDraft.waterLiters ?? defaultValues.waterLiters ?? undefined,
+          avgWeightG: parsedDraft.avgWeightG ?? defaultValues.avgWeightG ?? undefined,
+          observations: parsedDraft.observations ?? defaultValues.observations ?? "",
+        })
+
+        if (
+          parsedDraft.waterLiters !== undefined ||
+          parsedDraft.avgWeightG !== undefined ||
+          !!parsedDraft.observations
+        ) {
+          setDetailsOpen(true)
+        }
+      } catch {
+        window.localStorage.removeItem(draftStorageKey)
+      } finally {
+        setDraftReady(true)
       }
-    } catch {
-      window.localStorage.removeItem(draftStorageKey)
-    } finally {
-      setDraftReady(true)
     }
+
+    void loadDraft()
   }, [
     defaultValues.avgWeightG,
     defaultValues.feedKg,
     defaultValues.mortality,
     defaultValues.observations,
     defaultValues.waterLiters,
+    draftFormKey,
     draftStorageKey,
     isEditMode,
+    organizationId,
     reset,
   ])
 
   useEffect(() => {
     if (isEditMode || !draftReady || typeof window === "undefined") return
     window.localStorage.setItem(draftStorageKey, JSON.stringify(draftValues))
-  }, [draftReady, draftStorageKey, draftValues, isEditMode])
+
+    const timeout = window.setTimeout(() => {
+      void saveFormDraft({
+        formKey: draftFormKey,
+        organizationId,
+        title: "Saisie journaliere",
+        payload: draftValues as Record<string, unknown>,
+      })
+    }, 800)
+
+    return () => window.clearTimeout(timeout)
+  }, [draftFormKey, draftReady, draftStorageKey, draftValues, isEditMode, organizationId])
 
   const onSubmit = async (data: ParsedValues) => {
     setSubmitError(null)
@@ -229,6 +263,9 @@ export function DailyForm({
       if (result.success) {
         if (!isEditMode && typeof window !== "undefined") {
           window.localStorage.removeItem(draftStorageKey)
+        }
+        if (!isEditMode) {
+          await clearFormDraft({ formKey: draftFormKey, organizationId })
         }
         toast.success("Saisie corrigée")
         onSuccess()
@@ -255,6 +292,7 @@ export function DailyForm({
         if (typeof window !== "undefined") {
           window.localStorage.removeItem(draftStorageKey)
         }
+        await clearFormDraft({ formKey: draftFormKey, organizationId })
         toast.success("Saisie enregistrée")
         onSuccess()
       } else {
@@ -267,7 +305,7 @@ export function DailyForm({
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
       {!isEditMode && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          Brouillon automatique actif pour ce lot et cette date sur cet appareil.
+          Brouillon automatique actif pour ce lot et cette date sur cet appareil et sur votre compte.
         </div>
       )}
 

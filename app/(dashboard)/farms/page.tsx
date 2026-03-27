@@ -4,6 +4,7 @@ import { auth }            from "@/src/auth"
 import prisma              from "@/src/lib/prisma"
 import { getFarms }        from "@/src/actions/farms"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { FarmsClient }     from "./_components/FarmsClient"
 
 export const metadata: Metadata = { title: "Fermes & Bâtiments" }
@@ -12,14 +13,10 @@ export default async function FarmsPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true, role: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  const { organizationId, role } = membership
+  const { organizationId, role } = activeMembership
   const [subscription, activeFarmCount] = await Promise.all([
     getOrganizationSubscription(organizationId),
     prisma.farm.count({

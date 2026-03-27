@@ -28,6 +28,7 @@
 
 import prisma from "@/src/lib/prisma"
 import { AuditAction } from "@/src/generated/prisma/client"
+import { logger } from "@/src/lib/logger"
 
 // Re-export pour que les Server Actions n'aient qu'un seul import à gérer
 export { AuditAction }
@@ -78,7 +79,6 @@ export interface CreateAuditLogInput {
  * En cas d'échec Prisma, l'erreur est loguée sur stderr mais ne remonte pas.
  * Cela garantit qu'un problème d'audit ne fait pas échouer l'action métier.
  *
- * TODO (V2) : remplacer console.error par un logger structuré (pino, winston).
  */
 export async function createAuditLog(input: CreateAuditLogInput): Promise<void> {
   try {
@@ -97,11 +97,12 @@ export async function createAuditLog(input: CreateAuditLogInput): Promise<void> 
     })
   } catch (error) {
     // L'audit est secondaire — on logue mais on ne bloque jamais l'action métier
-    console.error("[AuditLog] Échec de création du log d'audit", {
-      action:       input.action,
+    logger.error("audit_log.create_failed", {
+      action: input.action,
       resourceType: input.resourceType,
-      resourceId:   input.resourceId,
-      userId:       input.userId,
+      resourceId: input.resourceId,
+      userId: input.userId,
+      organizationId: input.organizationId,
       error,
     })
   }

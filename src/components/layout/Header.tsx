@@ -18,10 +18,14 @@ import { signOut } from "next-auth/react"
 import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Bell, LogOut, User, ChevronDown } from "lucide-react"
 import { cn } from "@/src/lib/utils"
+import { OrganizationSwitcher } from "@/src/components/layout/OrganizationSwitcher"
+import type { OrganizationMembershipSummary } from "@/src/lib/active-organization"
 
 interface HeaderProps {
   orgName:             string
   plan:                SubscriptionPlan
+  memberships:         OrganizationMembershipSummary[]
+  activeOrganizationId: string
   userName:            string
   userEmail:           string
   /** Nombre de notifications non lues — 0 si aucune */
@@ -35,6 +39,8 @@ interface HeaderProps {
 export function Header({
   orgName,
   plan,
+  memberships,
+  activeOrganizationId,
   userName,
   userEmail,
   unreadCount = 0,
@@ -72,10 +78,10 @@ export function Header({
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-30 flex min-h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-2 shadow-sm sm:px-6 lg:px-8">
       {/* Gauche : nom organisation (visible sur mobile quand sidebar est cachée) */}
-      <div className="flex items-center gap-3 lg:hidden">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-green-600">
+      <div className="flex min-w-0 items-center gap-3 lg:hidden">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-green-600">
           <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-white" aria-hidden="true">
             <path
               d="M12 3C9 3 6 5 6 8c0 2 1 3.5 2.5 4.5L8 18h8l-.5-5.5C17 11.5 18 10 18 8c0-3-3-5-6-5z"
@@ -84,13 +90,23 @@ export function Header({
             <circle cx="10" cy="7" r="1" fill="white" />
           </svg>
         </div>
-        <span className="max-w-[160px] truncate text-sm font-semibold text-gray-900">
-          {orgName}
-        </span>
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="max-w-[160px] truncate text-sm font-semibold text-gray-900">
+            {orgName}
+          </span>
+          <OrganizationSwitcher
+            memberships={memberships}
+            activeOrganizationId={activeOrganizationId}
+          />
+        </div>
       </div>
 
       {/* Desktop : plan + bannière essai */}
       <div className="hidden lg:flex lg:items-center lg:gap-3">
+        <OrganizationSwitcher
+          memberships={memberships}
+          activeOrganizationId={activeOrganizationId}
+        />
         {trialDaysRemaining !== null ? (
           <span className={cn(
             "rounded-full border px-3 py-1 text-xs font-semibold",

@@ -23,6 +23,7 @@ import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
+import { logger } from "@/src/lib/logger"
 
 // ---------------------------------------------------------------------------
 // TypeScript — Extension du type Session NextAuth
@@ -135,7 +136,7 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           }
         } catch (err) {
           // Erreur DB ou réseau — logger pour debug, retourner null proprement
-          console.error("[auth][authorize] Erreur inattendue:", err)
+          logger.error("auth.authorize_failed", { error: err })
           return null
         }
       },

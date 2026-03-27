@@ -1,9 +1,9 @@
 import { redirect }      from "next/navigation"
 import type { Metadata } from "next"
 import { auth }          from "@/src/auth"
-import prisma            from "@/src/lib/prisma"
 import { getBatches }    from "@/src/actions/batches"
 import { getEggRecords } from "@/src/actions/eggs"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { EggsClient }    from "./_components/EggsClient"
 
 export const metadata: Metadata = { title: "Production d'œufs" }
@@ -12,14 +12,10 @@ export default async function EggsPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true, role: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  const { organizationId, role } = membership
+  const { organizationId, role } = activeMembership
 
   // Lots pondeuses actifs + records récents en parallèle
   const [batchesResult, recordsResult] = await Promise.all([

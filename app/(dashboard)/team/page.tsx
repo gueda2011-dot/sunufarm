@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { Shield, Users, Crown } from "lucide-react"
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import {
   Card,
   CardContent,
@@ -43,29 +44,18 @@ export default async function TeamPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  const membership = await prisma.userOrganization.findFirst({
-    where: { userId: session.user.id },
-    select: {
-      organizationId: true,
-      role: true,
-      organization: {
-        select: { name: true },
-      },
-    },
-    orderBy: { organization: { name: "asc" } },
-  })
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  if (!membership) redirect("/start")
-
-  if (membership.role === UserRole.SUPER_ADMIN) {
+  if (activeMembership.role === UserRole.SUPER_ADMIN) {
     redirect("/admin")
   }
 
   const [subscription, members] = await Promise.all([
-    getOrganizationSubscription(membership.organizationId),
+    getOrganizationSubscription(activeMembership.organizationId),
     prisma.userOrganization.findMany({
       where: {
-        organizationId: membership.organizationId,
+        organizationId: activeMembership.organizationId,
         user: { deletedAt: null },
       },
       select: {
@@ -96,7 +86,7 @@ export default async function TeamPage() {
           Equipe
         </p>
         <h1 className="mt-2 text-3xl font-bold">
-          Les membres de {membership.organization.name}
+          Les membres de {activeMembership.organization.name}
         </h1>
         <p className="mt-3 max-w-2xl text-sm text-slate-200 sm:text-base">
           Cette page centralise les personnes qui ont acces a l&apos;organisation et leur niveau de responsabilite.

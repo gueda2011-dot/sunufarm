@@ -22,6 +22,7 @@ import {
   TRIAL_AI_CREDITS,
   TRIAL_DAYS,
 } from "@/src/lib/subscriptions"
+import { logger } from "@/src/lib/logger"
 
 const registerUserSchema = z.object({
   name: z.string().trim().min(2, "Nom requis").max(120, "Nom trop long"),
@@ -250,7 +251,7 @@ export async function completeOnboarding(
       data: { organizationId: created.organizationId },
     }
   } catch (error) {
-    console.error("[Onboarding] Echec de finalisation", error)
+    logger.error("onboarding.complete_failed", { error })
 
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === "P2002") {

@@ -25,11 +25,13 @@ import { auth }                from "@/src/auth"
 import prisma                  from "@/src/lib/prisma"
 import { getBatches }          from "@/src/actions/batches"
 import { getExpenses }         from "@/src/actions/expenses"
+import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { AlertBanner }         from "../_components/AlertBanner"
 import { DashboardKpis }       from "../_components/DashboardKpis"
 import { ActiveBatchList }     from "../_components/ActiveBatchList"
 import { MortalityChart }      from "../_components/MortalityChart"
 import type { MortalityChartPoint } from "../_components/MortalityChart"
+import { MobileQuickActions } from "../_components/MobileQuickActions"
 
 export const metadata: Metadata = { title: "Tableau de bord" }
 
@@ -37,20 +39,17 @@ export default async function DashboardPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
 
-  // Même logique que le layout — première organisation alphabétiquement
-  const membership = await prisma.userOrganization.findFirst({
-    where:   { userId: session.user.id },
-    select:  { organizationId: true },
-    orderBy: { organization: { name: "asc" } },
-  })
-  if (!membership) redirect("/start")
+  const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
+  if (!activeMembership) redirect("/start")
 
-  const { organizationId } = membership
+  const { organizationId } = activeMembership
 
   // ── Fetch parallèle ────────────────────────────────────────────────────
   // Les 2 requêtes Prisma directes sont nécessaires car les Server Actions
   // existantes ne couvrent pas ces agrégations multi-lots.
-  const threshold48h = new Date(Date.now() - 2 * 86_400_000)
+  const now = new Date()
+  const nowTime = now.getTime()
+  const threshold48h = new Date(nowTime - 2 * 86_400_000)
 
   const [
     batchesResult,
@@ -86,7 +85,7 @@ export default async function DashboardPage() {
       by:    ["date"],
       where: {
         batch: { organizationId, status: "ACTIVE", deletedAt: null },
-        date:  { gte: new Date(Date.now() - 30 * 86_400_000) },
+        date:  { gte: new Date(nowTime - 30 * 86_400_000) },
       },
       _sum:    { mortality: true },
       orderBy: { date: "asc" },
@@ -114,7 +113,7 @@ export default async function DashboardPage() {
 
   const batchesNeedingSaisie = activeBatches.filter((b) => {
     const daysSinceEntry = Math.floor(
-      (Date.now() - new Date(b.entryDate).getTime()) / 86_400_000,
+      (nowTime - new Date(b.entryDate).getTime()) / 86_400_000,
     )
     return daysSinceEntry > 1 && !recentIds.has(b.id)
   })
@@ -128,7 +127,7 @@ export default async function DashboardPage() {
   )
   const chartData: MortalityChartPoint[] = []
   for (let i = 29; i >= 0; i--) {
-    const d   = new Date(Date.now() - i * 86_400_000)
+    const d   = new Date(nowTime - i * 86_400_000)
     const key = d.toISOString().substring(0, 10)
     chartData.push({
       date: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
@@ -138,8 +137,8 @@ export default async function DashboardPage() {
 
   // ── Tri des lots : âge décroissant (plus vieux = plus critique en premier) ─
   const sortedBatches = [...activeBatches].sort((a, b) => {
-    const ageA = a.entryAgeDay + Math.floor((Date.now() - new Date(a.entryDate).getTime()) / 86_400_000)
-    const ageB = b.entryAgeDay + Math.floor((Date.now() - new Date(b.entryDate).getTime()) / 86_400_000)
+    const ageA = a.entryAgeDay + Math.floor((nowTime - new Date(a.entryDate).getTime()) / 86_400_000)
+    const ageB = b.entryAgeDay + Math.floor((nowTime - new Date(b.entryDate).getTime()) / 86_400_000)
     return ageB - ageA
   })
 
@@ -153,6 +152,8 @@ export default async function DashboardPage() {
           Vue d&apos;ensemble de votre exploitation avicole.
         </p>
       </div>
+
+      <MobileQuickActions />
 
       {/* ── Alerte saisie manquante (conditionnelle) ─────────────────────── */}
       <AlertBanner batchesNeedingSaisie={batchesNeedingSaisie} />

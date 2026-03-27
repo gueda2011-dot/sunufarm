@@ -74,7 +74,7 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
     handleSubmit,
     reset,
     formState: { errors },
-  } = useForm<FormValues, any, SubmitValues>({
+  } = useForm<FormValues, unknown, SubmitValues>({
     resolver: zodResolver(schema),
     defaultValues: {
       batchId: "",

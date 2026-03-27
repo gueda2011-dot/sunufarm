@@ -14,7 +14,7 @@
  *   - Calcul âge du lot côté client à partir des données SSR (pas de fetch additionnel)
  */
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useCallback } from "react"
 import { useQuery, useQueryClient }          from "@tanstack/react-query"
 import { getDailyRecords }                   from "@/src/actions/daily-records"
 import type { BatchSummary }                 from "@/src/actions/batches"
@@ -102,12 +102,6 @@ export function DailyEntryClient({
   const [editingRecord, setEditingRecord] = useState<DailyRecordDetail | null>(null)
 
   const selectedBatch = initialBatches.find((b) => b.id === selectedBatchId)
-
-  // Réinitialiser le mode édition dès que le lot ou la date change
-  useEffect(() => {
-    setIsEditMode(false)
-    setEditingRecord(null)
-  }, [selectedBatchId, selectedDate])
 
   // ── Records récents (14 = ~2 semaines, suffisant pour la détection doublon) ─
   const { data: recentRecords = [], isLoading: loadingRecords } = useQuery({
@@ -197,7 +191,11 @@ export function DailyEntryClient({
         <select
           id="batch-select"
           value={selectedBatchId}
-          onChange={(e) => setSelectedBatchId(e.target.value)}
+          onChange={(e) => {
+            setSelectedBatchId(e.target.value)
+            setIsEditMode(false)
+            setEditingRecord(null)
+          }}
           className="w-full h-[52px] rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent"
         >
           {initialBatches.length > 1 && (
@@ -220,7 +218,11 @@ export function DailyEntryClient({
           id="date-input"
           type="date"
           value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
+          onChange={(e) => {
+            setSelectedDate(e.target.value)
+            setIsEditMode(false)
+            setEditingRecord(null)
+          }}
           max={todayStr()}
           className="w-full h-[52px] rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent"
         />

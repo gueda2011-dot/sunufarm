@@ -290,7 +290,7 @@ export function BatchReportDocument({
 
         {/* ── Informations lot ────────────────────────────────────────────── */}
         <View style={s.section}>
-          <Text style={s.sectionTitle}>Lot d'élevage</Text>
+          <Text style={s.sectionTitle}>Lot d&apos;elevage</Text>
           <View style={s.infoCard}>
             <Text style={s.batchNumber}>{batchNumber}</Text>
             <Text style={s.batchMeta}>{TYPE_LABELS[batchType] ?? batchType}</Text>
