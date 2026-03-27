@@ -74,6 +74,20 @@ export interface SessionUser {
 
 export interface AppSession {
   user: SessionUser
+  actor: {
+    id: string
+    email: string
+    name: string | null
+  }
+  impersonation: {
+    active: boolean
+    adminId: string
+    adminEmail: string
+    adminName: string | null
+    targetUserId: string
+    targetUserEmail: string
+    targetUserName: string | null
+  } | null
   /** ISO date d'expiration de la session */
   expires: string
 }

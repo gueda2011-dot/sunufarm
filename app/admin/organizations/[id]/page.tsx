@@ -13,6 +13,7 @@ import {
 import { auth } from "@/src/auth"
 import { AdminSubscriptionControl } from "@/app/admin/_components/AdminSubscriptionControl"
 import { AdminSignOutButton } from "@/app/admin/_components/AdminSignOutButton"
+import { AdminImpersonateButton } from "@/app/admin/_components/AdminImpersonateButton"
 import prisma from "@/src/lib/prisma"
 import {
   formatDate,
@@ -99,6 +100,7 @@ export default async function AdminOrganizationDetailPage(
           createdAt: true,
           user: {
             select: {
+              id: true,
               name: true,
               email: true,
             },
@@ -439,15 +441,21 @@ export default async function AdminOrganizationDetailPage(
               ) : (
                 organization.users.map((member) => (
                   <div key={member.id} className="rounded-2xl border border-gray-100 px-4 py-3">
-                    <p className="font-medium text-gray-900">
-                      {member.user.name || member.user.email}
-                    </p>
-                    <p className="text-sm text-gray-500">{member.user.email}</p>
-                    <div className="mt-2 flex items-center justify-between gap-3 text-xs">
-                      <span className="rounded-full bg-green-100 px-2 py-1 font-semibold text-green-800">
-                        {member.role}
-                      </span>
-                      <span className="text-gray-400">Ajoute le {formatDate(member.createdAt)}</span>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {member.user.name || member.user.email}
+                        </p>
+                        <p className="text-sm text-gray-500">{member.user.email}</p>
+                        <div className="mt-2 flex items-center gap-3 text-xs">
+                          <span className="rounded-full bg-green-100 px-2 py-1 font-semibold text-green-800">
+                            {member.role}
+                          </span>
+                          <span className="text-gray-400">Ajoute le {formatDate(member.createdAt)}</span>
+                        </div>
+                      </div>
+
+                      <AdminImpersonateButton targetUserId={member.user.id} />
                     </div>
                   </div>
                 ))

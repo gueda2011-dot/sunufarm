@@ -18,6 +18,7 @@
  */
 
 import NextAuth, { type DefaultSession } from "next-auth"
+import type { JWT } from "next-auth/jwt"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
@@ -35,6 +36,31 @@ declare module "next-auth" {
     user: {
       id: string
     } & DefaultSession["user"]
+    actor: {
+      id: string
+      email: string
+      name: string | null
+    }
+    impersonation: {
+      active: boolean
+      adminId: string
+      adminEmail: string
+      adminName: string | null
+      targetUserId: string
+      targetUserEmail: string
+      targetUserName: string | null
+    } | null
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    actorId?: string
+    actorEmail?: string
+    actorName?: string | null
+    impersonatedUserId?: string | null
+    impersonatedUserEmail?: string | null
+    impersonatedUserName?: string | null
   }
 }
 
@@ -47,11 +73,17 @@ const credentialsSchema = z.object({
   password: z.string().min(1, "Mot de passe requis"),
 })
 
+function clearImpersonation(token: JWT) {
+  token.impersonatedUserId = null
+  token.impersonatedUserEmail = null
+  token.impersonatedUserName = null
+}
+
 // ---------------------------------------------------------------------------
 // Configuration NextAuth v5
 // ---------------------------------------------------------------------------
 
-export const { auth, signIn, signOut, handlers } = NextAuth({
+export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   trustHost: true,
   // -------------------------------------------------------------------------
@@ -119,19 +151,99 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
   //             → expose token.sub dans session.user.id
   // -------------------------------------------------------------------------
   callbacks: {
-    jwt({ token, user }) {
+    jwt({ token, user, trigger, session }) {
       // user est présent uniquement lors du premier appel (sign-in)
       if (user?.id) {
         token.sub = user.id
+        token.email = user.email
+        token.name = user.name
+        token.actorId = user.id
+        token.actorEmail = user.email ?? ""
+        token.actorName = user.name ?? null
+        clearImpersonation(token)
       }
+
+      if (trigger === "update") {
+        const nextSession = session as
+          | {
+              user?: { id?: string; email?: string | null; name?: string | null }
+              actor?: { id?: string; email?: string; name?: string | null }
+              impersonation?: {
+                active?: boolean
+                targetUserId?: string
+                targetUserEmail?: string
+                targetUserName?: string | null
+              } | null
+            }
+          | undefined
+
+        if (nextSession?.actor?.id) {
+          token.actorId = nextSession.actor.id
+          token.actorEmail = nextSession.actor.email ?? token.actorEmail ?? ""
+          token.actorName = nextSession.actor.name ?? null
+        }
+
+        if (nextSession?.impersonation === null) {
+          clearImpersonation(token)
+        } else if (nextSession?.impersonation?.active) {
+          token.impersonatedUserId =
+            nextSession.user?.id ??
+            nextSession.impersonation.targetUserId ??
+            token.impersonatedUserId
+          token.impersonatedUserEmail =
+            nextSession.user?.email ??
+            nextSession.impersonation.targetUserEmail ??
+            token.impersonatedUserEmail
+          token.impersonatedUserName =
+            nextSession.user?.name ??
+            nextSession.impersonation.targetUserName ??
+            token.impersonatedUserName
+        }
+      }
+
       return token
     },
 
     session({ session, token }) {
-      // token.sub est garanti non-null après le callback jwt ci-dessus
-      if (token.sub) {
-        session.user.id = token.sub
+      const effectiveUserId = token.impersonatedUserId ?? token.sub
+      const effectiveUserEmail = token.impersonatedUserEmail ?? token.email
+      const effectiveUserName = token.impersonatedUserName ?? token.name
+
+      if (effectiveUserId) {
+        session.user.id = effectiveUserId
       }
+      if (typeof effectiveUserEmail === "string") {
+        session.user.email = effectiveUserEmail
+      }
+      if (typeof effectiveUserName === "string" || effectiveUserName === null) {
+        session.user.name = effectiveUserName
+      }
+
+      session.actor = {
+        id: token.actorId ?? token.sub ?? "",
+        email: token.actorEmail ?? (typeof token.email === "string" ? token.email : ""),
+        name: typeof token.actorName === "string" || token.actorName === null
+          ? token.actorName
+          : (typeof token.name === "string" ? token.name : null),
+      }
+
+      session.impersonation = token.impersonatedUserId
+        ? {
+            active: true,
+            adminId: session.actor.id,
+            adminEmail: session.actor.email,
+            adminName: session.actor.name,
+            targetUserId: token.impersonatedUserId,
+            targetUserEmail:
+              token.impersonatedUserEmail ??
+              (typeof session.user.email === "string" ? session.user.email : ""),
+            targetUserName:
+              typeof token.impersonatedUserName === "string" || token.impersonatedUserName === null
+                ? token.impersonatedUserName
+                : session.user.name ?? null,
+          }
+        : null
+
       return session
     },
   },

@@ -22,6 +22,7 @@ import { Sidebar }     from "@/src/components/layout/Sidebar"
 import { Header }      from "@/src/components/layout/Header"
 import { BottomNav }   from "@/src/components/layout/BottomNav"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { ImpersonationBanner } from "./_components/ImpersonationBanner"
 
 export default async function DashboardLayout({
   children,
@@ -94,6 +95,15 @@ export default async function DashboardLayout({
 
       {/* Zone principale */}
       <div className="flex flex-1 flex-col lg:pl-64">
+        {session.impersonation?.active && (
+          <ImpersonationBanner
+            adminName={session.impersonation.adminName}
+            adminEmail={session.impersonation.adminEmail}
+            targetName={session.impersonation.targetUserName}
+            targetEmail={session.impersonation.targetUserEmail}
+          />
+        )}
+
         {/* Header */}
         <Header
           orgName={orgName}
