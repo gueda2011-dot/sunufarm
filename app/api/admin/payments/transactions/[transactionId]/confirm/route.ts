@@ -5,11 +5,19 @@ import {
   createRateLimitHeaders,
   getClientIpFromHeaders,
 } from "@/src/lib/rate-limit"
+import { getRequestAuditContext, isTrustedMutationOrigin } from "@/src/lib/request-security"
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ transactionId: string }> },
 ) {
+  if (!isTrustedMutationOrigin(request)) {
+    return NextResponse.json(
+      { success: false, error: "Origine de requete non autorisee." },
+      { status: 403 },
+    )
+  }
+
   const { transactionId } = await params
   const rateLimit = applyRateLimit({
     key: `admin-payment-confirm:${transactionId}:${getClientIpFromHeaders(request.headers)}`,
@@ -24,7 +32,10 @@ export async function POST(
     )
   }
 
-  const result = await adminConfirmPaymentTransaction({ transactionId })
+  const result = await adminConfirmPaymentTransaction(
+    { transactionId },
+    getRequestAuditContext(request.headers),
+  )
 
   if (!result.success) {
     return NextResponse.json(

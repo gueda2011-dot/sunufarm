@@ -6,6 +6,7 @@ import {
   createRateLimitHeaders,
   getClientIpFromHeaders,
 } from "@/src/lib/rate-limit"
+import { isTrustedMutationOrigin } from "@/src/lib/request-security"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import {
   analyzeBatchRequestSchema,
@@ -23,6 +24,13 @@ export const dynamic = "force-dynamic"
 
 export async function POST(request: NextRequest) {
   try {
+    if (!isTrustedMutationOrigin(request)) {
+      return NextResponse.json(
+        { success: false, error: "Origine de requete non autorisee." },
+        { status: 403 },
+      )
+    }
+
     const session = await auth()
     if (!session?.user?.id) {
       return NextResponse.json({ success: false, error: "Non authentifie" }, { status: 401 })

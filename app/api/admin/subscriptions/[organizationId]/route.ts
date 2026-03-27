@@ -5,11 +5,19 @@ import {
   createRateLimitHeaders,
   getClientIpFromHeaders,
 } from "@/src/lib/rate-limit"
+import { getRequestAuditContext, isTrustedMutationOrigin } from "@/src/lib/request-security"
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ organizationId: string }> },
 ) {
+  if (!isTrustedMutationOrigin(request)) {
+    return NextResponse.json(
+      { success: false, error: "Origine de requete non autorisee." },
+      { status: 403 },
+    )
+  }
+
   const { organizationId } = await params
   const rateLimit = applyRateLimit({
     key: `admin-subscription:${organizationId}:${getClientIpFromHeaders(request.headers)}`,
@@ -26,10 +34,13 @@ export async function POST(
 
   const body = await request.json()
 
-  const result = await adminUpdateOrganizationSubscription({
-    ...body,
-    organizationId,
-  })
+  const result = await adminUpdateOrganizationSubscription(
+    {
+      ...body,
+      organizationId,
+    },
+    getRequestAuditContext(request.headers),
+  )
 
   if (!result.success) {
     return NextResponse.json(

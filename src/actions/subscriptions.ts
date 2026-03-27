@@ -24,6 +24,7 @@ import {
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { createPaymentTransaction } from "@/src/lib/payments"
+import type { AuditRequestContext } from "@/src/lib/request-security"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -57,6 +58,7 @@ const managePaymentTransactionSchema = z.object({
 
 export async function createSubscriptionPaymentRequest(
   data: unknown,
+  auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ paymentId: string; transactionId: string; checkoutToken: string | null }>> {
   try {
     const sessionResult = await requireSession()
@@ -129,6 +131,8 @@ export async function createSubscriptionPaymentRequest(
       action: AuditAction.CREATE,
       resourceType: "SUBSCRIPTION_PAYMENT",
       resourceId: payment.id,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       after: {
         requestedPlan,
         paymentMethod,
@@ -157,6 +161,7 @@ export async function createSubscriptionPaymentRequest(
 
 export async function confirmSubscriptionPayment(
   data: unknown,
+  auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ plan: SubscriptionPlan }>> {
   try {
     const sessionResult = await requireSession()
@@ -265,6 +270,8 @@ export async function confirmSubscriptionPayment(
       action: AuditAction.UPDATE,
       resourceType: "SUBSCRIPTION_PAYMENT",
       resourceId: payment.id,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       after: {
         status: SubscriptionPaymentStatus.CONFIRMED,
         requestedPlan: payment.requestedPlan,
@@ -286,6 +293,7 @@ export async function confirmSubscriptionPayment(
 
 export async function rejectSubscriptionPayment(
   data: unknown,
+  auditContext?: AuditRequestContext,
 ): Promise<ActionResult<void>> {
   try {
     const sessionResult = await requireSession()
@@ -334,6 +342,8 @@ export async function rejectSubscriptionPayment(
       action: AuditAction.UPDATE,
       resourceType: "SUBSCRIPTION_PAYMENT",
       resourceId: payment.id,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       after: { status: SubscriptionPaymentStatus.REJECTED },
     })
 
@@ -347,6 +357,7 @@ export async function rejectSubscriptionPayment(
 
 export async function adminStartTrial(
   data: unknown,
+  auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ trialEndsAt: Date }>> {
   try {
     const sessionResult = await requireSession()
@@ -434,6 +445,8 @@ export async function adminStartTrial(
       action: AuditAction.UPDATE,
       resourceType: "SUBSCRIPTION",
       resourceId: organizationId,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       after: { plan: SubscriptionPlan.BASIC, status: "TRIAL", trialEndsAt },
     })
 
@@ -533,6 +546,7 @@ export async function consumeAiCredit(
 
 export async function adminUpdateOrganizationSubscription(
   data: unknown,
+  auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ plan: SubscriptionPlan }>> {
   try {
     const sessionResult = await requireSession()
@@ -604,6 +618,8 @@ export async function adminUpdateOrganizationSubscription(
       action: AuditAction.UPDATE,
       resourceType: "SUBSCRIPTION",
       resourceId: organizationId,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       after: {
         plan,
         amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
@@ -624,6 +640,7 @@ export async function adminUpdateOrganizationSubscription(
 
 export async function adminConfirmPaymentTransaction(
   data: unknown,
+  auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ transactionId: string }>> {
   try {
     const sessionResult = await requireSession()
@@ -668,6 +685,8 @@ export async function adminConfirmPaymentTransaction(
       action: AuditAction.UPDATE,
       resourceType: "PAYMENT_TRANSACTION",
       resourceId: transaction.id,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       after: { status: "CONFIRMED_MANUALLY" },
     })
 
@@ -683,6 +702,7 @@ export async function adminConfirmPaymentTransaction(
 
 export async function adminRejectPaymentTransaction(
   data: unknown,
+  auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ transactionId: string }>> {
   try {
     const sessionResult = await requireSession()
@@ -743,6 +763,8 @@ export async function adminRejectPaymentTransaction(
       action: AuditAction.UPDATE,
       resourceType: "PAYMENT_TRANSACTION",
       resourceId: transaction.id,
+      ipAddress: auditContext?.ipAddress,
+      userAgent: auditContext?.userAgent,
       after: { status: "REJECTED_MANUALLY" },
     })
 
