@@ -1,88 +1,80 @@
 "use client"
 
-/**
- * SunuFarm — Page Achats (Client Component)
- *
- * Formulaire de création avec lignes d'articles dynamiques (+ / −).
- * Total recalculé à chaque frappe.
- */
-
-import { useState, useTransition } from "react"
+import { useMemo, useState, useTransition } from "react"
+import { CircleAlert, PackagePlus, Plus, Trash2 } from "lucide-react"
 import {
+  formatDate,
   formatMoneyFCFA,
   formatMoneyFCFACompact,
-  formatDate,
-}                                  from "@/src/lib/formatters"
+} from "@/src/lib/formatters"
 import { createPurchase, deletePurchase } from "@/src/actions/purchases"
-import type { PurchaseSummary }           from "@/src/actions/purchases"
-
-// ---------------------------------------------------------------------------
-// Types locaux
-// ---------------------------------------------------------------------------
+import type { PurchaseSummary } from "@/src/actions/purchases"
 
 interface Supplier {
-  id:   string
+  id: string
   name: string
   type: string | null
 }
 
 interface LineItem {
-  description:   string
-  quantity:      string
-  unit:          string
+  description: string
+  quantity: string
+  unit: string
   unitPriceFcfa: string
 }
 
+interface Props {
+  organizationId: string
+  userRole: string
+  purchases: PurchaseSummary[]
+  suppliers: Supplier[]
+  totalFcfa: number
+  paidFcfa: number
+  balanceFcfa: number
+}
+
+const UNIT_OPTIONS = ["KG", "SAC", "PIECE", "DOSE", "LITRE", "BOITE"] as const
+
 function emptyLine(): LineItem {
-  return { description: "", quantity: "", unit: "KG", unitPriceFcfa: "" }
+  return {
+    description: "",
+    quantity: "",
+    unit: "SAC",
+    unitPriceFcfa: "",
+  }
 }
 
 function lineTotal(line: LineItem): number {
-  const qty   = parseFloat(line.quantity)  || 0
-  const price = parseInt(line.unitPriceFcfa.replace(/\D/g, ""), 10) || 0
-  return Math.round(qty * price)
+  const quantity = parseFloat(line.quantity) || 0
+  const unitPriceFcfa = parseInt(line.unitPriceFcfa.replace(/\D/g, ""), 10) || 0
+  return Math.round(quantity * unitPriceFcfa)
 }
-
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
-interface Props {
-  organizationId: string
-  userRole:       string
-  purchases:      PurchaseSummary[]
-  suppliers:      Supplier[]
-  totalFcfa:      number
-  paidFcfa:       number
-  balanceFcfa:    number
-}
-
-// ---------------------------------------------------------------------------
-// KpiCard
-// ---------------------------------------------------------------------------
 
 function KpiCard({
-  label, value, sub, accent,
+  label,
+  value,
+  sub,
+  accent,
 }: {
-  label: string; value: string; sub?: string; accent?: "green" | "red" | "blue"
+  label: string
+  value: string
+  sub?: string
+  accent?: "green" | "red" | "blue"
 }) {
-  const cls =
+  const accentClass =
     accent === "green" ? "text-green-700" :
-    accent === "red"   ? "text-red-600"   :
-    accent === "blue"  ? "text-blue-600"  :
+    accent === "red" ? "text-red-600" :
+    accent === "blue" ? "text-blue-600" :
     "text-gray-900"
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
-      <div className="text-xs text-gray-400 mb-1">{label}</div>
-      <div className={`text-lg font-bold tabular-nums leading-tight ${cls}`}>{value}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <p className="text-xs text-gray-400">{label}</p>
+      <p className={`mt-1 text-xl font-bold tabular-nums ${accentClass}`}>{value}</p>
+      {sub ? <p className="mt-1 text-xs text-gray-400">{sub}</p> : null}
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function PurchasesPageClient({
   organizationId,
@@ -94,370 +86,466 @@ export function PurchasesPageClient({
   balanceFcfa,
 }: Props) {
   const canMutate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(userRole)
-
   const [purchases, setPurchases] = useState<PurchaseSummary[]>(initialPurchases)
-  const [showForm,  setShowForm]  = useState(false)
+  const [showForm, setShowForm] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const [lines,     setLines]     = useState<LineItem[]>([emptyLine()])
   const [isPending, startTransition] = useTransition()
+  const [supplierId, setSupplierId] = useState("")
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10))
+  const [reference, setReference] = useState("")
+  const [notes, setNotes] = useState("")
+  const [lines, setLines] = useState<LineItem[]>([emptyLine()])
 
-  const today = new Date().toISOString().slice(0, 10)
+  const formTotal = useMemo(
+    () => lines.reduce((sum, line) => sum + lineTotal(line), 0),
+    [lines],
+  )
 
-  // ---------------------------------------------------------------------------
-  // Gestion des lignes
-  // ---------------------------------------------------------------------------
+  const selectedSupplier = suppliers.find((supplier) => supplier.id === supplierId) ?? null
 
-  function updateLine(idx: number, field: keyof LineItem, value: string) {
-    setLines((prev) => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l))
+  function resetForm() {
+    setFormError(null)
+    setSupplierId("")
+    setPurchaseDate(new Date().toISOString().slice(0, 10))
+    setReference("")
+    setNotes("")
+    setLines([emptyLine()])
+  }
+
+  function updateLine(index: number, field: keyof LineItem, value: string) {
+    setLines((current) =>
+      current.map((line, lineIndex) =>
+        lineIndex === index ? { ...line, [field]: value } : line,
+      ),
+    )
   }
 
   function addLine() {
-    setLines((prev) => [...prev, emptyLine()])
+    setLines((current) => [...current, emptyLine()])
   }
 
-  function removeLine(idx: number) {
-    setLines((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)
+  function removeLine(index: number) {
+    setLines((current) => (
+      current.length > 1 ? current.filter((_, lineIndex) => lineIndex !== index) : current
+    ))
   }
 
-  const formTotal = lines.reduce((s, l) => s + lineTotal(l), 0)
+  function handleToggleForm() {
+    if (showForm) {
+      resetForm()
+      setShowForm(false)
+      return
+    }
 
-  // ---------------------------------------------------------------------------
-  // Création
-  // ---------------------------------------------------------------------------
-
-  function handleCreate(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
     setFormError(null)
-    const fd = new FormData(e.currentTarget)
+    setShowForm(true)
+  }
 
-    const supplierId = (fd.get("supplierId") as string) || undefined
+  function handleCreate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setFormError(null)
 
-    const items = lines.map((l) => ({
-      description:   l.description,
-      quantity:      parseFloat(l.quantity) || 0,
-      unit:          l.unit,
-      unitPriceFcfa: parseInt(l.unitPriceFcfa.replace(/\D/g, ""), 10) || 0,
+    const items = lines.map((line) => ({
+      description: line.description.trim(),
+      quantity: parseFloat(line.quantity) || 0,
+      unit: line.unit,
+      unitPriceFcfa: parseInt(line.unitPriceFcfa.replace(/\D/g, ""), 10) || 0,
     }))
+
+    const hasInvalidLine = items.some((item) =>
+      !item.description || item.quantity <= 0 || item.unitPriceFcfa <= 0,
+    )
+
+    if (hasInvalidLine) {
+      setFormError("Chaque ligne doit avoir une description, une quantite et un prix valides.")
+      return
+    }
 
     startTransition(async () => {
       const result = await createPurchase({
         organizationId,
-        supplierId,
-        purchaseDate: new Date(fd.get("purchaseDate") as string),
-        reference:    fd.get("reference") as string,
-        notes:        fd.get("notes") as string,
+        supplierId: supplierId || undefined,
+        purchaseDate: new Date(purchaseDate),
+        reference,
+        notes,
         items,
       })
 
-      if (!result.success) { setFormError(result.error); return }
-
-      const supplier = suppliers.find((s) => s.id === supplierId) ?? null
+      if (!result.success) {
+        setFormError(result.error)
+        return
+      }
 
       const newPurchase: PurchaseSummary = {
-        id:           result.data.id,
-        purchaseDate: new Date(fd.get("purchaseDate") as string),
-        reference:    (fd.get("reference") as string) || null,
-        totalFcfa:    formTotal,
-        paidFcfa:     0,
-        balanceFcfa:  formTotal,
-        notes:        (fd.get("notes") as string) || null,
-        createdAt:    new Date(),
-        supplier:     supplier ? { id: supplier.id, name: supplier.name, type: supplier.type } : null,
-        items:        items.map((item) => ({
+        id: result.data.id,
+        purchaseDate: new Date(purchaseDate),
+        reference: reference || null,
+        totalFcfa: formTotal,
+        paidFcfa: 0,
+        balanceFcfa: formTotal,
+        notes: notes || null,
+        createdAt: new Date(),
+        supplier: selectedSupplier
+          ? { id: selectedSupplier.id, name: selectedSupplier.name, type: selectedSupplier.type }
+          : null,
+        items: items.map((item) => ({
           ...item,
           totalFcfa: Math.round(item.quantity * item.unitPriceFcfa),
         })),
       }
 
-      setPurchases((prev) => [newPurchase, ...prev])
+      setPurchases((current) => [newPurchase, ...current])
+      resetForm()
       setShowForm(false)
-      setLines([emptyLine()])
-      ;(e.target as HTMLFormElement).reset()
     })
   }
-
-  // ---------------------------------------------------------------------------
-  // Suppression
-  // ---------------------------------------------------------------------------
 
   function handleDelete(purchase: PurchaseSummary) {
-    if (!window.confirm(`Supprimer cet achat de ${formatMoneyFCFA(purchase.totalFcfa)} ?`)) return
+    if (!window.confirm(`Supprimer cet achat de ${formatMoneyFCFA(purchase.totalFcfa)} ?`)) {
+      return
+    }
 
     startTransition(async () => {
-      const result = await deletePurchase({ organizationId, purchaseId: purchase.id })
-      if (!result.success) { alert(result.error); return }
-      setPurchases((prev) => prev.filter((p) => p.id !== purchase.id))
+      const result = await deletePurchase({
+        organizationId,
+        purchaseId: purchase.id,
+      })
+
+      if (!result.success) {
+        alert(result.error)
+        return
+      }
+
+      setPurchases((current) => current.filter((item) => item.id !== purchase.id))
     })
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-
-      {/* ── En-tête ────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-3">
+    <div className="mx-auto max-w-7xl space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Achats</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Commandes fournisseurs</p>
+          <p className="mt-0.5 text-sm text-gray-500">
+            Suis les commandes fournisseurs et structure mieux les couts de production.
+          </p>
         </div>
-        {canMutate && (
+
+        {canMutate ? (
           <button
-            onClick={() => { setShowForm((v) => !v); setFormError(null); setLines([emptyLine()]) }}
-            className="shrink-0 rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 active:scale-95 transition-all"
+            onClick={handleToggleForm}
+            className="inline-flex w-fit items-center gap-2 rounded-2xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700"
           >
-            {showForm ? "Annuler" : "+ Nouvel achat"}
+            <PackagePlus className="h-4 w-4" />
+            {showForm ? "Fermer le formulaire" : "Nouvel achat"}
           </button>
-        )}
+        ) : null}
       </div>
 
-      {/* ── KPI ────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid gap-4 md:grid-cols-3">
         <KpiCard
           label="Total achats"
           value={formatMoneyFCFACompact(totalFcfa)}
           sub={`${purchases.length} commandes`}
+          accent="blue"
         />
-        <KpiCard label="Payé" value={formatMoneyFCFACompact(paidFcfa)} accent="green" />
         <KpiCard
-          label="Solde dû"
+          label="Montant paye"
+          value={formatMoneyFCFACompact(paidFcfa)}
+          accent="green"
+        />
+        <KpiCard
+          label="Solde fournisseur"
           value={formatMoneyFCFACompact(balanceFcfa)}
-          sub="fournisseurs"
+          sub="A regler"
           accent={balanceFcfa > 0 ? "red" : undefined}
         />
       </div>
 
-      {/* ── Formulaire ─────────────────────────────────────────────────────── */}
-      {showForm && (
-        <form
-          onSubmit={handleCreate}
-          className="rounded-xl border border-green-200 bg-green-50 p-4 space-y-4"
-        >
-          <h2 className="text-sm font-semibold text-green-800">Nouvel achat</h2>
+      {showForm ? (
+        <form onSubmit={handleCreate} className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
+          <section className="space-y-6">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h2 className="text-base font-semibold text-gray-900">Informations achat</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Renseigne la commande, le fournisseur et la reference de facture.
+              </p>
 
-          {formError && (
-            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{formError}</p>
-          )}
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Date d&apos;achat</label>
+                  <input
+                    type="date"
+                    required
+                    value={purchaseDate}
+                    onChange={(event) => setPurchaseDate(event.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
 
-          {/* Date + Fournisseur */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Date <span className="text-red-500">*</span>
-              </label>
-              <input
-                name="purchaseDate"
-                type="date"
-                required
-                defaultValue={today}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Fournisseur</label>
+                  <select
+                    value={supplierId}
+                    onChange={(event) => setSupplierId(event.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  >
+                    <option value="">Sans fournisseur precise</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium text-gray-700">Reference / facture</label>
+                  <input
+                    value={reference}
+                    onChange={(event) => setReference(event.target.value)}
+                    placeholder="Ex: FAC-ALIM-2026-014"
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">Lignes d&apos;achat</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Detaille ce qui a ete achete pour garder une base exploitable ensuite.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={addLine}
+                  className="inline-flex items-center gap-2 rounded-xl bg-green-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-green-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  Ajouter une ligne
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                {lines.map((line, index) => (
+                  <div
+                    key={index}
+                    className="rounded-2xl border border-gray-200 bg-gray-50/60 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-gray-900">Ligne {index + 1}</p>
+                      <button
+                        type="button"
+                        onClick={() => removeLine(index)}
+                        disabled={lines.length === 1}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-red-600 transition hover:text-red-700 disabled:cursor-not-allowed disabled:text-gray-300"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Supprimer
+                      </button>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-[1.8fr_0.8fr_0.8fr_1fr]">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Description</label>
+                        <input
+                          required
+                          value={line.description}
+                          onChange={(event) => updateLine(index, "description", event.target.value)}
+                          placeholder="Ex: Aliment demarrage, vaccin, carton d'emballage..."
+                          className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Quantite</label>
+                        <input
+                          required
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={line.quantity}
+                          onChange={(event) => updateLine(index, "quantity", event.target.value)}
+                          className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Unite</label>
+                        <select
+                          value={line.unit}
+                          onChange={(event) => updateLine(index, "unit", event.target.value)}
+                          className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                        >
+                          {UNIT_OPTIONS.map((unit) => (
+                            <option key={unit} value={unit}>
+                              {unit}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Prix unitaire</label>
+                        <input
+                          required
+                          type="number"
+                          min="1"
+                          value={line.unitPriceFcfa}
+                          onChange={(event) => updateLine(index, "unitPriceFcfa", event.target.value)}
+                          className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-xl border border-dashed border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+                      Sous-total ligne : <span className="font-semibold">{formatMoneyFCFA(lineTotal(line))}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <label className="text-sm font-medium text-gray-700">Notes</label>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={4}
+                placeholder="Informations utiles sur la livraison, la qualite ou la destination interne."
+                className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-3 text-sm outline-none transition focus:border-green-500"
               />
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Fournisseur</label>
-              <select
-                name="supplierId"
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-              >
-                <option value="">— Sans fournisseur —</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          </section>
 
-          {/* Référence */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">N° facture fournisseur</label>
-            <input
-              name="reference"
-              placeholder="FAC-2025-001"
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            />
-          </div>
-
-          {/* Lignes d'articles */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-gray-500">
-                Lignes ({lines.length})
+          <aside className="space-y-5">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-gray-500">Resume de l&apos;achat</p>
+              <p className="mt-2 text-3xl font-bold text-gray-900">
+                {formatMoneyFCFA(formTotal)}
               </p>
-              <button
-                type="button"
-                onClick={addLine}
-                className="text-xs text-green-700 font-medium hover:underline"
-              >
-                + Ajouter une ligne
-              </button>
+
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex items-center justify-between text-gray-600">
+                  <span>Lignes</span>
+                  <span className="font-medium text-gray-900">{lines.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-gray-600">
+                  <span>Fournisseur</span>
+                  <span className="max-w-[11rem] truncate font-medium text-gray-900">
+                    {selectedSupplier?.name ?? "Non precise"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-gray-600">
+                  <span>Date</span>
+                  <span className="font-medium text-gray-900">{purchaseDate || "-"}</span>
+                </div>
+              </div>
             </div>
 
-            {lines.map((line, idx) => (
-              <div key={idx} className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">Ligne {idx + 1}</span>
-                  {lines.length > 1 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <div className="flex items-start gap-2">
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>
+                  Cet ecran structure l&apos;achat proprement. Si tu veux un impact stock automatique,
+                  il faudra ensuite relier explicitement ces lignes au module stock.
+                </p>
+              </div>
+            </div>
+
+            {formError ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {formError}
+              </div>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={isPending}
+              className="w-full rounded-2xl bg-green-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
+            >
+              {isPending ? "Enregistrement..." : "Enregistrer l&apos;achat"}
+            </button>
+          </aside>
+        </form>
+      ) : null}
+
+      {purchases.length === 0 ? (
+        <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center text-sm text-gray-400">
+          Aucun achat enregistre pour le moment.
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-4">
+            <h2 className="text-base font-semibold text-gray-900">Historique des achats</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Vue d&apos;ensemble des commandes fournisseurs recentes.
+            </p>
+          </div>
+
+          <div className="divide-y divide-gray-100">
+            {purchases.map((purchase) => (
+              <div
+                key={purchase.id}
+                className="flex flex-col gap-4 px-5 py-4 md:flex-row md:items-start md:justify-between"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-gray-900">
+                      {purchase.supplier?.name ?? "Sans fournisseur"}
+                    </h3>
+                    {purchase.reference ? (
+                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
+                        {purchase.reference}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <p className="mt-1 text-sm text-gray-500">
+                    {formatDate(purchase.purchaseDate)}
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {purchase.items.map((item, index) => (
+                      <span
+                        key={`${purchase.id}-${index}`}
+                        className="rounded-full bg-gray-50 px-3 py-1 text-xs text-gray-600"
+                      >
+                        {item.description}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-4">
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-gray-900">
+                      {formatMoneyFCFACompact(purchase.totalFcfa)}
+                    </p>
+                    <p className={`text-xs ${purchase.balanceFcfa > 0 ? "text-red-600" : "text-green-600"}`}>
+                      {purchase.balanceFcfa > 0
+                        ? `Reste: ${formatMoneyFCFA(purchase.balanceFcfa)}`
+                        : "Entierement regle"}
+                    </p>
+                  </div>
+
+                  {canMutate ? (
                     <button
-                      type="button"
-                      onClick={() => removeLine(idx)}
-                      className="text-xs text-red-400 hover:text-red-600"
+                      onClick={() => handleDelete(purchase)}
+                      disabled={isPending || purchase.paidFcfa > 0}
+                      title={purchase.paidFcfa > 0 ? "Impossible de supprimer un achat avec des paiements" : "Supprimer"}
+                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
                     >
                       Supprimer
                     </button>
-                  )}
+                  ) : null}
                 </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">
-                    Description <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    required
-                    value={line.description}
-                    onChange={(e) => updateLine(idx, "description", e.target.value)}
-                    placeholder="Aliment croissance, Poussins, Vaccin Newcastle..."
-                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">
-                      Quantité <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      required
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={line.quantity}
-                      onChange={(e) => updateLine(idx, "quantity", e.target.value)}
-                      placeholder="50"
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Unité</label>
-                    <select
-                      value={line.unit}
-                      onChange={(e) => updateLine(idx, "unit", e.target.value)}
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    >
-                      <option value="KG">kg</option>
-                      <option value="SAC">sac</option>
-                      <option value="PIECE">pièce</option>
-                      <option value="DOSE">dose</option>
-                      <option value="LITRE">litre</option>
-                      <option value="BOITE">boîte</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">
-                      Prix/unit (FCFA) <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      required
-                      type="number"
-                      min="1"
-                      value={line.unitPriceFcfa}
-                      onChange={(e) => updateLine(idx, "unitPriceFcfa", e.target.value)}
-                      placeholder="15000"
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    />
-                  </div>
-                </div>
-                {lineTotal(line) > 0 && (
-                  <p className="text-xs text-right text-gray-500 tabular-nums">
-                    Sous-total : <strong>{formatMoneyFCFA(lineTotal(line))}</strong>
-                  </p>
-                )}
               </div>
             ))}
           </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Notes</label>
-            <input
-              name="notes"
-              placeholder="Remarques optionnelles..."
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            />
-          </div>
-
-          {/* Total + bouton */}
-          {formTotal > 0 && (
-            <div className="rounded-lg bg-white border border-gray-200 px-4 py-2 flex items-center justify-between">
-              <span className="text-sm text-gray-500">Total commande</span>
-              <span className="font-bold text-gray-900 tabular-nums">{formatMoneyFCFA(formTotal)}</span>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isPending}
-            className="w-full rounded-xl bg-green-600 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-          >
-            {isPending ? "Enregistrement…" : "Enregistrer l'achat"}
-          </button>
-        </form>
-      )}
-
-      {/* ── Liste ──────────────────────────────────────────────────────────── */}
-      {purchases.length === 0 ? (
-        <div className="rounded-xl border border-gray-100 bg-white p-8 text-center text-sm text-gray-400">
-          Aucun achat enregistré.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {purchases.map((purchase) => (
-            <div key={purchase.id} className="rounded-xl border border-gray-100 bg-white p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-gray-900">
-                      {purchase.supplier?.name ?? "Sans fournisseur"}
-                    </span>
-                    {purchase.reference && (
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
-                        {purchase.reference}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 text-xs text-gray-400">
-                    {purchase.items.length} ligne{purchase.items.length > 1 ? "s" : ""}
-                    {" · "}
-                    {purchase.items.map((i) => i.description).join(", ")}
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
-                  <div className="text-sm font-semibold text-gray-900 tabular-nums">
-                    {formatMoneyFCFACompact(purchase.totalFcfa)}
-                  </div>
-                  {purchase.balanceFcfa > 0 ? (
-                    <div className="text-xs text-red-600">Dû : {formatMoneyFCFA(purchase.balanceFcfa)}</div>
-                  ) : (
-                    <div className="text-xs text-green-600">Payé</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between border-t border-gray-50 pt-2">
-                <span className="text-xs text-gray-300">{formatDate(purchase.purchaseDate)}</span>
-                {canMutate && (
-                  <button
-                    onClick={() => handleDelete(purchase)}
-                    disabled={isPending || purchase.paidFcfa > 0}
-                    title={purchase.paidFcfa > 0 ? "Impossible de supprimer un achat avec des paiements" : "Supprimer"}
-                    className="text-xs text-gray-300 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Supprimer
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
         </div>
       )}
     </div>
