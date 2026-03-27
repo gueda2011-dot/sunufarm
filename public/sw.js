@@ -1,12 +1,13 @@
 const CACHE_NAME = "sunufarm-v1"
 const APP_SHELL = [
   "/offline",
-  "/manifest.webmanifest",
 ]
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)),
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await Promise.allSettled(APP_SHELL.map((resource) => cache.add(resource)))
+    }),
   )
   self.skipWaiting()
 })
@@ -31,13 +32,16 @@ self.addEventListener("fetch", (event) => {
     try {
       const networkResponse = await fetch(event.request)
 
-      if (event.request.url.startsWith(self.location.origin)) {
+      if (
+        networkResponse.ok &&
+        event.request.url.startsWith(self.location.origin)
+      ) {
         const cache = await caches.open(CACHE_NAME)
         cache.put(event.request, networkResponse.clone())
       }
 
       return networkResponse
-    } catch (error) {
+    } catch {
       const cached = await caches.match(event.request)
       if (cached) return cached
 
@@ -46,7 +50,7 @@ self.addEventListener("fetch", (event) => {
         if (offlinePage) return offlinePage
       }
 
-      throw error
+      return Response.error()
     }
   })())
 })

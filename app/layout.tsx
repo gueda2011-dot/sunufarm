@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next"
+import { headers } from "next/headers"
 import { Toaster } from "sonner"
 import { QueryProvider } from "@/src/components/providers/QueryProvider"
 import { ServiceWorkerRegistration } from "@/src/components/pwa/ServiceWorkerRegistration"
 import "./globals.css"
 
-export const metadata: Metadata = {
+const BASE_METADATA: Metadata = {
   title: {
     default: "SunuFarm - Gere votre ferme. Gagnez plus.",
     template: "%s | SunuFarm",
@@ -13,7 +14,6 @@ export const metadata: Metadata = {
     "L'ERP avicole de reference pour l'Afrique francophone. " +
     "Gerez vos lots, suivez la rentabilite et prenez les bonnes decisions.",
   applicationName: "SunuFarm",
-  manifest: "/manifest.webmanifest",
   keywords: ["aviculture", "elevage", "ferme", "poules", "Senegal", "FCFA"],
   authors: [{ name: "SunuFarm" }],
   appleWebApp: {
@@ -21,6 +21,27 @@ export const metadata: Metadata = {
     title: "SunuFarm",
     statusBarStyle: "default",
   },
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const requestHeaders = await headers()
+  const currentHost =
+    requestHeaders.get("x-forwarded-host") ??
+    requestHeaders.get("host") ??
+    ""
+
+  const configuredHost = process.env.NEXT_PUBLIC_APP_URL
+    ? new URL(process.env.NEXT_PUBLIC_APP_URL).host
+    : null
+
+  const isPreviewDeployment =
+    currentHost.endsWith(".vercel.app") &&
+    (!configuredHost || currentHost !== configuredHost)
+
+  return {
+    ...BASE_METADATA,
+    ...(isPreviewDeployment ? {} : { manifest: "/manifest.webmanifest" }),
+  }
 }
 
 export const viewport: Viewport = {
