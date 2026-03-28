@@ -36,12 +36,11 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { canPerformAction } from "@/src/lib/permissions"
 import {
   requiredIdSchema,
   optionalIdSchema,
@@ -49,7 +48,7 @@ import {
   dateSchema,
   optionalDateSchema,
 } from "@/src/lib/validators"
-import { SaleProductType } from "@/src/generated/prisma/client"
+import { SaleProductType, UserRole } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -278,9 +277,6 @@ export async function getSales(
   data: unknown,
 ): Promise<ActionResult<SaleSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getSalesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -296,15 +292,14 @@ export async function getSales(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SALES")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Accès aux données financières refusé",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
-      return { success: false, error: "Accès aux données financières refusé" }
-    }
+    if (!roleResult.success) return roleResult
 
     const sales = await prisma.sale.findMany({
       where: {
@@ -344,9 +339,6 @@ export async function getSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getSaleSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -354,15 +346,14 @@ export async function getSale(
 
     const { organizationId, saleId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SALES")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Accès aux données financières refusé",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
-      return { success: false, error: "Accès aux données financières refusé" }
-    }
+    if (!roleResult.success) return roleResult
 
     const sale = await prisma.sale.findFirst({
       where:  { id: saleId, organizationId },
@@ -396,23 +387,21 @@ export async function createSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createSaleSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, customerId, items, ...saleData } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SALES")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     // Valider le client si fourni
     if (customerId) {
@@ -492,23 +481,21 @@ export async function updateSale(
   data: unknown,
 ): Promise<ActionResult<SaleDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateSaleSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, saleId, items, paidFcfa, ...headerUpdates } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SALES")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.sale.findFirst({
       where:  { id: saleId, organizationId },
@@ -619,23 +606,21 @@ export async function updateSale(
 export async function deleteSale(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = deleteSaleSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, saleId } = parsed.data
-  const actorId = sessionResult.data.user.id
-
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
-
-  if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-    return { success: false, error: "Permission refusée" }
-  }
+  const accessResult = await requireOrganizationModuleContext(organizationId, "SALES")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
+  const roleResult = requireRole(
+    accessResult.data.membership,
+    [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+    "Permission refusée",
+  )
+  if (!roleResult.success) return roleResult
 
   const existing = await prisma.sale.findFirst({
     where:  { id: saleId, organizationId },

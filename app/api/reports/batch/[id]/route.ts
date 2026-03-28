@@ -14,20 +14,24 @@ import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { apiError } from "@/src/lib/api-response"
 import { getBatchOperationalSnapshot } from "@/src/lib/batch-metrics"
 import { getSunuFarmLogoDataUri } from "@/src/lib/branding.server"
+import { logger } from "@/src/lib/logger"
 import { hasModuleAccess } from "@/src/lib/permissions"
 import prisma from "@/src/lib/prisma"
+import { getRequestId } from "@/src/lib/request-security"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const requestId = getRequestId(req.headers)
   try {
     const session = await auth()
     if (!session?.user?.id) {
+      logger.warn("reports.batch.unauthenticated", { requestId })
       return apiError("Non authentifie", { status: 401, code: "UNAUTHENTICATED" })
     }
 
@@ -35,10 +39,20 @@ export async function GET(
     const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
 
     if (!activeMembership) {
+      logger.warn("reports.batch.org_not_found", {
+        requestId,
+        userId: session.user.id,
+      })
       return apiError("Organisation introuvable", { status: 403, code: "ORG_NOT_FOUND" })
     }
 
     if (!hasModuleAccess(activeMembership.role, activeMembership.modulePermissions, "REPORTS")) {
+      logger.warn("reports.batch.module_denied", {
+        requestId,
+        userId: session.user.id,
+        organizationId: activeMembership.organizationId,
+        batchId,
+      })
       return apiError("Acces refuse au module REPORTS.", {
         status: 403,
         code: "MODULE_ACCESS_DENIED",
@@ -88,6 +102,12 @@ export async function GET(
     ])
 
     if (!batch) {
+      logger.warn("reports.batch.not_found", {
+        requestId,
+        userId: session.user.id,
+        organizationId,
+        batchId,
+      })
       return apiError("Lot introuvable", { status: 404, code: "BATCH_NOT_FOUND" })
     }
 
@@ -143,6 +163,14 @@ export async function GET(
     const buffer = await renderToBuffer(doc as any)
     const filename = `lot-${batch.number.replace(/[^a-zA-Z0-9-]/g, "-")}.pdf`
 
+    logger.info("reports.batch.generated", {
+      requestId,
+      userId: session.user.id,
+      organizationId,
+      batchId,
+      canSeeProfitability,
+    })
+
     return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
@@ -152,7 +180,10 @@ export async function GET(
       },
     })
   } catch (error) {
-    console.error("[PDF batch] Error:", error)
+    logger.error("reports.batch.failed", {
+      requestId,
+      error,
+    })
     return apiError("Erreur lors de la generation du PDF", {
       status: 500,
       code: "PDF_GENERATION_FAILED",

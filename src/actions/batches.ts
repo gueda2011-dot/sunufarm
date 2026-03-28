@@ -33,11 +33,10 @@ import {
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
+import { getAccessibleFarmIds, getNextBatchNumber } from "@/src/lib/batch-rules"
 import {
   canPerformAction,
   canAccessFarm,
-  parseFarmPermissions,
-  type FarmRight,
 } from "@/src/lib/permissions"
 import {
   requiredIdSchema,
@@ -263,27 +262,6 @@ async function findActiveBatch(batchId: string, organizationId: string) {
 }
 
 /**
- * Retourne les IDs de fermes accessibles pour l'utilisateur, ou null si tout est accessible.
- *
- * null   → pas de filtre (SUPER_ADMIN, OWNER, MANAGER en lecture)
- * []     → aucune ferme accessible → résultat vide sans requête DB
- * [...]  → liste des farmIds autorisés
- */
-function getAccessibleFarmIds(
-  role: string,
-  farmPermissions: unknown,
-  right: FarmRight = "canRead",
-): string[] | null {
-  if (role === "SUPER_ADMIN" || role === "OWNER") return null
-  if (role === "MANAGER" && right === "canRead")  return null
-
-  const permissions = parseFarmPermissions(farmPermissions)
-  return permissions
-    .filter((p) => p[right] === true)
-    .map((p) => p.farmId)
-}
-
-/**
  * Génère le prochain numéro de lot SF-YYYY-NNN pour l'organisation.
  * Doit être appelé à l'intérieur d'une $transaction pour garantir l'unicité.
  *
@@ -304,11 +282,7 @@ async function generateBatchNumber(
     select:  { number: true },
   })
 
-  const nextSeq = lastBatch
-    ? parseInt(lastBatch.number.slice(prefix.length), 10) + 1
-    : 1
-
-  return `${prefix}${String(nextSeq).padStart(3, "0")}`
+  return getNextBatchNumber(year, lastBatch?.number)
 }
 
 // ---------------------------------------------------------------------------

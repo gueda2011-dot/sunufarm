@@ -51,8 +51,8 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -448,9 +448,6 @@ export async function getVaccinationPlans(
   data: unknown,
 ): Promise<ActionResult<VaccinationPlanSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getVaccinationPlansSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -458,11 +455,8 @@ export async function getVaccinationPlans(
 
     const { organizationId, batchType, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
 
     const plans = await prisma.vaccinationPlan.findMany({
       where: {
@@ -494,23 +488,21 @@ export async function createVaccinationPlan(
   data: unknown,
 ): Promise<ActionResult<VaccinationPlanSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createVaccinationPlanSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, name, batchType, items } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "MANAGE_FARMS")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     const plan = await prisma.vaccinationPlan.create({
       data: {
@@ -551,23 +543,21 @@ export async function updateVaccinationPlan(
   data: unknown,
 ): Promise<ActionResult<VaccinationPlanSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateVaccinationPlanSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, planId, items, ...planUpdates } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "MANAGE_FARMS")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.vaccinationPlan.findFirst({
       where:  { id: planId, organizationId },
@@ -631,9 +621,6 @@ export async function getVaccinations(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getVaccinationsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -648,13 +635,9 @@ export async function getVaccinations(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const { role, farmPermissions } = accessResult.data.membership
 
     // Construire le filtre ferme
     let farmFilter: object = {}
@@ -713,9 +696,6 @@ export async function getVaccination(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getVaccinationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -723,13 +703,9 @@ export async function getVaccination(
 
     const { organizationId, vaccinationId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const { role, farmPermissions } = accessResult.data.membership
 
     const vaccination = await prisma.vaccinationRecord.findFirst({
       where:  { id: vaccinationId, organizationId },
@@ -781,9 +757,6 @@ export async function createVaccination(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createVaccinationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -800,16 +773,16 @@ export async function createVaccination(
       medicineStockId,
       notes,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
-
-    if (!canPerformAction(role, "CREATE_VACCINATION")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.VET],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     // Valider le lot et obtenir les données nécessaires
     const batch = await findBatchForHealth(batchId, organizationId)
@@ -914,25 +887,22 @@ export async function updateVaccination(
   data: unknown,
 ): Promise<ActionResult<VaccinationSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateVaccinationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, vaccinationId, countVaccinated, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
-
-    if (!canPerformAction(role, "CREATE_VACCINATION")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.VET],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     // Charger la vaccination avec les infos nécessaires aux gardes
     const existing = await prisma.vaccinationRecord.findFirst({
@@ -1013,9 +983,6 @@ export async function getTreatments(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getTreatmentsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1030,13 +997,9 @@ export async function getTreatments(
       limit,
     } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const { role, farmPermissions } = accessResult.data.membership
 
     let farmFilter: object = {}
 
@@ -1094,9 +1057,6 @@ export async function getTreatment(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getTreatmentSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1104,13 +1064,9 @@ export async function getTreatment(
 
     const { organizationId, treatmentId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const { role, farmPermissions } = accessResult.data.membership
 
     const treatment = await prisma.treatmentRecord.findFirst({
       where:  { id: treatmentId, organizationId },
@@ -1164,9 +1120,6 @@ export async function createTreatment(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createTreatmentSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -1185,16 +1138,16 @@ export async function createTreatment(
       indication,
       notes,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
-
-    if (!canPerformAction(role, "CREATE_TREATMENT")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.VET],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     const batch = await findBatchForHealth(batchId, organizationId)
     if (!batch) {
@@ -1300,25 +1253,22 @@ export async function updateTreatment(
   data: unknown,
 ): Promise<ActionResult<TreatmentSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateTreatmentSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, treatmentId, countTreated, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
-
-    if (!canPerformAction(role, "CREATE_TREATMENT")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.VET],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.treatmentRecord.findFirst({
       where:  { id: treatmentId, organizationId },

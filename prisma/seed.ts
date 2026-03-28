@@ -45,6 +45,34 @@ function dt(date: Date): Date {
   return new Date(date.toISOString().split("T")[0] + "T00:00:00.000Z")
 }
 
+function deterministicMortality(dayIndex: number, phase: "starter" | "grower" | "layer") {
+  if (phase === "starter") {
+    if (dayIndex < 7) return dayIndex % 3 === 0 ? 2 : 1
+    if (dayIndex < 21) return dayIndex % 6 === 0 ? 1 : 0
+    return dayIndex % 9 === 0 ? 1 : 0
+  }
+
+  if (phase === "grower") {
+    if (dayIndex < 7) return dayIndex % 4 === 0 ? 2 : 1
+    if (dayIndex < 30) return dayIndex % 8 === 0 ? 1 : 0
+    return dayIndex % 11 === 0 ? 1 : 0
+  }
+
+  return dayIndex % 14 === 0 ? 1 : 0
+}
+
+function deterministicTemperatureMin(dayIndex: number) {
+  return 28 + (dayIndex % 5) * 0.6
+}
+
+function deterministicTemperatureMax(dayIndex: number) {
+  return 33 + (dayIndex % 4) * 0.7
+}
+
+function deterministicHumidity(dayIndex: number) {
+  return 60 + (dayIndex % 6) * 2.5
+}
+
 // ---------------------------------------------------------------------------
 // Suppression dans l'ordre inverse des dépendances
 // ---------------------------------------------------------------------------
@@ -481,7 +509,7 @@ async function main() {
   for (let j = 0; j < 30; j++) {
     const ageDay  = j + 1
     const dateJ   = dt(addDays(entryDate1, j))
-    const mort    = j < 7 ? (Math.random() < 0.4 ? 2 : 1) : (Math.random() < 0.15 ? 1 : 0)
+    const mort    = deterministicMortality(j, "starter")
     mortCumul1   += mort
     const effectif = 2000 - mortCumul1
 
@@ -497,9 +525,9 @@ async function main() {
         mortality:      mort,
         feedKg,
         waterLiters:    Math.round(feedKg * 2 * 10) / 10,
-        temperatureMin: Math.round((28 + Math.random() * 4) * 10) / 10,
-        temperatureMax: Math.round((33 + Math.random() * 4) * 10) / 10,
-        humidity:       Math.round((60 + Math.random() * 15) * 10) / 10,
+        temperatureMin: deterministicTemperatureMin(j),
+        temperatureMax: deterministicTemperatureMax(j),
+        humidity:       deterministicHumidity(j),
         recordedById:   j % 3 === 0 ? tech1.id : saisie1.id,
       },
     })
@@ -566,7 +594,7 @@ async function main() {
   for (let j = 0; j < 45; j++) {
     const ageDay   = j + 1
     const dateJ    = dt(addDays(entryDate2, j))
-    const mort     = j < 7 ? (Math.random() < 0.35 ? 2 : 1) : (Math.random() < 0.1 ? 1 : 0)
+    const mort     = deterministicMortality(j, "grower")
     mortCumul2    += mort
     const effectif = 1500 - mortCumul2
     const gPerBird = ageDay < 8 ? 30 : ageDay < 15 ? 65 : ageDay < 22 ? 105 : ageDay < 35 ? 150 : 175
@@ -704,7 +732,7 @@ async function main() {
   let mortCumul3 = 0
   for (let j = 0; j < 45; j++) {
     const dateJ    = dt(addDays(entryDate3, j))
-    const mort     = Math.random() < 0.08 ? 1 : 0
+    const mort     = deterministicMortality(j, "layer")
     mortCumul3    += mort
     const effectif = 800 - mortCumul3
     const feedKg   = Math.round((effectif * 115) / 1000 * 10) / 10
@@ -835,7 +863,7 @@ async function main() {
   let mortCumul4 = 0
   for (let j = 0; j < 30; j++) {
     const dateJ    = dt(addDays(today, -30 + j))
-    const mort     = Math.random() < 0.07 ? 1 : 0
+    const mort     = deterministicMortality(j, "layer")
     mortCumul4    += mort
     const effectif = 1200 - mortCumul4
     const feedKg   = Math.round((effectif * 118) / 1000 * 10) / 10

@@ -49,8 +49,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
   type ActionResult,
 } from "@/src/lib/auth"
 import {
@@ -510,19 +509,15 @@ export async function getNotifications(
   data: unknown,
 ): Promise<ActionResult<NotificationSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getNotificationsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, status, cursorDate, limit } = parsed.data
-    const userId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(userId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "DASHBOARD")
+    if (!accessResult.success) return accessResult
+    const userId = accessResult.data.session.user.id
 
     const notifications = await prisma.notification.findMany({
       where: {
@@ -556,19 +551,15 @@ export async function getUnreadCount(
   data: unknown,
 ): Promise<ActionResult<number>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getUnreadCountSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId } = parsed.data
-    const userId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(userId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "DASHBOARD")
+    if (!accessResult.success) return accessResult
+    const userId = accessResult.data.session.user.id
 
     const count = await prisma.notification.count({
       where: { userId, organizationId, status: NotificationStatus.NON_LU },
@@ -595,19 +586,15 @@ export async function markNotificationRead(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = markNotificationReadSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, notificationId } = parsed.data
-    const userId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(userId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "DASHBOARD")
+    if (!accessResult.success) return accessResult
+    const userId = accessResult.data.session.user.id
 
     // Vérifier que la notification appartient bien à cet utilisateur
     const notification = await prisma.notification.findFirst({
@@ -643,19 +630,15 @@ export async function markAllNotificationsRead(
   data: unknown,
 ): Promise<ActionResult<{ count: number }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = markAllNotificationsReadSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId } = parsed.data
-    const userId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(userId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "DASHBOARD")
+    if (!accessResult.success) return accessResult
+    const userId = accessResult.data.session.user.id
 
     const result = await prisma.notification.updateMany({
       where: { userId, organizationId, status: NotificationStatus.NON_LU },
@@ -683,19 +666,15 @@ export async function archiveNotification(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = archiveNotificationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, notificationId } = parsed.data
-    const userId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(userId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "DASHBOARD")
+    if (!accessResult.success) return accessResult
+    const userId = accessResult.data.session.user.id
 
     const notification = await prisma.notification.findFirst({
       where:  { id: notificationId, userId, organizationId },
@@ -749,20 +728,14 @@ export async function generateNotifications(
   data: unknown,
 ): Promise<ActionResult<{ created: number }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = generateNotificationsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId } = parsed.data
-    const userId = sessionResult.data.user.id
-
-    // Vérifier l'appartenance à l'organisation (Ajustement 5)
-    const membershipResult = await requireMembership(userId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "DASHBOARD")
+    if (!accessResult.success) return accessResult
 
     const result = await generateNotificationsForOrganization(organizationId)
     return { success: true, data: { created: result.created } }

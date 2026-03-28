@@ -3,12 +3,11 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { canPerformAction } from "@/src/lib/permissions"
 import {
   requiredIdSchema,
   optionalIdSchema,
@@ -16,7 +15,7 @@ import {
   dateSchema,
   optionalDateSchema,
 } from "@/src/lib/validators"
-import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
+import { BatchType, BatchStatus, UserRole } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -129,20 +128,14 @@ export async function getEggRecords(
   data: unknown,
 ): Promise<ActionResult<EggRecordSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getEggRecordsSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: "Données invalides" }
 
     const { organizationId, batchId, fromDate, toDate, cursor, limit } =
       parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "EGGS")
+    if (!accessResult.success) return accessResult
 
     const records = await prisma.eggProductionRecord.findMany({
       where: {
@@ -177,21 +170,19 @@ export async function createEggRecord(
   data: unknown,
 ): Promise<ActionResult<EggRecordSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createEggRecordSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: "Données invalides" }
 
     const { organizationId, batchId, ...recordData } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_DAILY_RECORD")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "EGGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.TECHNICIAN, UserRole.DATA_ENTRY],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     // Valider que le lot appartient à l'org, est actif, et est de type PONDEUSE
     const batch = await prisma.batch.findFirst({
@@ -255,21 +246,19 @@ export async function updateEggRecord(
   data: unknown,
 ): Promise<ActionResult<EggRecordSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateEggRecordSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: "Données invalides" }
 
     const { organizationId, recordId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_DAILY_RECORD")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "EGGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.TECHNICIAN, UserRole.DATA_ENTRY],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.eggProductionRecord.findFirst({
       where: { id: recordId, organizationId },
@@ -305,21 +294,19 @@ export async function updateEggRecord(
 export async function deleteEggRecord(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = deleteEggRecordSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: "Données invalides" }
 
   const { organizationId, recordId } = parsed.data
-  const actorId = sessionResult.data.user.id
-
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
-
-  if (!canPerformAction(membershipResult.data.role, "CREATE_DAILY_RECORD")) {
-    return { success: false, error: "Permission refusée" }
-  }
+  const accessResult = await requireOrganizationModuleContext(organizationId, "EGGS")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
+  const roleResult = requireRole(
+    accessResult.data.membership,
+    [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.TECHNICIAN, UserRole.DATA_ENTRY],
+    "Permission refusée",
+  )
+  if (!roleResult.success) return roleResult
 
   const existing = await prisma.eggProductionRecord.findFirst({
     where: { id: recordId, organizationId },

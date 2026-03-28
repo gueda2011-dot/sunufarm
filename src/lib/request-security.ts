@@ -3,17 +3,28 @@ import { getServerEnv } from "@/src/lib/env"
 export interface AuditRequestContext {
   ipAddress?: string
   userAgent?: string
+  requestId?: string
 }
 
 export function getRequestAuditContext(headers: Headers): AuditRequestContext {
   const forwardedFor = headers.get("x-forwarded-for")
   const ipAddress = forwardedFor?.split(",")[0]?.trim() ?? headers.get("x-real-ip") ?? undefined
   const userAgent = headers.get("user-agent") ?? undefined
+  const requestId = getRequestId(headers)
 
   return {
     ipAddress,
     userAgent,
+    requestId,
   }
+}
+
+export function getRequestId(headers: Headers): string {
+  return (
+    headers.get("x-request-id") ??
+    headers.get("x-correlation-id") ??
+    crypto.randomUUID()
+  )
 }
 
 function normalizeOrigin(value: string): string {

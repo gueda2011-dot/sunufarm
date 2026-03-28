@@ -27,18 +27,19 @@
 import { z }                          from "zod"
 import prisma                         from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 }                                     from "@/src/lib/auth"
 import { canAccessFarm }              from "@/src/lib/permissions"
 import { requiredIdSchema }           from "@/src/lib/validators"
-import { netMargin, mortalityRate, livingCount } from "@/src/lib/kpi"
+import { computeBatchProfitability }  from "@/src/lib/batch-profitability"
 import {
   getFeatureUpgradeMessage,
   hasPlanFeature,
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { UserRole } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Schéma
@@ -93,9 +94,6 @@ export async function getBatchProfitability(
   data: unknown,
 ): Promise<ActionResult<BatchProfitability>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchProfitabilitySchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -103,11 +101,14 @@ export async function getBatchProfitability(
 
     const { organizationId, batchId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "REPORTS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Accès aux données financières refusé",
     )
-    if (!membershipResult.success) return membershipResult
+    if (!roleResult.success) return roleResult
 
     const subscription = await getOrganizationSubscription(organizationId)
     if (!hasPlanFeature(subscription.plan, "PROFITABILITY")) {
@@ -160,8 +161,8 @@ export async function getBatchProfitability(
 
     // Vérifier l'accès en lecture à la ferme du lot
     if (!canAccessFarm(
-      membershipResult.data.role,
-      membershipResult.data.farmPermissions,
+      accessResult.data.membership.role,
+      accessResult.data.membership.farmPermissions,
       batch.building.farmId,
       "canRead",
     )) {
@@ -170,37 +171,20 @@ export async function getBatchProfitability(
 
     // ── Calculs ────────────────────────────────────────────────────────────
 
-    const revenueFcfa         = saleItemsAgg._sum.totalFcfa  ?? 0
-    const saleItemsCount      = saleItemsAgg._count.id
-    const operationalCostFcfa = expensesAgg._sum.amountFcfa  ?? 0
-    const purchaseCostFcfa    = batch.totalCostFcfa
-    const totalCostFcfa       = purchaseCostFcfa + operationalCostFcfa
-    const totalMortality      = mortalityAgg._sum.mortality  ?? 0
-
-    const margin     = netMargin(revenueFcfa, totalCostFcfa)
-    const live       = livingCount(batch.entryCount, totalMortality)
-    const mRatePct   = mortalityRate(totalMortality, batch.entryCount)
-    const costPerBird =
-      totalCostFcfa > 0 && batch.entryCount > 0
-        ? Math.round(totalCostFcfa / batch.entryCount)
-        : null
+    const profitability = computeBatchProfitability({
+      entryCount: batch.entryCount,
+      revenueFcfa: saleItemsAgg._sum.totalFcfa ?? 0,
+      saleItemsCount: saleItemsAgg._count.id,
+      purchaseCostFcfa: batch.totalCostFcfa,
+      operationalCostFcfa: expensesAgg._sum.amountFcfa ?? 0,
+      totalMortality: mortalityAgg._sum.mortality ?? 0,
+    })
 
     return {
       success: true,
       data: {
         batchId,
-        entryCount:          batch.entryCount,
-        revenueFcfa,
-        saleItemsCount,
-        purchaseCostFcfa,
-        operationalCostFcfa,
-        totalCostFcfa,
-        profitFcfa:          margin.amount,
-        marginRate:          margin.rate,
-        costPerBird,
-        totalMortality,
-        mortalityRatePct:    mRatePct,
-        liveCount:           live,
+        ...profitability,
       },
     }
   } catch {

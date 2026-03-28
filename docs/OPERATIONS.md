@@ -34,6 +34,33 @@
 - `AUTH_SECRET` ou `NEXTAUTH_SECRET`
 - `AUTH_URL` ou `NEXTAUTH_URL`
 
+## Variables recommandees par usage
+
+### Recommandees sur tous les environnements applicatifs
+
+- `NEXT_PUBLIC_APP_URL` pour les liens absolus, emails et la PWA
+- `SUNUFARM_DIRECT_URL` seulement si l'environnement l'utilise pour migrations ou outillage admin
+
+### Notifications et cron
+
+- `CRON_SECRET` pour proteger `GET /api/cron/notifications`
+- `RESEND_API_KEY` + `MAIL_FROM` pour activer les emails transactionnels et le digest de notifications
+
+### Paiements
+
+- `WAVE_API_KEY` pour initier les checkouts Wave
+- `WAVE_WEBHOOK_SECRET` pour verifier les webhooks Wave
+- `PAYMENT_WEBHOOK_SECRET` pour les autres providers webhook HMAC
+
+### IA
+
+- `OPENAI_API_KEY` pour activer l'analyse IA des lots
+
+## Variables optionnelles par environnement
+
+- `VERCEL_ENV`, `VERCEL_URL` et `VERCEL_PROJECT_PRODUCTION_URL` sont exploitees quand l'app tourne sur Vercel, notamment pour les URLs de confiance et l'observabilite
+- Les aliases `NEXTAUTH_SECRET`, `NEXTAUTH_URL` et `EMAIL_FROM` restent toleres pour compatibilite, mais `AUTH_SECRET`, `AUTH_URL` et `MAIL_FROM` sont les noms cibles
+
 ## Sequence de deploiement recommandee
 
 1. Recuperer les variables d'environnement du bon environnement
@@ -43,6 +70,25 @@
 5. Executer `npm run build`
 6. Deployer
 7. Verifier la checklist post-deploiement
+8. Relire la matrice de non-regression dans `docs/NON_REGRESSION_MATRIX.md` si le diff touche une zone sensible
+
+## Backup et restore
+
+- La procedure de reference est documentee dans `docs/BACKUP_RESTORE.md`
+- En pratique :
+  - utiliser `SUNUFARM_DIRECT_URL` pour les operations admin si elle existe
+  - sinon utiliser `SUNUFARM_DATABASE_URL`
+  - faire un backup avant migration sensible ou restauration
+  - verifier la restauration via `npx prisma migrate status`, `npm run test` et `npm run build`
+
+## Reponse a incident
+
+- La procedure minimale est documentee dans `docs/INCIDENT_RESPONSE.md`
+- En pratique :
+  - commencer par confirmer l'impact reel
+  - recuperer les logs structures et le `requestId`
+  - verifier la page `/admin` et sa sante applicative
+  - utiliser `docs/BACKUP_RESTORE.md` si une restauration devient necessaire
 
 ## Check prod apres deploiement
 
@@ -90,6 +136,14 @@
 - verifier l'origine de requete sur les endpoints de mutation
 - verifier la permission de module cote serveur
 - verifier la configuration chargee par `src/lib/env.ts`
+- verifier les logs structures lies au `requestId`
+
+### Restaurer une base apres incident
+
+- suivre `docs/BACKUP_RESTORE.md`
+- restaurer d'abord sur une cible de verification si le temps le permet
+- verifier `npx prisma migrate status`
+- rejouer la checklist minimale produit avant reouverture du trafic
 
 ### Les notifications automatiques ne partent pas
 
