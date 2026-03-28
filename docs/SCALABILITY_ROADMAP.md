@@ -25,7 +25,7 @@ Faire evoluer SunuFarm d'un MVP avance vers une plateforme:
 | 0 | Stabilisation immediate | Critique | Terminee |
 | 1 | Fondations production | Critique | En cours |
 | 2 | Donnees et performance | Haute | Terminee |
-| 3 | Architecture applicative | Haute | A faire |
+| 3 | Architecture applicative | Haute | En cours |
 | 4 | Qualite et automatisation | Haute | A faire |
 | 5 | Observabilite et securite | Haute | A faire |
 | 6 | Scalabilite produit et equipe | Moyenne | A faire |
@@ -177,12 +177,12 @@ Rendre le code plus modulaire pour supporter plus de fonctionnalites et plus de 
 ### Chantiers
 
 - [ ] Clarifier la separation `app/`, `src/actions/`, `src/lib/`, `src/components/`
-- [ ] Extraire les logiques metier complexes en services ou domaines dedies
-- [ ] Eviter la duplication des calculs entre pages, exports et API routes
-- [ ] Standardiser les DTO/view models pour dashboard, rapports et detail lot
+- [x] Extraire les logiques metier complexes en services ou domaines dedies
+- [x] Eviter la duplication des calculs entre pages, exports et API routes
+- [x] Standardiser les DTO/view models pour dashboard, rapports et detail lot
 - [ ] Introduire une structure commune pour validation + autorisation + mutation
 - [ ] Isoler le branding, les formatters et les primitives de presentation
-- [ ] Documenter les conventions d'architecture dans `docs/`
+- [x] Documenter les conventions d'architecture dans `docs/`
 
 ### Cibles
 
@@ -197,6 +197,29 @@ Rendre le code plus modulaire pour supporter plus de fonctionnalites et plus de 
 - moins de duplication
 - structure plus lisible pour un nouveau dev
 
+### Notes De Progression
+
+- Un premier helper de domaine partage `src/lib/batch-metrics.ts` centralise maintenant le calcul de l'etat operationnel d'un lot (`ageDay`, `liveCount`, `mortalityRatePct`) et la detection de saisie manquante
+- Ce helper est utilise par la page detail lot, l'export PDF de lot et la preparation des donnees IA, ce qui reduit les recalculs divergents entre surfaces
+- Un test unitaire dedie couvre ce contrat metier dans `src/lib/batch-metrics.test.ts`
+- Un view model partage `src/lib/dashboard-view.ts` centralise maintenant les KPI, alertes, cartes de lots et points de graphique du dashboard
+- `app/(dashboard)/dashboard/page.tsx` ne fait plus que charger les donnees puis consommer ce view model, et `ActiveBatchList` recoit des objets d'affichage deja prepares
+- Un test unitaire dedie couvre ce contrat dans `src/lib/dashboard-view.test.ts`
+- Un view model partage `src/lib/monthly-report-view.ts` centralise maintenant l'assemblage metier du rapport mensuel a partir des agregats Prisma
+- `src/lib/monthly-reports.ts` garde le fetch et les formats de sortie, tandis que `ReportsPageClient`, le PDF mensuel et les exports consomment le meme DTO `report`
+- Un test unitaire dedie couvre ce contrat dans `src/lib/monthly-report-view.test.ts`
+- `docs/ARCHITECTURE.md` formalise maintenant la separation cible entre `app/`, `src/actions/`, `src/lib/` et `src/components/`
+- Le domaine `subscriptions / payments` partage maintenant ses transitions critiques via `src/lib/subscription-lifecycle.ts`, utilise par les actions admin et les confirmations de paiement
+- Un test de contrat dedie `src/lib/subscription-lifecycle.test.ts` verrouille maintenant les comportements d'activation payante, de demarrage d'essai et le calcul des periodes associees
+- `src/lib/auth.ts` expose maintenant `requireOrganizationModuleContext()` et `requireRole()` pour standardiser la sequence `session -> membership -> module -> role`
+- `src/actions/subscriptions.ts` applique deja ce pattern commun sur les flux de paiement et credits IA
+- `src/actions/batches.ts` applique maintenant lui aussi `requireOrganizationModuleContext()` sur ses flux de lecture, creation, mise a jour, cloture et suppression
+- `src/actions/organizations.ts` suit maintenant le meme pattern sur la gestion des membres, roles, permissions module et preferences de notification
+- `src/actions/buildings.ts` applique maintenant ce meme pattern sur ses flux de lecture, creation, mise a jour et suppression, tout en conservant les gardes par ferme
+- `src/actions/daily-records.ts` suit maintenant lui aussi ce pattern sur ses flux de lecture, creation et correction, sans changer les regles de verrouillage ni les controles par ferme
+- `src/lib/formatters.ts` commence maintenant a jouer son role de primitive transversale d'affichage avec des helpers partages pour les comptes unites, durees et credits IA, consommes par le header, les reglages et la creation de lot
+- Le prochain sous-bloc rentable consiste surtout a statuer sur la cloture complete de la Phase 3, avec eventuellement un dernier passage sur quelques actions secondaires si on veut une lecture tres stricte
+
 ---
 
 ## Phase 4 - Qualite Et Automatisation
@@ -207,12 +230,12 @@ Passer d'une verification surtout manuelle a une qualite defendable automatiquem
 
 ### Chantiers
 
-- [ ] Etendre les tests unitaires sur les helpers metier
+- [x] Etendre les tests unitaires sur les helpers metier
 - [ ] Ajouter des tests sur les Server Actions critiques
 - [ ] Ajouter des tests sur les routes d'export
 - [ ] Ajouter des tests d'integration auth / organisation / permissions
 - [ ] Introduire une strategie de fixtures realistes
-- [ ] Ajouter une verification CI minimale: lint + test + build
+- [x] Ajouter une verification CI minimale: lint + test + build
 - [ ] Definir une petite matrice de non-regression avant merge
 
 ### Priorites Test
@@ -230,6 +253,12 @@ Passer d'une verification surtout manuelle a une qualite defendable automatiquem
 - CI obligatoire avant merge
 - couverture utile des chemins critiques
 - regression majeure detectable avant production
+
+### Notes De Progression
+
+- Un workflow GitHub Actions minimal existe maintenant dans `.github/workflows/ci.yml` avec `npm ci`, `npx prisma generate`, `npm run lint`, `npm test` et `npm run build`
+- `vitest.config.ts` execute maintenant a la fois les tests centralises dans `tests/` et les tests co-localises dans `src/**/*.test.ts`
+- La suite locale couvre maintenant 9 fichiers et 26 tests, incluant les contrats `batch-metrics`, `dashboard-view`, `monthly-report-view`, `subscription-lifecycle` et `formatters`
 
 ---
 

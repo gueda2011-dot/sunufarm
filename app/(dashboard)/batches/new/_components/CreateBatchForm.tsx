@@ -25,7 +25,7 @@ import {
   isBreedSuggestedForBatchType,
   SENEGAL_BREED_HINTS,
 } from "@/src/lib/breeds"
-import { formatMoneyFCFA } from "@/src/lib/formatters"
+import { formatCountWithUnit, formatMoneyFCFA } from "@/src/lib/formatters"
 
 const schema = z.object({
   farmId: z.string().min(1, "Ferme requise"),
@@ -363,8 +363,8 @@ export function CreateBatchForm({
                 </option>
                 {buildings.map((building) => (
                   <option key={building.id} value={building.id}>
-                    {building.name} - {building.capacity.toLocaleString("fr-SN")} sujets
-                    {building._count.batches > 0 ? ` (${building._count.batches} lot actif)` : ""}
+                    {building.name} - {formatCountWithUnit(building.capacity, "sujet")}
+                    {building._count.batches > 0 ? ` (${formatCountWithUnit(building._count.batches, "lot actif")})` : ""}
                   </option>
                 ))}
               </select>

@@ -9,10 +9,7 @@ import {
   SubscriptionPaymentStatus,
   SubscriptionPlan,
 } from "@/src/generated/prisma/client"
-import {
-  PLAN_DEFINITIONS,
-  UNLIMITED_AI,
-} from "@/src/lib/subscriptions"
+import { activateOrganizationSubscription } from "@/src/lib/subscription-lifecycle"
 
 const MOBILE_MONEY_TRANSACTION_TTL_MS = 15 * 60 * 1000
 const WAVE_API_BASE_URL = "https://api.wave.com"
@@ -371,34 +368,12 @@ export async function confirmPaymentTransaction(input: {
         isRenewal && existingSubscription?.currentPeriodEnd
           ? existingSubscription.currentPeriodEnd
           : now
-      const periodEnd = new Date(periodStart)
-      periodEnd.setDate(periodEnd.getDate() + 30)
-
-      await tx.subscription.upsert({
-        where: { organizationId: payment.organizationId },
-        update: {
-          plan: payment.requestedPlan,
-          status: "ACTIVE",
-          amountFcfa: PLAN_DEFINITIONS[payment.requestedPlan].monthlyPriceFcfa,
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
-          trialEndsAt: null,
-          aiCreditsTotal: UNLIMITED_AI,
-          aiCreditsUsed: 0,
-          canceledAt: null,
-        },
-        create: {
-          organizationId: payment.organizationId,
-          plan: payment.requestedPlan,
-          status: "ACTIVE",
-          amountFcfa: payment.amountFcfa,
-          startedAt: now,
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
-          trialEndsAt: null,
-          aiCreditsTotal: UNLIMITED_AI,
-          aiCreditsUsed: 0,
-        },
+      await activateOrganizationSubscription(tx, {
+        organizationId: payment.organizationId,
+        plan: payment.requestedPlan,
+        amountFcfa: payment.amountFcfa,
+        now,
+        periodStart,
       })
     }
 

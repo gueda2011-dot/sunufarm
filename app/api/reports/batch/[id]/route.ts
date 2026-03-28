@@ -12,6 +12,7 @@ import { getBatchProfitability } from "@/src/actions/profitability"
 import { BatchReportDocument } from "@/src/components/pdf/BatchReportDocument"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { apiError } from "@/src/lib/api-response"
+import { getBatchOperationalSnapshot } from "@/src/lib/batch-metrics"
 import { getSunuFarmLogoDataUri } from "@/src/lib/branding.server"
 import { hasModuleAccess } from "@/src/lib/permissions"
 import prisma from "@/src/lib/prisma"
@@ -104,21 +105,15 @@ export async function GET(
       _sum: { mortality: true, feedKg: true },
     })
 
-    const totalMortality = mortalityAgg._sum.mortality ?? 0
     const totalFeedKg = mortalityAgg._sum.feedKg ?? 0
-    const liveCount = Math.max(0, batch.entryCount - totalMortality)
-    const mortalityRate = batch.entryCount > 0
-      ? (totalMortality / batch.entryCount) * 100
-      : 0
-
-    const nowMs = Date.now()
-    const endMs = batch.status === "ACTIVE"
-      ? nowMs
-      : new Date(batch.closedAt ?? nowMs).getTime()
-    const ageDay = batch.entryAgeDay + Math.max(
-      0,
-      Math.floor((endMs - new Date(batch.entryDate).getTime()) / 86_400_000),
-    )
+    const snapshot = getBatchOperationalSnapshot({
+      entryDate: batch.entryDate,
+      entryAgeDay: batch.entryAgeDay,
+      entryCount: batch.entryCount,
+      status: batch.status,
+      closedAt: batch.closedAt,
+      totalMortality: mortalityAgg._sum.mortality ?? 0,
+    })
 
     const orgName = orgMembership?.organization.name ?? "SunuFarm"
 
@@ -133,10 +128,10 @@ export async function GET(
       entryCount: batch.entryCount,
       closedAt: batch.closedAt ?? null,
       closeReason: batch.closeReason ?? null,
-      ageDay,
-      totalMortality,
-      mortalityRate,
-      liveCount,
+      ageDay: snapshot.ageDay,
+      totalMortality: snapshot.totalMortality,
+      mortalityRate: snapshot.mortalityRatePct,
+      liveCount: snapshot.liveCount,
       totalFeedKg,
       profitability,
       recentRecords: records,

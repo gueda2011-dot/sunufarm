@@ -65,23 +65,6 @@ export default async function ReportsPage({
   })
 
   return (
-    <ReportsPageClient
-      year={report.year}
-      month={report.month}
-      batchesActive={report.batchesActive}
-      batchesClosedCount={report.batchesClosedCount}
-      totalMortality={report.totalMortality}
-      totalFeedKg={report.totalFeedKg}
-      totalExpenses={report.totalExpenses}
-      expensesCount={report.expensesCount}
-      totalSales={report.totalSales}
-      totalPaid={report.totalPaid}
-      salesCount={report.salesCount}
-      totalPurchases={report.totalPurchases}
-      purchasesCount={report.purchasesCount}
-      dailyRecordsCount={report.dailyRecordsCount}
-      netResult={report.netResult}
-      comparison={report.comparison}
-    />
+    <ReportsPageClient report={report} />
   )
 }

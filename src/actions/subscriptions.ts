@@ -5,8 +5,8 @@ import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
   requireSession,
-  requireMembership,
-  requireModuleAccess,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
 import {
@@ -27,13 +27,15 @@ import {
 import { requiredIdSchema } from "@/src/lib/validators"
 import {
   PLAN_DEFINITIONS,
-  TRIAL_DAYS,
-  TRIAL_AI_CREDITS,
   UNLIMITED_AI,
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { createPaymentTransaction } from "@/src/lib/payments"
 import type { AuditRequestContext } from "@/src/lib/request-security"
+import {
+  activateOrganizationSubscription,
+  startOrganizationTrial,
+} from "@/src/lib/subscription-lifecycle"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -70,9 +72,6 @@ export async function createSubscriptionPaymentRequest(
   auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ paymentId: string; transactionId: string; checkoutToken: string | null }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createSubscriptionPaymentSchema.safeParse(data)
     if (!parsed.success) {
       return invalidInput()
@@ -85,12 +84,9 @@ export async function createSubscriptionPaymentRequest(
       paymentReference,
       notes,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "SETTINGS")
-    if (!moduleAccessResult.success) return moduleAccessResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
 
     const currentSubscription = await getOrganizationSubscription(organizationId)
     if (currentSubscription.plan === requestedPlan) {
@@ -171,25 +167,21 @@ export async function confirmSubscriptionPayment(
   auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ plan: SubscriptionPlan }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = manageSubscriptionPaymentSchema.safeParse(data)
     if (!parsed.success) {
       return invalidInput()
     }
 
     const { organizationId, paymentId } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "SETTINGS")
-    if (!moduleAccessResult.success) return moduleAccessResult
-
-    if (membershipResult.data.role !== UserRole.OWNER) {
-      return forbidden("Seul un proprietaire peut confirmer un paiement.")
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const ownerRoleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.OWNER],
+      "Seul un proprietaire peut confirmer un paiement.",
+    )
+    if (!ownerRoleResult.success) return ownerRoleResult
 
     const payment = await prisma.subscriptionPayment.findFirst({
       where: {
@@ -227,9 +219,6 @@ export async function confirmSubscriptionPayment(
       isRenewal && existingSubscription?.currentPeriodEnd
         ? existingSubscription.currentPeriodEnd
         : now
-    const periodEnd = new Date(periodStart)
-    periodEnd.setDate(periodEnd.getDate() + 30)
-
     await prisma.$transaction(async (tx) => {
       await tx.subscriptionPayment.update({
         where: { id: payment.id },
@@ -240,37 +229,13 @@ export async function confirmSubscriptionPayment(
         },
       })
 
-      if (existingSubscription) {
-        await tx.subscription.update({
-          where: { organizationId },
-          data: {
-            plan: payment.requestedPlan,
-            status: "ACTIVE",
-            amountFcfa: payment.amountFcfa,
-            currentPeriodStart: periodStart,
-            currentPeriodEnd: periodEnd,
-            trialEndsAt: null,
-            aiCreditsTotal: UNLIMITED_AI,
-            aiCreditsUsed: 0,
-            canceledAt: null,
-          },
-        })
-      } else {
-        await tx.subscription.create({
-          data: {
-            organizationId,
-            plan: payment.requestedPlan,
-            status: "ACTIVE",
-            amountFcfa: payment.amountFcfa,
-            startedAt: now,
-            currentPeriodStart: periodStart,
-            currentPeriodEnd: periodEnd,
-            trialEndsAt: null,
-            aiCreditsTotal: UNLIMITED_AI,
-            aiCreditsUsed: 0,
-          },
-        })
-      }
+      await activateOrganizationSubscription(tx, {
+        organizationId,
+        plan: payment.requestedPlan,
+        amountFcfa: payment.amountFcfa,
+        now,
+        periodStart,
+      })
     })
 
     await createAuditLog({
@@ -302,25 +267,21 @@ export async function rejectSubscriptionPayment(
   auditContext?: AuditRequestContext,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = manageSubscriptionPaymentSchema.safeParse(data)
     if (!parsed.success) {
       return invalidInput()
     }
 
     const { organizationId, paymentId } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "SETTINGS")
-    if (!moduleAccessResult.success) return moduleAccessResult
-
-    if (membershipResult.data.role !== UserRole.OWNER) {
-      return forbidden("Seul un proprietaire peut refuser un paiement.")
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const ownerRoleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.OWNER],
+      "Seul un proprietaire peut refuser un paiement.",
+    )
+    if (!ownerRoleResult.success) return ownerRoleResult
 
     const payment = await prisma.subscriptionPayment.findFirst({
       where: {
@@ -422,31 +383,9 @@ export async function adminStartTrial(
     }
 
     const now = new Date()
-    const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 86_400_000)
-
-    await prisma.subscription.upsert({
-      where: { organizationId },
-      update: {
-        plan: SubscriptionPlan.BASIC,
-        status: "TRIAL",
-        amountFcfa: 0,
-        currentPeriodStart: null,
-        currentPeriodEnd: null,
-        trialEndsAt,
-        aiCreditsTotal: TRIAL_AI_CREDITS,
-        aiCreditsUsed: 0,
-        canceledAt: null,
-      },
-      create: {
-        organizationId,
-        plan: SubscriptionPlan.BASIC,
-        status: "TRIAL",
-        amountFcfa: 0,
-        startedAt: now,
-        trialEndsAt,
-        aiCreditsTotal: TRIAL_AI_CREDITS,
-        aiCreditsUsed: 0,
-      },
+    const { trialEndsAt } = await startOrganizationTrial(prisma, {
+      organizationId,
+      now,
     })
 
     await createAuditLog({
@@ -473,19 +412,12 @@ export async function consumeAiCredit(
   data: unknown,
 ): Promise<ActionResult<{ creditsRemaining: number }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = consumeAiCreditSchema.safeParse(data)
     if (!parsed.success) return invalidInput()
 
     const { organizationId } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "SETTINGS")
-    if (!moduleAccessResult.success) return moduleAccessResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
 
     const result = await prisma.$transaction(async (tx) => {
       const sub = await tx.subscription.findUnique({
@@ -597,34 +529,11 @@ export async function adminUpdateOrganizationSubscription(
     }
 
     const now = new Date()
-    const periodEnd = new Date(now)
-    periodEnd.setDate(periodEnd.getDate() + 30)
-
-    await prisma.subscription.upsert({
-      where: { organizationId },
-      update: {
-        plan,
-        status: "ACTIVE",
-        amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        trialEndsAt: null,
-        aiCreditsTotal: UNLIMITED_AI,
-        aiCreditsUsed: 0,
-        canceledAt: null,
-      },
-      create: {
-        organizationId,
-        plan,
-        status: "ACTIVE",
-        amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
-        startedAt: now,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        trialEndsAt: null,
-        aiCreditsTotal: UNLIMITED_AI,
-        aiCreditsUsed: 0,
-      },
+    await activateOrganizationSubscription(prisma, {
+      organizationId,
+      plan,
+      amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
+      now,
     })
 
     await createAuditLog({

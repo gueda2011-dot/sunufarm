@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from "@react-pdf/renderer"
-import type { MonthlyReportData } from "@/src/lib/monthly-reports"
+import type { MonthlyReportData } from "@/src/lib/monthly-report-view"
 
 const s = StyleSheet.create({
   page: {

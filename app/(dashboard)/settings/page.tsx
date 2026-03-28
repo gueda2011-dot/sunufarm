@@ -17,7 +17,12 @@ import {
   hasPlanFeature,
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
-import { formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
+import {
+  formatCountWithUnit,
+  formatDateTime,
+  formatDurationDays,
+  formatMoneyFCFA,
+} from "@/src/lib/formatters"
 import {
   PaymentMethod,
   SubscriptionPaymentStatus,
@@ -171,7 +176,7 @@ export default async function SettingsPage() {
             </p>
             <p className="mt-1 text-sm text-green-50">
               {subscription.isTrialActive
-                ? `Acces ${subscription.label} temporaire pendant ${subscription.trialDaysRemaining ?? 0} jour(s).`
+                ? `Acces ${subscription.label} temporaire pendant ${formatDurationDays(subscription.trialDaysRemaining ?? 0)}.`
                 : `${formatMoneyFCFA(subscription.amountFcfa)} par mois`}
             </p>
             {!subscription.isTrialActive && (
@@ -433,7 +438,7 @@ export default async function SettingsPage() {
               </p>
             </div>
             <div className="rounded-2xl border border-dashed border-gray-200 p-4 text-gray-600">
-              Organisation actuelle : {memberCount} membre(s), {farmCount} ferme(s), {activeBatchCount} lot(s) actif(s).
+              Organisation actuelle : {formatCountWithUnit(memberCount, "membre")}, {formatCountWithUnit(farmCount, "ferme")}, {formatCountWithUnit(activeBatchCount, "lot actif")}.
             </div>
           </CardContent>
         </Card>

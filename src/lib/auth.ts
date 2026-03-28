@@ -147,6 +147,11 @@ export type MembershipWithRole = Pick<
   "userId" | "organizationId" | "role" | "modulePermissions" | "farmPermissions"
 >
 
+export interface AuthorizedOrganizationContext {
+  session: AppSession
+  membership: MembershipWithRole
+}
+
 // ---------------------------------------------------------------------------
 // Helpers membership (UserOrganization)
 // ---------------------------------------------------------------------------
@@ -232,6 +237,41 @@ export function requireModuleAccess(
 ): ActionResult<void> {
   if (!hasModuleAccess(membership.role, membership.modulePermissions, module)) {
     return forbidden(`Acces refuse au module ${module}.`, "MODULE_ACCESS_DENIED")
+  }
+
+  return actionSuccess(undefined)
+}
+
+export async function requireOrganizationModuleContext(
+  organizationId: string,
+  module: AppModule,
+): Promise<ActionResult<AuthorizedOrganizationContext>> {
+  const sessionResult = await requireSession()
+  if (!sessionResult.success) return sessionResult
+
+  const membershipResult = await requireMembership(
+    sessionResult.data.user.id,
+    organizationId,
+  )
+  if (!membershipResult.success) return membershipResult
+
+  const moduleAccessResult = requireModuleAccess(membershipResult.data, module)
+  if (!moduleAccessResult.success) return moduleAccessResult
+
+  return actionSuccess({
+    session: sessionResult.data,
+    membership: membershipResult.data,
+  })
+}
+
+export function requireRole(
+  membership: Pick<MembershipWithRole, "role">,
+  expectedRoles: string[],
+  error = "Permission refusee",
+  code = "ROLE_ACCESS_DENIED",
+): ActionResult<void> {
+  if (!expectedRoles.includes(membership.role)) {
+    return forbidden(error, code)
   }
 
   return actionSuccess(undefined)

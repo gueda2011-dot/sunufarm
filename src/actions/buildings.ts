@@ -27,8 +27,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -173,23 +172,16 @@ export async function getBuildings(
   data: unknown,
 ): Promise<ActionResult<BuildingSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBuildingsSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
-      const { organizationId, farmId, limit } = parsed.data
+    const { organizationId, farmId, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "FARMS")
+    if (!accessResult.success) return accessResult
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (!canAccessFarm(role, farmPermissions, farmId, "canRead")) {
       return { success: false, error: "Accès refusé à cette ferme" }
@@ -201,12 +193,12 @@ export async function getBuildings(
       return { success: false, error: "Ferme introuvable" }
     }
 
-      const buildings = await prisma.building.findMany({
-        where:   { farmId, organizationId, deletedAt: null },
-        select:  buildingSummarySelect,
-        orderBy: { name: "asc" },
-        take:    limit,
-      })
+    const buildings = await prisma.building.findMany({
+      where:   { farmId, organizationId, deletedAt: null },
+      select:  buildingSummarySelect,
+      orderBy: { name: "asc" },
+      take:    limit,
+    })
 
     return { success: true, data: buildings }
   } catch {
@@ -226,9 +218,6 @@ export async function getBuilding(
   data: unknown,
 ): Promise<ActionResult<BuildingSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBuildingSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -236,13 +225,9 @@ export async function getBuilding(
 
     const { organizationId, farmId, buildingId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "FARMS")
+    if (!accessResult.success) return accessResult
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (!canAccessFarm(role, farmPermissions, farmId, "canRead")) {
       return { success: false, error: "Accès refusé à cette ferme" }
@@ -275,21 +260,16 @@ export async function createBuilding(
   data: unknown,
 ): Promise<ActionResult<BuildingSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createBuildingSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, farmId, ...buildingData } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "FARMS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (!canPerformAction(role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
@@ -338,21 +318,16 @@ export async function updateBuilding(
   data: unknown,
 ): Promise<ActionResult<BuildingSummary>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateBuildingSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, farmId, buildingId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "FARMS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (!canPerformAction(role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
@@ -408,21 +383,16 @@ export async function updateBuilding(
 export async function deleteBuilding(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = deleteBuildingSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, farmId, buildingId } = parsed.data
-  const actorId = sessionResult.data.user.id
-
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
-
-  const { role, farmPermissions } = membershipResult.data
+  const accessResult = await requireOrganizationModuleContext(organizationId, "FARMS")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
+  const { role, farmPermissions } = accessResult.data.membership
 
   if (!canPerformAction(role, "MANAGE_FARMS")) {
     return { success: false, error: "Permission refusée" }

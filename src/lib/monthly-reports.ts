@@ -2,107 +2,13 @@ import ExcelJS from "exceljs"
 import prisma from "@/src/lib/prisma"
 import { formatDate, formatMoneyFCFA, formatNumber } from "@/src/lib/formatters"
 import {
-  buildMetricComparison,
-  type MetricComparison,
-} from "@/src/lib/reporting"
+  buildMonthlyReportViewModel,
+  type MonthlyReportData,
+} from "@/src/lib/monthly-report-view"
 
-const MONTHS = [
-  "Janvier",
-  "Fevrier",
-  "Mars",
-  "Avril",
-  "Mai",
-  "Juin",
-  "Juillet",
-  "Aout",
-  "Septembre",
-  "Octobre",
-  "Novembre",
-  "Decembre",
-]
+export type { MonthlyReportData } from "@/src/lib/monthly-report-view"
 
 const MONTHLY_REPORT_DETAIL_LIMIT = 500
-
-export interface MonthlyBatchRow {
-  id: string
-  number: string
-  status: string
-  type: string
-  entryDate: Date
-  entryCount: number
-  totalCostFcfa: number
-  farmName: string
-  buildingName: string
-  periodMortality: number
-  periodFeedKg: number
-  dailyRecordsCount: number
-}
-
-export interface MonthlyExpenseRow {
-  date: Date
-  category: string
-  description: string
-  amountFcfa: number
-  batchNumber: string
-  reference: string
-}
-
-export interface MonthlySaleRow {
-  date: Date
-  customer: string
-  productType: string
-  totalFcfa: number
-  paidFcfa: number
-  dueFcfa: number
-  notes: string
-}
-
-export interface MonthlyPurchaseRow {
-  date: Date
-  supplier: string
-  reference: string
-  totalFcfa: number
-  paidFcfa: number
-  dueFcfa: number
-  notes: string
-}
-
-export interface MonthlyReportData {
-  organizationId: string
-  organizationName: string
-  year: number
-  month: number
-  periodLabel: string
-  generatedAt: Date
-  fromDate: Date
-  toDate: Date
-  batchesActive: MonthlyBatchRow[]
-  batchesClosedCount: number
-  totalEntryCount: number
-  totalMortality: number
-  totalFeedKg: number
-  totalExpenses: number
-  expensesCount: number
-  totalSales: number
-  totalPaid: number
-  salesCount: number
-  totalPurchases: number
-  purchasesCount: number
-  dailyRecordsCount: number
-  netResult: number
-  comparison: {
-    sales: MetricComparison
-    expenses: MetricComparison
-    mortality: MetricComparison
-  }
-  detailRowLimit: number
-  expensesTruncated: boolean
-  salesTruncated: boolean
-  purchasesTruncated: boolean
-  expenses: MonthlyExpenseRow[]
-  sales: MonthlySaleRow[]
-  purchases: MonthlyPurchaseRow[]
-}
 
 function autosizeColumns(worksheet: ExcelJS.Worksheet) {
   worksheet.columns.forEach((column) => {
@@ -328,103 +234,43 @@ export async function getMonthlyReportData(args: {
     }),
   ])
 
-  const aggregatesByBatchId = new Map(
-    batchPeriodAgg.map((item) => [
-      item.batchId,
-      {
-        periodMortality: item._sum.mortality ?? 0,
-        periodFeedKg: item._sum.feedKg ?? 0,
-        dailyRecordsCount: item._count._all,
-      },
-    ]),
-  )
-
-  const batchesActive: MonthlyBatchRow[] = batches.map((batch) => {
-    const aggregate = aggregatesByBatchId.get(batch.id)
-
-    return {
-      id: batch.id,
-      number: batch.number,
-      status: batch.status,
-      type: batch.type,
-      entryDate: batch.entryDate,
-      entryCount: batch.entryCount,
-      totalCostFcfa: batch.totalCostFcfa,
-      farmName: batch.building.farm.name,
-      buildingName: batch.building.name,
-      periodMortality: aggregate?.periodMortality ?? 0,
-      periodFeedKg: aggregate?.periodFeedKg ?? 0,
-      dailyRecordsCount: aggregate?.dailyRecordsCount ?? 0,
-    }
-  })
-
-  const totalMortality = mortalityAgg._sum.mortality ?? 0
-  const totalFeedKg = mortalityAgg._sum.feedKg ?? 0
-  const totalExpenses = expensesAgg._sum.amountFcfa ?? 0
-  const totalSales = salesAgg._sum.totalFcfa ?? 0
-  const totalPaid = salesAgg._sum.paidFcfa ?? 0
-  const totalPurchases = purchasesAgg._sum.totalFcfa ?? 0
-  const totalEntryCount = batchesActive.reduce((sum, batch) => sum + batch.entryCount, 0)
-
-  return {
+  return buildMonthlyReportViewModel({
     organizationId,
     organizationName: organization.name,
     year,
     month,
-    periodLabel: `${MONTHS[month - 1]} ${year}`,
-    generatedAt: new Date(),
     fromDate,
     toDate,
-    batchesActive,
     batchesClosedCount,
-    totalEntryCount,
-    totalMortality,
-    totalFeedKg,
-    totalExpenses,
-    expensesCount: expensesAgg._count.id,
-    totalSales,
-    totalPaid,
-    salesCount: salesAgg._count.id,
-    totalPurchases,
-    purchasesCount: purchasesAgg._count.id,
     dailyRecordsCount,
-    netResult: totalSales - totalExpenses,
-    comparison: {
-      sales: buildMetricComparison(totalSales, previousSalesAgg._sum.totalFcfa ?? 0),
-      expenses: buildMetricComparison(totalExpenses, previousExpensesAgg._sum.amountFcfa ?? 0),
-      mortality: buildMetricComparison(totalMortality, previousMortalityAgg._sum.mortality ?? 0),
-    },
     detailRowLimit: MONTHLY_REPORT_DETAIL_LIMIT,
-    expensesTruncated: expenses.length < expensesAgg._count.id,
-    salesTruncated: sales.length < salesAgg._count.id,
-    purchasesTruncated: purchases.length < purchasesAgg._count.id,
-    expenses: expenses.map((expense) => ({
-      date: expense.date,
-      category: expense.category?.name ?? "Non classe",
-      description: expense.description,
-      amountFcfa: expense.amountFcfa,
-      batchNumber: expense.batch?.number ?? "General",
-      reference: expense.reference ?? "",
-    })),
-    sales: sales.map((sale) => ({
-      date: sale.saleDate,
-      customer: sale.customer?.name ?? "Client divers",
-      productType: sale.productType,
-      totalFcfa: sale.totalFcfa,
-      paidFcfa: sale.paidFcfa,
-      dueFcfa: Math.max(0, sale.totalFcfa - sale.paidFcfa),
-      notes: sale.notes ?? "",
-    })),
-    purchases: purchases.map((purchase) => ({
-      date: purchase.purchaseDate,
-      supplier: purchase.supplier?.name ?? "Fournisseur divers",
-      reference: purchase.reference ?? "",
-      totalFcfa: purchase.totalFcfa,
-      paidFcfa: purchase.paidFcfa,
-      dueFcfa: Math.max(0, purchase.totalFcfa - purchase.paidFcfa),
-      notes: purchase.notes ?? "",
-    })),
-  } satisfies MonthlyReportData
+    generatedAt: new Date(),
+    batches,
+    batchPeriodAgg,
+    mortality: {
+      current: mortalityAgg._sum.mortality ?? 0,
+      previous: previousMortalityAgg._sum.mortality ?? 0,
+      feedKg: mortalityAgg._sum.feedKg ?? 0,
+    },
+    expenses: {
+      current: expensesAgg._sum.amountFcfa ?? 0,
+      previous: previousExpensesAgg._sum.amountFcfa ?? 0,
+      count: expensesAgg._count.id,
+      rows: expenses,
+    },
+    sales: {
+      current: salesAgg._sum.totalFcfa ?? 0,
+      previous: previousSalesAgg._sum.totalFcfa ?? 0,
+      paid: salesAgg._sum.paidFcfa ?? 0,
+      count: salesAgg._count.id,
+      rows: sales,
+    },
+    purchases: {
+      current: purchasesAgg._sum.totalFcfa ?? 0,
+      count: purchasesAgg._count.id,
+      rows: purchases,
+    },
+  })
 }
 
 export function buildMonthlyReportCsv(report: MonthlyReportData) {

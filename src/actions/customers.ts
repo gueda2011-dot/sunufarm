@@ -20,14 +20,13 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
-  requireModuleAccess,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { canPerformAction } from "@/src/lib/permissions"
 import { requiredIdSchema } from "@/src/lib/validators"
+import { UserRole } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Types retournés
@@ -93,9 +92,6 @@ export async function getCustomers(
   data: unknown,
 ): Promise<ActionResult<CustomerSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = listSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -103,13 +99,8 @@ export async function getCustomers(
 
     const { organizationId, search, type, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
-    if (!moduleAccessResult.success) return moduleAccessResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
 
     const customers = await prisma.customer.findMany({
       where: {
@@ -201,9 +192,6 @@ export async function createCustomer(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createCustomerSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
@@ -211,17 +199,14 @@ export async function createCustomer(
 
     const { organizationId, ...fields } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
-    if (!moduleAccessResult.success) return moduleAccessResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     const customer = await prisma.customer.create({
       data: {
@@ -237,7 +222,7 @@ export async function createCustomer(
     })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.CREATE,
       resourceType:   "Customer",
@@ -259,9 +244,6 @@ export async function updateCustomer(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateCustomerSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
@@ -269,17 +251,14 @@ export async function updateCustomer(
 
     const { organizationId, customerId, ...fields } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
-    if (!moduleAccessResult.success) return moduleAccessResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.customer.findFirst({
       where: { id: customerId, organizationId },
@@ -303,7 +282,7 @@ export async function updateCustomer(
     })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.UPDATE,
       resourceType:   "Customer",
@@ -325,9 +304,6 @@ export async function deleteCustomer(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = deleteCustomerSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -335,17 +311,14 @@ export async function deleteCustomer(
 
     const { organizationId, customerId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
-    if (!moduleAccessResult.success) return moduleAccessResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.customer.findFirst({
       where:  { id: customerId, organizationId },
@@ -365,7 +338,7 @@ export async function deleteCustomer(
     await prisma.customer.delete({ where: { id: customerId } })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.DELETE,
       resourceType:   "Customer",
