@@ -45,6 +45,8 @@
 
 - `CRON_SECRET` pour proteger `GET /api/cron/notifications`
 - `RESEND_API_KEY` + `MAIL_FROM` pour activer les emails transactionnels et le digest de notifications
+- sur Vercel Hobby, le cron est volontairement limite a `1 fois par jour`
+- au moment du lancement commercial ou du passage sur un plan payant, remettre la frequence cible a `toutes les 6 heures`
 
 ### Paiements
 
@@ -148,7 +150,9 @@
 ### Les notifications automatiques ne partent pas
 
 - verifier que `CRON_SECRET` est defini dans l'environnement
-- verifier que `vercel.json` contient bien le cron `/api/cron/notifications` (toutes les 6 heures)
+- verifier que `vercel.json` contient bien le cron `/api/cron/notifications`
+- en plan Hobby, la frequence attendue est `1 fois par jour`
+- au lancement commercial, remettre la frequence cible a `toutes les 6 heures`
 - verifier que `RESEND_API_KEY` et `MAIL_FROM` sont definis si l'envoi email est attendu
 - verifier que les membres concernes ont bien l'option email active dans l'equipe
 - tester manuellement `GET /api/cron/notifications` avec `Authorization: Bearer <CRON_SECRET>`

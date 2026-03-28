@@ -173,7 +173,7 @@ Cela couvre actuellement :
 
 - exports `CSV`, `Excel` et `PDF`
 - rapport mensuel base sur un modele partage entre page, export et PDF
-- cron automatique toutes les 6 heures pour generer les notifications
+- cron automatique quotidien pour generer les notifications sur Vercel Hobby
 - digest email possible si `RESEND_API_KEY` et `MAIL_FROM` sont configures
 
 ## Qualite et exploitation
@@ -196,8 +196,13 @@ Cela couvre actuellement :
 - donnees de demo dans [docs/DEMO_DATA.md](./docs/DEMO_DATA.md)
 - roadmap de scalabilite dans [docs/SCALABILITY_ROADMAP.md](./docs/SCALABILITY_ROADMAP.md)
 - exports CSV, Excel et PDF disponibles dans les rapports
-- cron automatique toutes les 6 heures pour generer les notifications et envoyer un digest email si Resend est configure
+- cron automatique quotidien pour generer les notifications et envoyer un digest email si Resend est configure
 - base PWA avec `manifest`, `icon` et `apple-icon`
+
+Note de deploiement :
+
+- le cron `notifications` est volontairement regle a `1 fois par jour` pour rester compatible avec le plan Vercel Hobby
+- au moment du lancement commercial ou du passage sur un plan payant, remettre la frequence cible a `toutes les 6 heures`
 
 Budget de performance actuellement documente :
 
