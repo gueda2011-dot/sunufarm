@@ -18,6 +18,7 @@ import React                              from "react"
 import { auth }                           from "@/src/auth"
 import prisma                             from "@/src/lib/prisma"
 import { getBatchProfitability }          from "@/src/actions/profitability"
+import { getSunuFarmLogoDataUri }         from "@/src/lib/branding.server"
 import { hasPlanFeature }                 from "@/src/lib/subscriptions"
 import { getOrganizationSubscription }    from "@/src/lib/subscriptions.server"
 import { BatchReportDocument }            from "@/src/components/pdf/BatchReportDocument"
@@ -152,6 +153,7 @@ export async function GET(
       profitability,
       recentRecords:  records,
       generatedAt:    new Date(),
+      logoSrc:        await getSunuFarmLogoDataUri(),
     })
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

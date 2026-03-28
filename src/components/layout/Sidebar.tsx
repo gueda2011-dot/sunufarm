@@ -21,6 +21,7 @@ import {
   Users,
   Settings,
 } from "lucide-react"
+import { SunuFarmLogo } from "@/src/components/branding/SunuFarmLogo"
 import { cn } from "@/src/lib/utils"
 import { hasModuleAccess } from "@/src/lib/permissions"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
@@ -78,18 +79,8 @@ export function Sidebar({ orgName, plan, role, modulePermissions }: SidebarProps
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 lg:bg-white lg:shadow-sm">
       <div className="flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 px-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-600">
-          <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-white" aria-hidden="true">
-            <path
-              d="M12 3C9 3 6 5 6 8c0 2 1 3.5 2.5 4.5L8 18h8l-.5-5.5C17 11.5 18 10 18 8c0-3-3-5-6-5z"
-              fill="currentColor"
-              opacity="0.9"
-            />
-            <circle cx="10" cy="7" r="1" fill="white" />
-          </svg>
-        </div>
+        <SunuFarmLogo className="w-28 shrink-0" priority />
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-gray-900">SunuFarm</p>
           <p className="truncate text-xs text-gray-500">{orgName}</p>
         </div>
       </div>

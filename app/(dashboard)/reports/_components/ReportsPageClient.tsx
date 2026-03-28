@@ -20,9 +20,15 @@ interface BatchInfo {
   id: string
   number: string
   status: string
+  type: string
   entryCount: number
   totalCostFcfa: number
   entryDate: Date
+  farmName: string
+  buildingName: string
+  periodMortality: number
+  periodFeedKg: number
+  dailyRecordsCount: number
 }
 
 interface Props {
@@ -141,11 +147,25 @@ export function ReportsPageClient({
             {"->"}
           </button>
           <Link
-            href={`/api/reports/monthly?month=${month}&year=${year}`}
+            href={`/api/reports/monthly?month=${month}&year=${year}&format=xlsx`}
             className="inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 transition-colors hover:bg-green-100"
           >
             <Download className="h-4 w-4" />
-            Export CSV
+            Export Excel
+          </Link>
+          <Link
+            href={`/api/reports/monthly?month=${month}&year=${year}&format=pdf`}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            <Download className="h-4 w-4" />
+            Export PDF
+          </Link>
+          <Link
+            href={`/api/reports/monthly?month=${month}&year=${year}&format=csv`}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            <Download className="h-4 w-4" />
+            CSV
           </Link>
         </div>
       </div>
@@ -297,9 +317,15 @@ export function ReportsPageClient({
                   }`}>
                     {batch.status === "ACTIVE" ? "Actif" : "Cloture"}
                   </span>
+                  <div className="mt-1 text-xs text-gray-400">
+                    {batch.farmName} · {batch.buildingName}
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="text-xs text-gray-400">{formatNumber(batch.entryCount)} sujets</div>
+                  <div className="text-xs text-gray-400">
+                    {formatNumber(batch.periodMortality)} morts · {formatNumber(batch.periodFeedKg)} kg
+                  </div>
                   <div className="text-xs text-gray-400">{formatMoneyFCFA(batch.totalCostFcfa)}</div>
                 </div>
               </Link>
@@ -309,7 +335,7 @@ export function ReportsPageClient({
       )}
 
       <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-center text-sm text-gray-500">
-        Export CSV disponible maintenant. PDF et Excel pourront suivre ensuite sans changer la structure du rapport.
+        Les exports Excel, PDF et CSV reposent maintenant sur la meme structure mensuelle pour garder des chiffres coherents.
       </div>
     </div>
   )

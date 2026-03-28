@@ -17,6 +17,7 @@ import { useState, useRef, useEffect } from "react"
 import { signOut } from "next-auth/react"
 import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Bell, LogOut, User, ChevronDown } from "lucide-react"
+import { SunuFarmLogo } from "@/src/components/branding/SunuFarmLogo"
 import { cn } from "@/src/lib/utils"
 import { OrganizationSwitcher } from "@/src/components/layout/OrganizationSwitcher"
 import type { OrganizationMembershipSummary } from "@/src/lib/active-organization"
@@ -81,15 +82,7 @@ export function Header({
     <header className="sticky top-0 z-30 flex min-h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-2 shadow-sm sm:px-6 lg:px-8">
       {/* Gauche : nom organisation (visible sur mobile quand sidebar est cachée) */}
       <div className="flex min-w-0 items-center gap-3 lg:hidden">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-green-600">
-          <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-white" aria-hidden="true">
-            <path
-              d="M12 3C9 3 6 5 6 8c0 2 1 3.5 2.5 4.5L8 18h8l-.5-5.5C17 11.5 18 10 18 8c0-3-3-5-6-5z"
-              fill="currentColor" opacity="0.9"
-            />
-            <circle cx="10" cy="7" r="1" fill="white" />
-          </svg>
-        </div>
+        <SunuFarmLogo className="w-24 shrink-0" priority />
         <div className="flex min-w-0 flex-col gap-1">
           <span className="max-w-[160px] truncate text-sm font-semibold text-gray-900">
             {orgName}
