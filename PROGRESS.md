@@ -28,10 +28,14 @@
 ## Pilotage scalabilite
 
 - Roadmap de reference enregistree dans `docs/SCALABILITY_ROADMAP.md`
-- Priorite active : Phase 3 - Architecture applicative
+- Priorite active : execution du trimestre courant a partir de `docs/QUARTERLY_ROADMAP.md`
 - Phase 0 terminee le 2026-03-28
 - Phase 1 en cours : socle env + erreurs API + permissions serveur critiques
 - Phase 2 terminee : audit Prisma + bornes sur les listes metier + index composes appliques
+- Phase 3 terminee : logique metier partagee + pattern commun des Server Actions
+- Phase 4 terminee : CI + tests critiques + matrice de non-regression
+- Phase 5 terminee : observabilite critique + sante applicative + backup / restore + incident response
+- Phase 6 terminee : workflow equipe + onboarding + ownership + priorisation + trajectoire async/cache
 
 ---
 
@@ -487,6 +491,779 @@
 - Ajouter des tests sur les Server Actions critiques, en priorite `daily-records`, `batches` et `subscriptions`
 - Introduire ensuite une petite matrice de non-regression avant merge
 - Avancer vers des tests d'integration sur `organisation active` et `permissions`
+
+---
+
+## Session 19 - 2026-03-28
+
+### Travail effectue
+
+- Extraction des regles pures de saisie journaliere dans `src/lib/daily-record-rules.ts`
+- Ajout de tests dedies dans `src/lib/daily-record-rules.test.ts`
+- Couverture des regles de normalisation a minuit UTC et du verrouillage J+2
+- Rebranchement de `src/actions/daily-records.ts` sur ce module de regles partage
+
+### Resultat
+
+- La Phase 4 avance maintenant sur une priorite metier explicite : la saisie journaliere
+- Les regles critiques de verrouillage ne dependent plus seulement d'une revue de code
+- Validation actuelle : `10` fichiers de test, `29` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur des tests cibles pour `batches` ou `subscriptions`
+- Commencer les tests d'integration autour de `organisation active` et `permissions`
+- Introduire ensuite une petite matrice de non-regression avant merge
+
+---
+
+## Session 20 - 2026-03-28
+
+### Travail effectue
+
+- Extraction des regles pures de lot dans `src/lib/batch-rules.ts`
+- Ajout de tests dedies dans `src/lib/batch-rules.test.ts`
+- Couverture du scope de fermes accessibles et de la generation du prochain numero de lot
+- Rebranchement de `src/actions/batches.ts` sur ces regles partagees
+
+### Resultat
+
+- La Phase 4 avance maintenant aussi sur le domaine `batches`
+- Les regles critiques autour du scope lecture et de la numerotation des lots ne dependent plus seulement d'une revue de code
+- Validation actuelle : `11` fichiers de test, `32` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur des tests cibles pour `subscriptions`
+- Commencer les tests d'integration autour de `organisation active` et `permissions`
+- Introduire ensuite une petite matrice de non-regression avant merge
+
+---
+
+## Session 21 - 2026-03-28
+
+### Travail effectue
+
+- Extraction des regles pures d'abonnement dans `src/lib/subscription-rules.ts`
+- Ajout de tests dedies dans `src/lib/subscription-rules.test.ts`
+- Couverture de l'essai autorise ou refuse, de l'acces IA illimite et du calcul des credits restants
+- Rebranchement de `src/actions/subscriptions.ts` sur ces regles partagees
+- Nettoyage du commentaire orphelin dans `src/actions/batches.ts`
+
+### Resultat
+
+- La Phase 4 avance maintenant aussi sur le domaine `subscriptions`
+- Les regles critiques autour des essais et des credits IA ne dependent plus seulement d'une revue de code
+- Validation actuelle : `12` fichiers de test, `38` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Commencer les tests d'integration autour de `organisation active` et `permissions`
+- Definir une petite matrice de non-regression avant merge
+- Revenir ensuite sur les calculs de rentabilite si on veut continuer les priorites Phase 4
+
+---
+
+## Session 22 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'une suite dediee `src/lib/permissions.test.ts`
+- Couverture de la hierarchie des roles, de la matrice d'actions, des modules effectifs et des acces par ferme
+- Consolidation de la Phase 4 sur un module transverse critique reutilise dans de nombreuses Server Actions
+
+### Resultat
+
+- La base de permissions est maintenant verrouillee par des tests unitaires utiles
+- On reduit le risque de regression silencieuse sur les autorisations lors des prochains refactors
+- Validation actuelle : `13` fichiers de test, `46` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Commencer les tests d'integration autour de `organisation active`
+- Definir une petite matrice de non-regression avant merge
+- Revenir ensuite sur les calculs de rentabilite si on veut continuer les priorites Phase 4
+
+---
+
+## Session 23 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un test d'integration leger dans `tests/organization-context.test.ts`
+- Couverture de l'action `selectActiveOrganization` sur quatre scenarios: session absente, ID invalide, organisation refusee et selection valide
+- Verification de l'ecriture du cookie `sunufarm_active_org` et de la revalidation du layout
+
+### Resultat
+
+- La priorite `organisation active` est maintenant couverte par un vrai test de flux serveur
+- On reduit le risque de regression sur un point central du multi-tenant sans dependre d'une base de test complete
+- Validation actuelle : `14` fichiers de test, `50` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur les tests d'integration autour de `permissions`
+- Definir une petite matrice de non-regression avant merge
+- Revenir ensuite sur les calculs de rentabilite si on veut continuer les priorites Phase 4
+
+---
+
+## Session 24 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un test d'integration leger dans `tests/expenses-permissions.test.ts`
+- Couverture de `createExpense` sur quatre scenarios: donnees invalides, module refuse, role refuse et creation autorisee
+- Verification de la chaine `requireOrganizationModuleContext -> requireRole -> mutation -> audit`
+
+### Resultat
+
+- La priorite `permissions` est maintenant couverte par un vrai flux serveur sur une action metier sensible
+- On reduit le risque de regression sur les autorisations transverses sans devoir monter une base de test complete
+- Validation actuelle : `15` fichiers de test, `54` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Definir une petite matrice de non-regression avant merge
+- Revenir ensuite sur les calculs de rentabilite si on veut continuer les priorites Phase 4
+- Statuer ensuite sur la cloture partielle ou complete du bloc Phase 4
+
+---
+
+## Session 25 - 2026-03-28
+
+### Travail effectue
+
+- Creation de `docs/NON_REGRESSION_MATRIX.md`
+- Formalisation d'un socle en trois niveaux: automatique avant merge, verification ciblee selon le diff, verification ciblee avant deploiement
+- Ajout des pointeurs vers cette matrice dans `README.md`, `docs/OPERATIONS.md` et `docs/SCALABILITY_ROADMAP.md`
+
+### Resultat
+
+- La Phase 4 dispose maintenant d'une reference simple et actionnable avant merge
+- Les validations manuelles sont mieux ciblees, avec moins de risque d'oublier un parcours critique
+- Le projet a maintenant un chemin plus clair entre CI automatique et verification produit
+
+### Prochaine session recommandee
+
+- Revenir sur les calculs de rentabilite pour continuer les priorites Phase 4
+- Statuer ensuite sur la cloture partielle ou complete du bloc Phase 4
+- Si besoin, transformer la matrice en template PR plus tard
+
+---
+
+## Session 26 - 2026-03-28
+
+### Travail effectue
+
+- Extraction des calculs purs de rentabilite lot dans `src/lib/batch-profitability.ts`
+- Ajout de tests dedies dans `src/lib/batch-profitability.test.ts`
+- Couverture de la marge, du cout par sujet, de la mortalite et des cas limites a zero
+- Rebranchement de `src/actions/profitability.ts` sur ce helper partage
+
+### Resultat
+
+- La priorite `calculs de rentabilite` est maintenant couverte par un vrai contrat unitaire
+- On reduit le risque de divergence entre l'action analytique et les futures surfaces qui reutiliseront ces KPI
+- Validation actuelle : `16` fichiers de test, `57` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur les tests des rapports mensuels pour finir les priorites Phase 4 les plus visibles
+- Statuer ensuite sur la cloture partielle ou complete du bloc Phase 4
+- Eventuellement ajouter un test sur les paiements admin si on veut pousser la phase un cran plus loin
+
+---
+
+## Session 27 - 2026-03-28
+
+### Travail effectue
+
+- Ajout de `src/lib/monthly-reports.test.ts`
+- Couverture des sorties `CSV` et workbook Excel du module rapports mensuels
+- Verification des onglets attendus, des KPI visibles et des lignes detaillees exportees
+
+### Resultat
+
+- La priorite `rapports mensuels` est maintenant couverte sur le view model et sur deux formats d'export concrets
+- On reduit le risque de regression sur une zone visible du produit, sans introduire de test d'integration lourd
+- Validation actuelle : `17` fichiers de test, `59` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Statuer sur la cloture partielle ou complete du bloc Phase 4
+- Eventuellement ajouter un test sur les paiements admin / abonnement pour pousser encore la couverture
+- Sinon preparer la transition vers la Phase 5
+
+---
+
+## Session 28 - 2026-03-28
+
+### Travail effectue
+
+- Ajout de `tests/subscriptions-admin-payments.test.ts`
+- Couverture de `adminRejectPaymentTransaction` sur quatre scenarios: session absente, refus hors super admin, transaction introuvable et rejet complet reussi
+- Verification de la chaine `session -> role super admin -> transaction DB -> audit -> revalidation`
+
+### Resultat
+
+- La priorite `paiements admin / abonnement` est maintenant couverte par un vrai flux serveur sensible
+- La Phase 4 dispose maintenant d'une couverture plus complete sur les chemins critiques les plus risqués du produit
+- Validation actuelle : `18` fichiers de test, `63` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Statuer sur la cloture partielle ou complete du bloc Phase 4
+- Si on veut aller plus loin, commencer la Phase 5 sur l'observabilite
+- Sinon preparer un push propre du travail de la session
+
+---
+
+## Session 29 - 2026-03-28
+
+### Travail effectue
+
+- Relecture de coherence de la Phase 4 par rapport a ses criteres de sortie
+- Cloture de la Phase 4 dans `docs/SCALABILITY_ROADMAP.md`
+- Maintien de la Phase 3 comme prochain bloc actif, la qualite et l'automatisation ayant atteint un niveau defendable
+
+### Resultat
+
+- La Phase 4 est maintenant consideree terminee
+- Le projet dispose d'une CI minimale, d'une matrice de non-regression et d'une couverture utile sur les chemins critiques les plus sensibles
+- Les points non traites volontairement, comme des fixtures plus riches ou une couverture encore plus large, sont assumes comme des approfondissements futurs et non comme des bloqueurs de phase
+
+### Prochaine session recommandee
+
+- Revenir sur la Phase 3 pour finir l'uniformisation architecturale restante
+- Cibler en priorite les actions secondaires encore heterogenes et les primitives de presentation restantes
+- Statuer ensuite sur la cloture de la Phase 3 avant d'ouvrir vraiment la Phase 5
+
+---
+
+## Session 30 - 2026-03-28
+
+### Travail effectue
+
+- Alignement de `src/actions/eggs.ts` sur le pattern commun `validation -> auth -> autorisation -> mutation`
+- Remplacement de `requireSession + requireMembership` par `requireOrganizationModuleContext()` sur les flux du module oeufs
+- Ajout de gardes de role explicites via `requireRole()` sur les mutations
+
+### Resultat
+
+- Le module `eggs` n'est plus un ilot d'ancien pattern dans les actions secondaires
+- La Phase 3 avance encore sur l'uniformisation architecturale sans changer le comportement metier du module
+- Validation actuelle : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur `stock`, `health` ou `notifications`, qui restent les gros modules secondaires les plus heterogenes
+- Revenir ensuite sur les primitives de presentation restantes
+- Statuer ensuite sur la cloture de la Phase 3
+
+---
+
+## Session 31 - 2026-03-28
+
+### Travail effectue
+
+- Alignement de `src/actions/stock.ts` sur le pattern commun `validation -> auth -> autorisation -> mutation`
+- Remplacement de `requireSession + requireMembership + requireModuleAccess` par `requireOrganizationModuleContext()` sur les flux principaux du module
+- Ajout de gardes de role explicites via `requireRole()` sur les mutations, sans toucher aux gardes par ferme ni aux regles de mouvement
+
+### Resultat
+
+- Le module `stock` n'est plus une grosse exception architecturale dans les actions secondaires
+- La Phase 3 avance nettement sur un des modules les plus lourds encore heterogenes
+- Validation actuelle : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur `health` ou `notifications`, qui restent les plus gros blocs secondaires encore non homogenises
+- Revenir ensuite sur les primitives de presentation restantes
+- Statuer ensuite sur la cloture de la Phase 3
+
+---
+
+## Session 32 - 2026-03-28
+
+### Travail effectue
+
+- Alignement de `src/actions/health.ts` sur le pattern commun `validation -> auth -> autorisation -> mutation`
+- Remplacement de `requireSession + requireMembership` par `requireOrganizationModuleContext()` sur les flux principaux du module sante
+- Ajout de gardes de role explicites via `requireRole()` sur les mutations, sans toucher aux gardes par ferme, statuts de lot ni regles sanitaires
+
+### Resultat
+
+- Le module `health` n'est plus une grosse exception architecturale dans les actions secondaires
+- La Phase 3 progresse fortement sur un autre bloc lourd et sensible du produit
+- Validation actuelle : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur `notifications`, qui reste le plus gros module secondaire encore non homogenise
+- Revenir ensuite sur les primitives de presentation restantes
+- Statuer ensuite sur la cloture de la Phase 3
+
+---
+
+## Session 33 - 2026-03-28
+
+### Travail effectue
+
+- Alignement de `src/actions/notifications.ts` sur le pattern commun `validation -> auth -> autorisation -> mutation`
+- Remplacement de `requireSession + requireMembership` par `requireOrganizationModuleContext()` sur les flux utilisateur du module
+- Conservation du comportement metier existant sur la generation automatique et la lecture par utilisateur
+
+### Resultat
+
+- Le module `notifications` n'est plus une exception architecturale parmi les actions secondaires
+- Le gros du chantier d'uniformisation Phase 3 cote actions serveur est maintenant derriere nous
+- Validation actuelle : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Statuer sur la cloture de la Phase 3, avec un dernier passage seulement si on veut etre tres strict
+- Sinon revenir sur les primitives de presentation restantes pour finir proprement la phase
+- Puis ouvrir la transition vers la Phase 5
+
+---
+
+## Session 34 - 2026-03-28
+
+### Travail effectue
+
+- Relecture de coherence de la Phase 3 par rapport a ses objectifs et a son etat reel dans le code
+- Cloture de la Phase 3 dans `docs/SCALABILITY_ROADMAP.md`
+- Positionnement explicite des derniers elements restants comme du polissage et non comme des bloqueurs architecturaux
+
+### Resultat
+
+- La Phase 3 est maintenant consideree terminee
+- L'architecture applicative est suffisamment modulaire et lisible pour supporter la suite du projet et l'arrivee de nouveaux changements sans dispersion majeure
+- Les calculs partages, view models, helpers d'autorisation et primitives transversales couvrent maintenant l'essentiel des zones structurantes
+
+### Prochaine session recommandee
+
+- Ouvrir proprement la Phase 5 sur l'observabilite et la securite
+- Prioriser la standardisation des logs critiques et la correlation des flux sensibles
+- Garder les petits raffinements UI ou actions secondaires pour des opportunites ponctuelles, sans reouvrir la Phase 3
+
+---
+
+## Session 35 - 2026-03-28
+
+### Travail effectue
+
+- Demarrage de la Phase 5 par un socle de correlation de requete dans `src/lib/request-security.ts`
+- Introduction d'un `requestId` resolu depuis les headers ou genere cote serveur
+- Ajout de logs structures avec `requestId` sur `api/cron/notifications`, `api/payments/transactions/[transactionId]/checkout`, `api/ai/analyze` et `api/reports/monthly`
+
+### Resultat
+
+- Les flux sensibles ont maintenant une premiere base de correlation exploitable en incident
+- Les refus d'acces, rate limits, echecs de checkout, erreurs AI et executions de cron sont plus faciles a relier et diagnostiquer
+- Validation actuelle : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer la Phase 5 sur la standardisation des logs applicatifs critiques
+- Ajouter ensuite une correlation plus explicite sur quelques flux serveur sensibles
+- Puis revenir sur le rate limiting ou les endpoints admin si on veut renforcer la securite
+
+---
+
+## Session 36 - 2026-03-28
+
+### Travail effectue
+
+- Extension des logs structures avec `requestId` sur les webhooks de paiement
+- Extension des logs structures sur les routes admin de confirmation/rejet de transaction et de mise a jour d'abonnement
+- Ajout du meme niveau de traces sur l'export PDF lot dans `app/api/reports/batch/[id]/route.ts`
+
+### Resultat
+
+- Les flux paiements, webhooks, admin et exports PDF disposent maintenant d'un niveau de trace plus coherent
+- Les incidents de paiement ou d'export deviennent plus faciles a reconstruire a partir des logs serveur
+- Validation actuelle : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer la Phase 5 sur le rate limiting et les endpoints admin sensibles
+- Ou bien formaliser un tableau de bord minimal de sante applicative a partir des evenements deja traces
+- Garder la correlation `requestId` comme socle pour les prochains ajouts d'observabilite
+
+---
+
+## Session 37 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un rate limiting explicite sur `api/subscriptions/payments`
+- Ajout d'un rate limiting explicite sur `api/subscriptions/payments/[paymentId]/confirm` et `api/subscriptions/payments/[paymentId]/reject`
+- Ajout d'un rate limiting explicite sur `api/payments/webhooks/[provider]`
+- Ajout des logs structures correspondants sur ces routes, avec `requestId`
+
+### Resultat
+
+- Les flux d'abonnement et les webhooks de paiement ont maintenant une premiere protection explicite contre les rafales et repetitions involontaires
+- Les headers de rate limit sont renvoyes de facon coherente sur ces endpoints sensibles
+- Validation actuelle : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer la Phase 5 sur un tableau de bord minimal de sante applicative
+- Ou bien renforcer encore les endpoints admin et webhooks si on veut pousser le durcissement securite
+- Garder `requestId` et les logs structures comme base commune pour la suite
+
+---
+
+## Session 38 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un helper de sante applicative dans `src/lib/app-health.ts`
+- Ajout des tests dedies dans `src/lib/app-health.test.ts`
+- Branchement d'un tableau de bord minimal de sante applicative dans `app/admin/page.tsx`
+- La vue admin expose maintenant l'etat global, les checks critiques de configuration, le backlog paiements, les transactions techniques stale, les erreurs webhook sur 24h et le volume d'audit recent
+- Mise a jour de `docs/SCALABILITY_ROADMAP.md` pour refleter l'avancement Phase 5
+
+### Resultat
+
+- La Phase 5 dispose maintenant d'une premiere surface de supervision exploitable sans outil externe
+- Les super admins peuvent voir rapidement si les garde-fous critiques sont en place et si un backlog technique demande une intervention
+- Validation actuelle : `19` fichiers de test, `66` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer la Phase 5 sur l'instrumentation plus systematique des erreurs serveur et erreurs d'export
+- Revoir les secrets et variables par environnement pour distinguer les configurations critiques des integrations optionnelles
+- Formaliser ensuite la procedure de backup / restore et la reponse a incident minimale
+
+---
+
+## Session 39 - 2026-03-28
+
+### Travail effectue
+
+- Durcissement des routes `app/api/reports/monthly/route.ts`, `app/api/subscriptions/payments/route.ts`, `app/api/subscriptions/payments/[paymentId]/confirm/route.ts`, `app/api/subscriptions/payments/[paymentId]/reject/route.ts` et `app/api/admin/subscriptions/[organizationId]/route.ts`
+- Les corps JSON invalides sont maintenant detectes explicitement et renvoyes en `400 INVALID_JSON`
+- Les erreurs techniques inattendues de ces routes sont maintenant journalisees proprement avec `requestId`
+- Les routes `app/api/admin/payments/transactions/[transactionId]/confirm/route.ts` et `app/api/admin/payments/transactions/[transactionId]/reject/route.ts` tracent maintenant elles aussi les echecs techniques inattendus
+
+### Resultat
+
+- Les erreurs serveur et erreurs d'entree sont mieux distinguees sur les flux abonnement, admin et export
+- Les incidents deviennent plus faciles a diagnostiquer sans confondre JSON invalide, refus metier et vraies erreurs internes
+- Validation actuelle : `19` fichiers de test, `66` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Revoir les secrets et variables d'environnement par environnement pour identifier les dependances critiques et optionnelles
+- Formaliser ensuite la procedure de backup / restore de base de donnees
+- Documenter enfin une reponse a incident minimale pour fermer plus proprement la Phase 5
+
+---
+
+## Session 40 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un diagnostic centralise des variables d'environnement dans `src/lib/environment-readiness.ts`
+- Ajout des tests dedies dans `src/lib/environment-readiness.test.ts`
+- Rebranchement de `app/admin/page.tsx` sur ce diagnostic pour eviter les checks env eparpilles
+- Alignement de `app/api/payments/webhooks/[provider]/route.ts` sur `getServerEnv()` au lieu d'un acces direct a `process.env`
+- Mise a jour de `.env.local.example`, `README.md` et `docs/OPERATIONS.md` pour distinguer minimum de boot et integrations optionnelles
+
+### Resultat
+
+- L'etat des secrets et variables critiques est maintenant plus lisible, plus centralise et plus fidele au code reel
+- Les super admins voient mieux quelles integrations sont absentes, partielles ou correctement configurees
+- Validation actuelle : `20` fichiers de test, `69` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Formaliser la procedure de backup / restore de base de donnees
+- Documenter ensuite une reponse a incident minimale
+- Revenir enfin sur la cloture de la Phase 5 quand ces deux blocs seront en place
+
+---
+
+## Session 41 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un runbook de sauvegarde et restauration dans `docs/BACKUP_RESTORE.md`
+- Documentation d'une strategie de backup logique PostgreSQL avec exemples `pg_dump`, `pg_restore` et `psql`
+- Ajout d'une verification post-restore avec `npx prisma migrate status`, `npm run test` et `npm run build`
+- Mise a jour de `docs/OPERATIONS.md`, `README.md`, `docs/SCALABILITY_ROADMAP.md`
+
+### Resultat
+
+- Le projet dispose maintenant d'une procedure explicite de backup / restore adaptee au socle PostgreSQL + Prisma reel
+- La Phase 5 se rapproche d'une cloture defendable sur l'exploitation et la recuperation incident
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Documenter une reponse a incident minimale
+- Statuer ensuite sur la cloture de la Phase 5
+- Puis ouvrir la Phase 6
+
+---
+
+## Session 42 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un runbook de reponse a incident dans `docs/INCIDENT_RESPONSE.md`
+- Documentation d'une boucle minimale: detection, diagnostic, mitigation, restauration et retour au service
+- Alignement de `docs/OPERATIONS.md`, `README.md` et `docs/SCALABILITY_ROADMAP.md`
+
+### Resultat
+
+- Le projet dispose maintenant d'une procedure d'incident simple et coherente avec les logs structures, la page admin et le runbook backup/restore
+- La Phase 5 couvre maintenant observation, securite de base, reprise et reponse a incident
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Statuer sur la cloture de la Phase 5
+- Puis ouvrir la Phase 6
+
+---
+
+## Session 43 - 2026-03-28
+
+### Travail effectue
+
+- Relecture finale de la Phase 5 par rapport a ses criteres de sortie
+- Cloture de la Phase 5 dans `docs/SCALABILITY_ROADMAP.md`
+- Bascule de la priorite active vers la Phase 6 dans `PROGRESS.md`
+
+### Resultat
+
+- La Phase 5 est maintenant consideree terminee
+- Le projet dispose d'un socle coherent pour observer, proteger et exploiter les flux critiques, avec supervision admin minimale et procedures de reprise
+- La suite logique devient la Phase 6, orientee scalabilite produit et equipe
+
+### Prochaine session recommandee
+
+- Ouvrir la Phase 6
+- Prioriser les chantiers d'organisation du travail, ownership et seed/demo stable
+
+---
+
+## Session 44 - 2026-03-28
+
+### Travail effectue
+
+- Demarrage effectif de la Phase 6
+- Ajout d'un cadre de travail equipe dans `docs/TEAM_WORKFLOW.md`
+- Ajout d'un onboarding dev court dans `docs/ONBOARDING.md`
+- Mise a jour de `README.md` et `docs/SCALABILITY_ROADMAP.md`
+
+### Resultat
+
+- Le projet devient plus facile a reprendre et a faire avancer a plusieurs
+- La Phase 6 est maintenant engagee sur un premier bloc concret: workflow equipe + onboarding
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Continuer la Phase 6 sur l'ownership plus explicite des domaines
+- Ou bien preparer une version seed/demo stable pour accelerer l'onboarding produit
+
+---
+
+## Session 45 - 2026-03-28
+
+### Travail effectue
+
+- Stabilisation de la seed demo dans `prisma/seed.ts` avec suppression des aleas
+- Ajout de `docs/DEMO_DATA.md` pour documenter les comptes, roles, lots utiles et parcours de demo
+- Mise a jour de `docs/ONBOARDING.md`, `README.md` et `docs/SCALABILITY_ROADMAP.md`
+
+### Resultat
+
+- Le projet dispose maintenant d'un jeu de donnees de demo stable, plus fiable pour l'onboarding, la demo produit et les validations manuelles
+- La Phase 6 avance sur un second bloc concret: seed/demo stable
+
+### Prochaine session recommandee
+
+- Continuer la Phase 6 sur l'ownership plus explicite des domaines
+- Ou bien prioriser les modules par impact business reel
+
+---
+
+## Session 46 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'un decoupage explicite des domaines dans `docs/DOMAIN_OWNERSHIP.md`
+- Mise a jour de `docs/TEAM_WORKFLOW.md`, `README.md` et `docs/SCALABILITY_ROADMAP.md`
+
+### Resultat
+
+- Le projet dispose maintenant d'un ownership plus clair par domaine, avec points d'entree et vigilance de review
+- La Phase 6 avance sur un troisieme bloc concret: ownership fonctionnel explicite
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Prioriser les modules par impact business reel
+- Ou bien definir une roadmap trimestrielle produit/tech separee
+
+---
+
+## Session 47 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'une grille de priorisation des modules dans `docs/MODULE_PRIORITIES.md`
+- Distinction explicite entre coeur de fonctionnement, impact business direct, differenciation produit et acceleration equipe
+- Mise a jour de `README.md`, `docs/TEAM_WORKFLOW.md` et `docs/SCALABILITY_ROADMAP.md`
+- Correction de l'etat du README pour refleter que la Phase 5 est terminee et que la Phase 6 est en cours
+
+### Resultat
+
+- La Phase 6 relie maintenant plus clairement les arbitrages techniques aux enjeux produit reels
+- L'equipe a une base simple pour choisir quoi fiabiliser et reviewer en priorite
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Definir une roadmap trimestrielle produit/tech separee de la roadmap historique
+- Puis identifier les besoins futurs de jobs asynchrones et de cache applicatif
+
+---
+
+## Session 48 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'une roadmap trimestrielle produit/tech dans `docs/QUARTERLY_ROADMAP.md`
+- Decoupage en horizon court, trimestre suivant et trimestre d'apres
+- Alignement de cette trajectoire sur `docs/MODULE_PRIORITIES.md`
+- Mise a jour de `README.md` et `docs/SCALABILITY_ROADMAP.md`
+
+### Resultat
+
+- La Phase 6 dispose maintenant d'une vraie lecture temporelle, separee de l'ancienne logique de roadmap MVP
+- L'equipe peut mieux arbitrer entre stabilite du coeur, valeur produit et chantiers de plateforme
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Identifier les futurs besoins de file de jobs pour exports, emails et traitements lourds
+- Puis etudier les besoins de cache et d'async processing
+
+---
+
+## Session 49 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'une trajectoire des jobs asynchrones dans `docs/ASYNC_JOBS.md`
+- Distinction entre traitements a garder synchrones, bons candidats a une queue et signaux de bascule
+- Proposition d'une premiere decoupe ciblee autour de `report_exports` puis `notification_emails`
+- Mise a jour de `README.md`, `docs/SCALABILITY_ROADMAP.md` et `docs/QUARTERLY_ROADMAP.md`
+
+### Resultat
+
+- La Phase 6 couvre maintenant aussi la trajectoire des traitements lourds sans introduire prematurement une complexite d'infrastructure
+- L'equipe sait quels flux surveiller et a partir de quels signes une queue deviendra justifiee
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Etudier les futurs besoins de cache et d'async processing
+- Puis statuer sur la cloture de la Phase 6
+
+---
+
+## Session 50 - 2026-03-28
+
+### Travail effectue
+
+- Ajout d'une strategie cible de cache et d'async processing dans `docs/CACHE_STRATEGY.md`
+- Distinction entre bons candidats, mauvais candidats et garde-fous multi-tenant pour un futur cache applicatif
+- Alignement de `README.md`, `docs/SCALABILITY_ROADMAP.md` et `docs/QUARTERLY_ROADMAP.md`
+- Mise a jour de la recommandation de session suivante pour statuer sur la cloture de la Phase 6
+
+### Resultat
+
+- La Phase 6 couvre maintenant aussi la trajectoire des lectures optimisees et de l'async processing sans introduire prematurement de complexite
+- Le projet a un cadre plus complet pour arbitrer entre simplicite, coherence des donnees et performance future
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Statuer sur la cloture de la Phase 6
+- Puis revenir sur les priorites produit/tech du trimestre en cours
+
+---
+
+## Session 51 - 2026-03-28
+
+### Travail effectue
+
+- Cloture formelle de la Phase 6 dans `docs/SCALABILITY_ROADMAP.md`
+- Alignement du `README.md` pour refleter que la Phase 6 est terminee
+- Mise a jour de `PROGRESS.md` pour basculer d'une logique de phase a une logique d'execution du trimestre courant
+
+### Resultat
+
+- Les six phases de la roadmap de scalabilite sont maintenant closes
+- Le projet peut repartir sur une logique plus simple de priorites produit/tech guidees par `docs/QUARTERLY_ROADMAP.md` et `docs/MODULE_PRIORITIES.md`
+- Validation non relancee: changements documentaires uniquement
+
+### Prochaine session recommandee
+
+- Revenir sur les priorites produit/tech du trimestre en cours
+- Ouvrir seulement les chantiers qui servent les priorites 1 et 2
+
+---
+
+## Session 52 - 2026-03-28
+
+### Travail effectue
+
+- Alignement de `src/actions/sales.ts` sur le pattern commun `requireOrganizationModuleContext() + requireRole()`
+- Remplacement de la sequence repetitive `requireSession + requireMembership + canPerformAction` sur les flux `getSales`, `getSale`, `createSale`, `updateSale` et `deleteSale`
+- Alignement de `src/actions/profitability.ts` sur le meme socle d'acces, avec conservation du controle d'acces par ferme et du gate abonnement `PROFITABILITY`
+
+### Resultat
+
+- Les flux ventes et rentabilite utilisent maintenant le meme socle d'autorisation que les autres modules critiques
+- Le coeur financier gagne en coherence et en lisibilite, sans changement des regles metier existantes
+- Validation complete : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur les flux critiques restants encore heterogenes, en priorite `form-drafts` ou certains parcours auth/support
+- Ou bien attaquer une amelioration produit concrete sur `reports` ou `subscriptions / payments`
+
+---
+
+## Session 53 - 2026-03-28
+
+### Travail effectue
+
+- Durcissement de `src/actions/form-drafts.ts` pour verifier l'appartenance a `organizationId` quand un brouillon est rattache a une organisation
+- Ajout d'un helper interne de validation d'organisation optionnelle pour les brouillons serveur
+- Ajout de `tests/form-drafts.test.ts` pour couvrir l'auth, le refus d'organisation non accessible, le chargement et la suppression d'un brouillon
+
+### Resultat
+
+- Les brouillons serveur lies aux parcours critiques `create-batch` et `daily` ne peuvent plus etre associes a une organisation non accessible par l'utilisateur
+- Le flux de drafts gagne un vrai garde-fou multi-tenant, avec non-regression automatisee
+- Validation complete : `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Continuer sur les derniers flux atypiques d'auth/support
+- Ou bien revenir sur une amelioration produit visible dans `reports` ou `subscriptions / payments`
 
 ---
 

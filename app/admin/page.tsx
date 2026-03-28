@@ -2,8 +2,11 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import {
+  Activity,
+  AlertTriangle,
   ArrowRight,
   Building2,
+  CheckCircle2,
   CreditCard,
   Shield,
   Sparkles,
@@ -11,9 +14,16 @@ import {
 } from "lucide-react"
 import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
-import { formatDateTime, formatMoneyFCFA } from "@/src/lib/formatters"
+import {
+  formatDateTime,
+  formatMoneyFCFA,
+  formatRelativeDate,
+} from "@/src/lib/formatters"
 import { PaymentTransactionStatus } from "@/src/generated/prisma/client"
 import { PLAN_DEFINITIONS } from "@/src/lib/subscriptions"
+import { buildAppHealthReport, type AppHealthStatus } from "@/src/lib/app-health"
+import { buildEnvironmentReadiness } from "@/src/lib/environment-readiness"
+import { getServerEnv } from "@/src/lib/env"
 import { AdminSignOutButton } from "./_components/AdminSignOutButton"
 import { AdminSubscriptionControl } from "./_components/AdminSubscriptionControl"
 import { AdminPaymentTransactions } from "./_components/AdminPaymentTransactions"
@@ -44,6 +54,43 @@ function StatCard({
   )
 }
 
+function HealthTone({
+  status,
+}: {
+  status: AppHealthStatus
+}) {
+  const styles = {
+    healthy: {
+      chip: "bg-emerald-100 text-emerald-800",
+      icon: CheckCircle2,
+      label: "Sain",
+    },
+    warn: {
+      chip: "bg-amber-100 text-amber-800",
+      icon: AlertTriangle,
+      label: "A surveiller",
+    },
+    critical: {
+      chip: "bg-rose-100 text-rose-800",
+      icon: AlertTriangle,
+      label: "Critique",
+    },
+  } satisfies Record<
+    AppHealthStatus,
+    { chip: string; icon: typeof CheckCircle2; label: string }
+  >
+
+  const current = styles[status]
+  const Icon = current.icon
+
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${current.chip}`}>
+      <Icon className="h-3.5 w-3.5" />
+      {current.label}
+    </span>
+  )
+}
+
 export default async function AdminPage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
@@ -67,12 +114,21 @@ export default async function AdminPage() {
     redirect("/dashboard")
   }
 
+  const env = getServerEnv()
+  const now = new Date()
+  const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const staleTransactionThreshold = new Date(now.getTime() - 30 * 60 * 1000)
+
   const [
     organizations,
     usersCount,
     pendingPaymentsCount,
     pendingPayments,
     pendingTransactions,
+    pendingTransactionsCount,
+    stalePendingTransactionsCount,
+    failedWebhookEventsLast24h,
+    auditLogsLast24h,
   ] = await Promise.all([
     prisma.organization.findMany({
       where: {
@@ -159,6 +215,48 @@ export default async function AdminPage() {
       orderBy: { createdAt: "desc" },
       take: 8,
     }),
+    prisma.paymentTransaction.count({
+      where: {
+        status: {
+          in: [
+            PaymentTransactionStatus.CREATED,
+            PaymentTransactionStatus.PENDING,
+            PaymentTransactionStatus.REQUIRES_ACTION,
+          ],
+        },
+      },
+    }),
+    prisma.paymentTransaction.count({
+      where: {
+        status: {
+          in: [
+            PaymentTransactionStatus.CREATED,
+            PaymentTransactionStatus.PENDING,
+            PaymentTransactionStatus.REQUIRES_ACTION,
+          ],
+        },
+        createdAt: {
+          lt: staleTransactionThreshold,
+        },
+      },
+    }),
+    prisma.paymentWebhookEvent.count({
+      where: {
+        receivedAt: {
+          gte: last24Hours,
+        },
+        processingError: {
+          not: null,
+        },
+      },
+    }),
+    prisma.auditLog.count({
+      where: {
+        createdAt: {
+          gte: last24Hours,
+        },
+      },
+    }),
   ])
 
   const visibleOrganizations = organizations.filter((org) => org.slug !== "sunufarm-platform")
@@ -175,6 +273,24 @@ export default async function AdminPage() {
       return aTime - bTime
     })
     .slice(0, 5)
+  const environmentReadiness = buildEnvironmentReadiness(env)
+  const healthReport = buildAppHealthReport({
+    cronSecretConfigured: environmentReadiness.cronReady,
+    emailNotificationsConfigured: environmentReadiness.emailReady,
+    emailNotificationsPartiallyConfigured: environmentReadiness.emailPartiallyConfigured,
+    paymentWebhooksConfigured: environmentReadiness.paymentWebhooksReady,
+    pendingSubscriptionPayments: pendingPaymentsCount,
+    oldestPendingSubscriptionPaymentAt: pendingPayments[0]?.requestedAt ?? null,
+    pendingPaymentTransactions: pendingTransactionsCount,
+    stalePendingPaymentTransactions: stalePendingTransactionsCount,
+    failedWebhookEventsLast24h,
+    auditLogsLast24h,
+  })
+  const healthSummary = {
+    healthy: healthReport.checks.filter((check) => check.status === "healthy").length,
+    warn: healthReport.checks.filter((check) => check.status === "warn").length,
+    critical: healthReport.checks.filter((check) => check.status === "critical").length,
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
@@ -221,6 +337,80 @@ export default async function AdminPage() {
             value={String(activeTrials.length)}
             icon={Sparkles}
           />
+        </section>
+
+        <section className="rounded-3xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-6 py-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-green-50 text-green-700">
+                  <Activity className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Sante applicative</h2>
+                  <p className="text-sm text-gray-500">
+                    Vue minimale sur les garde-fous Phase 5: config critique, paiements,
+                    webhooks et traces d&apos;audit.
+                  </p>
+                </div>
+              </div>
+
+              <HealthTone status={healthReport.overallStatus} />
+            </div>
+          </div>
+
+          <div className="grid gap-4 border-b border-gray-100 px-6 py-5 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl bg-gray-50 px-4 py-3">
+              <p className="text-sm text-gray-500">Checks OK</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900">{healthSummary.healthy}</p>
+              <p className="text-xs text-gray-500">
+                {healthSummary.warn} warning(s) · {healthSummary.critical} critique(s)
+              </p>
+            </div>
+            <div className="rounded-2xl bg-gray-50 px-4 py-3">
+              <p className="text-sm text-gray-500">Erreurs webhook 24h</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900">
+                {failedWebhookEventsLast24h}
+              </p>
+              <p className="text-xs text-gray-500">
+                {environmentReadiness.paymentWebhooksReady ? "webhooks configures" : "fallback admin manuel"}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-gray-50 px-4 py-3">
+              <p className="text-sm text-gray-500">Transactions a surveiller</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900">
+                {stalePendingTransactionsCount}
+              </p>
+              <p className="text-xs text-gray-500">
+                stale sur {pendingTransactionsCount} transaction(s) en attente
+              </p>
+            </div>
+            <div className="rounded-2xl bg-gray-50 px-4 py-3">
+              <p className="text-sm text-gray-500">Traces audit 24h</p>
+              <p className="mt-1 text-2xl font-semibold text-gray-900">{auditLogsLast24h}</p>
+              <p className="text-xs text-gray-500">
+                plus ancien paiement pending:{" "}
+                {pendingPayments[0]?.requestedAt
+                  ? formatRelativeDate(pendingPayments[0].requestedAt)
+                  : "aucun"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 px-6 py-5 lg:grid-cols-2">
+            {healthReport.checks.map((check) => (
+              <div key={check.key} className="rounded-2xl border border-gray-100 px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-gray-900">{check.label}</p>
+                    <p className="mt-1 text-sm text-gray-500">{check.description}</p>
+                  </div>
+                  <HealthTone status={check.status} />
+                </div>
+                <p className="mt-3 text-sm font-semibold text-gray-900">{check.value}</p>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">

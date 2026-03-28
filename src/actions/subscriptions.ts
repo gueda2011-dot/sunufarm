@@ -36,6 +36,11 @@ import {
   activateOrganizationSubscription,
   startOrganizationTrial,
 } from "@/src/lib/subscription-lifecycle"
+import {
+  hasActivePaidPlan,
+  hasUnlimitedAiAccess,
+  resolveAiCreditsRemaining,
+} from "@/src/lib/subscription-rules"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -363,17 +368,7 @@ export async function adminStartTrial(
       },
     })
 
-    const hasActivePaidPlan =
-      existingSubscription?.status === "ACTIVE" &&
-      (
-        (existingSubscription.amountFcfa ?? 0) > 0 ||
-        (
-          existingSubscription.currentPeriodEnd != null &&
-          existingSubscription.currentPeriodEnd > new Date()
-        )
-      )
-
-    if (hasActivePaidPlan) {
+    if (hasActivePaidPlan(existingSubscription)) {
       return {
         ...conflict(
           "Impossible de demarrer un essai sur une organisation avec un abonnement payant actif.",
@@ -435,11 +430,7 @@ export async function consumeAiCredit(
         return { ok: false as const, error: notFound("Abonnement introuvable.", "SUBSCRIPTION_NOT_FOUND") }
       }
 
-      const hasUnlimitedAI =
-        (sub.plan === SubscriptionPlan.PRO || sub.plan === SubscriptionPlan.BUSINESS) &&
-        sub.status === "ACTIVE"
-
-      if (hasUnlimitedAI) {
+      if (hasUnlimitedAiAccess(sub.plan, sub.status)) {
         return { ok: true as const, creditsRemaining: UNLIMITED_AI }
       }
 
@@ -477,7 +468,12 @@ export async function consumeAiCredit(
 
       return {
         ok: true as const,
-        creditsRemaining: Math.max(0, refreshed.aiCreditsTotal - refreshed.aiCreditsUsed),
+        creditsRemaining: resolveAiCreditsRemaining({
+          plan: sub.plan,
+          status: sub.status,
+          aiCreditsTotal: refreshed.aiCreditsTotal,
+          aiCreditsUsed: refreshed.aiCreditsUsed,
+        }),
       }
     })
 

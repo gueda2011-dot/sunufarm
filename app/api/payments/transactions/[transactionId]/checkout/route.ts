@@ -9,13 +9,17 @@ import {
   createRateLimitHeaders,
   getClientIpFromHeaders,
 } from "@/src/lib/rate-limit"
-import { isTrustedMutationOrigin } from "@/src/lib/request-security"
+import { logger } from "@/src/lib/logger"
+import { getRequestId, isTrustedMutationOrigin } from "@/src/lib/request-security"
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ transactionId: string }> },
 ) {
+  const requestId = getRequestId(request.headers)
+
   if (!isTrustedMutationOrigin(request)) {
+    logger.warn("payments.checkout.untrusted_origin", { requestId })
     return apiError("Origine de requete non autorisee.", {
       status: 403,
       code: "UNTRUSTED_ORIGIN",
@@ -24,6 +28,7 @@ export async function POST(
 
   const session = await auth()
   if (!session?.user?.id) {
+    logger.warn("payments.checkout.unauthenticated", { requestId })
     return apiError("Non authentifie", { status: 401, code: "UNAUTHENTICATED" })
   }
 
@@ -35,6 +40,11 @@ export async function POST(
   })
 
   if (!rateLimit.allowed) {
+    logger.warn("payments.checkout.rate_limited", {
+      requestId,
+      userId: session.user.id,
+      transactionId,
+    })
     return apiError("Trop de tentatives de paiement. Reessayez dans un instant.", {
       status: 429,
       code: "RATE_LIMITED",
@@ -53,6 +63,11 @@ export async function POST(
   })
 
   if (!transaction) {
+    logger.warn("payments.checkout.transaction_not_found", {
+      requestId,
+      userId: session.user.id,
+      transactionId,
+    })
     return apiError("Transaction introuvable", { status: 404, code: "TRANSACTION_NOT_FOUND" })
   }
 
@@ -62,6 +77,13 @@ export async function POST(
   )
 
   if (!membershipResult.success) {
+    logger.warn("payments.checkout.membership_denied", {
+      requestId,
+      userId: session.user.id,
+      organizationId: transaction.organizationId,
+      transactionId,
+      code: membershipResult.code,
+    })
     return apiError(membershipResult.error, {
       status: membershipResult.status,
       code: membershipResult.code,
@@ -69,6 +91,12 @@ export async function POST(
   }
 
   if (!hasModuleAccess(membershipResult.data.role, membershipResult.data.modulePermissions, "SETTINGS")) {
+    logger.warn("payments.checkout.module_denied", {
+      requestId,
+      userId: session.user.id,
+      organizationId: transaction.organizationId,
+      transactionId,
+    })
     return apiError("Acces refuse au module SETTINGS.", {
       status: 403,
       code: "MODULE_ACCESS_DENIED",
@@ -78,6 +106,14 @@ export async function POST(
   try {
     const checkout = await createWaveCheckoutSessionForTransaction(transaction.id)
 
+    logger.info("payments.checkout.initialized", {
+      requestId,
+      userId: session.user.id,
+      organizationId: transaction.organizationId,
+      transactionId,
+      provider: transaction.provider,
+    })
+
     return apiSuccess({
       provider: transaction.provider,
       checkoutUrl: checkout.checkoutUrl,
@@ -86,6 +122,15 @@ export async function POST(
     }, { headers: createRateLimitHeaders(rateLimit, 5) })
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN_ERROR"
+
+    logger.error("payments.checkout.failed", {
+      requestId,
+      userId: session.user.id,
+      organizationId: transaction.organizationId,
+      transactionId,
+      provider: transaction.provider,
+      error,
+    })
 
     if (message === "WAVE_NOT_CONFIGURED") {
       return apiError("Wave n'est pas encore configure dans l'environnement.", {

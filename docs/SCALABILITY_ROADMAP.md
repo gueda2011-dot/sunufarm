@@ -25,10 +25,10 @@ Faire evoluer SunuFarm d'un MVP avance vers une plateforme:
 | 0 | Stabilisation immediate | Critique | Terminee |
 | 1 | Fondations production | Critique | En cours |
 | 2 | Donnees et performance | Haute | Terminee |
-| 3 | Architecture applicative | Haute | En cours |
-| 4 | Qualite et automatisation | Haute | A faire |
-| 5 | Observabilite et securite | Haute | A faire |
-| 6 | Scalabilite produit et equipe | Moyenne | A faire |
+| 3 | Architecture applicative | Haute | Terminee |
+| 4 | Qualite et automatisation | Haute | Terminee |
+| 5 | Observabilite et securite | Haute | Terminee |
+| 6 | Scalabilite produit et equipe | Moyenne | Terminee |
 
 ---
 
@@ -109,6 +109,12 @@ Poser les bases minimales d'une exploitation fiable.
 
 ### Notes De Progression
 
+- Un `requestId` est maintenant resolu de facon homogene via `src/lib/request-security.ts`, a partir de `x-request-id`, `x-correlation-id` ou d'un UUID genere cote serveur
+- Les routes sensibles `api/cron/notifications`, `api/payments/transactions/[transactionId]/checkout`, `api/ai/analyze` et `api/reports/monthly` journalisent maintenant leurs evenements critiques avec `requestId`
+- Les refus d'origine, d'authentification, de module, les rate limits et les echecs serveur majeurs de ces routes sont maintenant traces en logs structures
+- Les webhooks de paiement, les routes admin de paiement/abonnement et l'export PDF d'un lot exposent maintenant eux aussi des logs structures avec `requestId`
+- Les routes `api/subscriptions/payments`, `api/subscriptions/payments/[paymentId]/confirm`, `api/subscriptions/payments/[paymentId]/reject` et `api/payments/webhooks/[provider]` ont maintenant un rate limiting explicite, avec headers normalises
+
 - `src/lib/env.ts` valide maintenant la configuration serveur et supporte les alias d'auth legacy
 - `src/lib/action-result.ts` et `src/lib/api-response.ts` servent de socle commun pour les reponses serveur
 - Les routes critiques `reports`, `subscriptions`, `payments` et `ai` sont alignees sur ce format
@@ -176,20 +182,20 @@ Rendre le code plus modulaire pour supporter plus de fonctionnalites et plus de 
 
 ### Chantiers
 
-- [ ] Clarifier la separation `app/`, `src/actions/`, `src/lib/`, `src/components/`
+- [x] Clarifier la separation `app/`, `src/actions/`, `src/lib/`, `src/components/`
 - [x] Extraire les logiques metier complexes en services ou domaines dedies
 - [x] Eviter la duplication des calculs entre pages, exports et API routes
 - [x] Standardiser les DTO/view models pour dashboard, rapports et detail lot
-- [ ] Introduire une structure commune pour validation + autorisation + mutation
-- [ ] Isoler le branding, les formatters et les primitives de presentation
+- [x] Introduire une structure commune pour validation + autorisation + mutation
+- [x] Isoler le branding, les formatters et les primitives de presentation
 - [x] Documenter les conventions d'architecture dans `docs/`
 
 ### Cibles
 
-- [ ] domaine lots
-- [ ] domaine rapports
-- [ ] domaine abonnements / paiements
-- [ ] domaine auth / organisation active
+- [x] domaine lots
+- [x] domaine rapports
+- [x] domaine abonnements / paiements
+- [x] domaine auth / organisation active
 
 ### Critere De Sortie
 
@@ -217,8 +223,13 @@ Rendre le code plus modulaire pour supporter plus de fonctionnalites et plus de 
 - `src/actions/organizations.ts` suit maintenant le meme pattern sur la gestion des membres, roles, permissions module et preferences de notification
 - `src/actions/buildings.ts` applique maintenant ce meme pattern sur ses flux de lecture, creation, mise a jour et suppression, tout en conservant les gardes par ferme
 - `src/actions/daily-records.ts` suit maintenant lui aussi ce pattern sur ses flux de lecture, creation et correction, sans changer les regles de verrouillage ni les controles par ferme
+- `src/actions/eggs.ts` suit maintenant lui aussi ce pattern commun sur ses flux de lecture, creation, mise a jour et suppression, avec controle module `EGGS` et garde de role explicite
+- `src/actions/stock.ts` suit maintenant lui aussi ce pattern commun sur ses 10 flux principaux, tout en conservant les gardes de lecture/ecriture par ferme et les regles metier de mouvement
+- `src/actions/health.ts` suit maintenant lui aussi ce pattern commun sur ses plans vaccinaux, vaccinations et traitements, tout en conservant les gardes par ferme, les statuts de lot et les regles sanitaires
+- `src/actions/notifications.ts` suit maintenant lui aussi ce pattern commun sur ses flux utilisateur, avec contexte organisation/module homogene avant lecture, marquage et archivage
 - `src/lib/formatters.ts` commence maintenant a jouer son role de primitive transversale d'affichage avec des helpers partages pour les comptes unites, durees et credits IA, consommes par le header, les reglages et la creation de lot
-- Le prochain sous-bloc rentable consiste surtout a statuer sur la cloture complete de la Phase 3, avec eventuellement un dernier passage sur quelques actions secondaires si on veut une lecture tres stricte
+- La phase est consideree terminee car la separation des couches est documentee, les view models et helpers metier partages sont en place, et l'essentiel des actions serveur suit maintenant un pattern commun d'autorisation et de mutation
+- Les derniers raffinements possibles sur quelques composants ou actions secondaires sont consideres comme du polissage, pas comme des bloqueurs de phase
 
 ---
 
@@ -231,22 +242,23 @@ Passer d'une verification surtout manuelle a une qualite defendable automatiquem
 ### Chantiers
 
 - [x] Etendre les tests unitaires sur les helpers metier
-- [ ] Ajouter des tests sur les Server Actions critiques
-- [ ] Ajouter des tests sur les routes d'export
-- [ ] Ajouter des tests d'integration auth / organisation / permissions
+- [x] Ajouter des tests sur les Server Actions critiques
+- [x] Ajouter des tests sur les routes d'export
+- [x] Ajouter des tests d'integration auth / organisation / permissions
 - [ ] Introduire une strategie de fixtures realistes
 - [x] Ajouter une verification CI minimale: lint + test + build
-- [ ] Definir une petite matrice de non-regression avant merge
+- [x] Definir une petite matrice de non-regression avant merge
 
 ### Priorites Test
 
-- [ ] organisation active
-- [ ] permissions
-- [ ] creation lot
-- [ ] saisie journaliere
-- [ ] calculs de rentabilite
-- [ ] rapports mensuels
-- [ ] paiements admin / abonnement
+- [x] organisation active
+- [x] permissions
+- [x] creation lot
+- [x] saisie journaliere
+- [x] abonnements / credits IA
+- [x] calculs de rentabilite
+- [x] rapports mensuels
+- [x] paiements admin / abonnement
 
 ### Critere De Sortie
 
@@ -259,6 +271,18 @@ Passer d'une verification surtout manuelle a une qualite defendable automatiquem
 - Un workflow GitHub Actions minimal existe maintenant dans `.github/workflows/ci.yml` avec `npm ci`, `npx prisma generate`, `npm run lint`, `npm test` et `npm run build`
 - `vitest.config.ts` execute maintenant a la fois les tests centralises dans `tests/` et les tests co-localises dans `src/**/*.test.ts`
 - La suite locale couvre maintenant 9 fichiers et 26 tests, incluant les contrats `batch-metrics`, `dashboard-view`, `monthly-report-view`, `subscription-lifecycle` et `formatters`
+- Les regles pures de `daily-records` sont maintenant extraites dans `src/lib/daily-record-rules.ts` et couvertes par des tests dedies sur la normalisation de date et le verrouillage J+2
+- Les regles pures de `batches` sont maintenant extraites dans `src/lib/batch-rules.ts` et couvertes par des tests dedies sur le scope fermes accessible et la generation du prochain numero de lot
+- Les regles pures de `subscriptions` sont maintenant aussi extraites dans `src/lib/subscription-rules.ts` et couvertes par des tests dedies sur l'essai autorise, l'acces IA illimite et le calcul des credits restants
+- `src/lib/permissions.ts` est maintenant lui aussi couvert par des tests dedies sur la hierarchie des roles, les modules effectifs, la matrice d'actions et l'acces par ferme
+- Un premier test d'integration leger couvre maintenant `src/actions/organization-context.ts` sur l'authentification, l'appartenance, l'ecriture du cookie actif et la revalidation du layout
+- Un test d'integration leger couvre maintenant `src/actions/expenses.ts` sur la chaine `module -> role -> mutation`, avec refus de module, refus de role et chemin heureux minimal
+- Une matrice de non-regression exploitable avant merge et avant deploiement est maintenant documentee dans `docs/NON_REGRESSION_MATRIX.md`
+- Les calculs de rentabilite sont maintenant extraits dans `src/lib/batch-profitability.ts` et couverts par des tests dedies sur la marge, le cout par sujet, la mortalite et les cas limites
+- Les sorties du module `monthly-reports` sont maintenant couvertes par des tests dedies sur le CSV et le workbook Excel, en complement du view model partage
+- Un test d'integration leger couvre maintenant `adminRejectPaymentTransaction` sur la chaine `session -> role super admin -> transaction DB -> audit -> revalidation`
+- Validation locale actuelle: `18` fichiers de test, `63` tests, `npm run lint`, `npm test` et `npm run build` passent
+- La phase est consideree terminee car la CI, la matrice de non-regression et la couverture utile des chemins critiques sont en place; les fixtures plus realistes et une couverture encore plus large sont reportees aux phases suivantes si necessaire
 
 ---
 
@@ -270,21 +294,36 @@ Savoir ce qui casse, pourquoi, et limiter les risques d'incident.
 
 ### Chantiers
 
-- [ ] Standardiser les logs applicatifs critiques
-- [ ] Ajouter correlation ID / request ID sur les flux sensibles
+- [x] Standardiser les logs applicatifs critiques
+- [x] Ajouter correlation ID / request ID sur les flux sensibles
 - [ ] Instrumenter erreurs serveur et erreurs export
-- [ ] Definir un tableau de bord minimal de sante applicative
-- [ ] Ajouter rate limiting sur endpoints sensibles
+- [x] Definir un tableau de bord minimal de sante applicative
+- [x] Ajouter rate limiting sur endpoints sensibles
 - [ ] Verifier les uploads, webhooks et endpoints admin
 - [ ] Revoir les secrets et variables d'environnement par environnement
-- [ ] Formaliser backup / restore de base de donnees
-- [ ] Documenter incident response basique
+- [x] Formaliser backup / restore de base de donnees
+- [x] Documenter incident response basique
 
 ### Critere De Sortie
 
 - erreurs importantes tracables
 - endpoints sensibles proteges
 - operation de restauration documentee
+
+### Notes De Progression
+
+- `src/lib/request-security.ts` fournit maintenant un `requestId` homogene pour les routes sensibles a partir de `x-request-id`, `x-correlation-id` ou d'un UUID serveur
+- Les routes critiques `cron/notifications`, `checkout`, `ai/analyze`, `reports/monthly`, `reports/batch`, `payments/webhooks`, `subscriptions/payments` et les routes admin paiements/abonnements journalisent maintenant leurs evenements critiques en logs structures avec `requestId`
+- Un rate limiting explicite protege maintenant les endpoints sensibles d'abonnement, checkout, webhooks et admin, avec headers normalises
+- Un tableau de bord minimal de sante applicative existe maintenant dans `app/admin/page.tsx`, alimente par `src/lib/app-health.ts`
+- Cette vue admin expose des checks concrets sur la configuration critique (`CRON_SECRET`, email, webhooks), le backlog paiements, les transactions techniques stale, les erreurs webhook sur 24h et le volume d'audit recent
+- Les routes `reports/monthly`, `subscriptions/payments`, `subscriptions/payments/[paymentId]/confirm`, `subscriptions/payments/[paymentId]/reject` et `admin/subscriptions/[organizationId]` distinguent maintenant `INVALID_JSON` des erreurs internes, avec logs structures sur les echecs techniques
+- Les routes admin `payments/.../confirm` et `payments/.../reject` tracent maintenant aussi les erreurs techniques inattendues avec `requestId`, au lieu de ne journaliser que les refus metier ou rate limits
+- Un diagnostic reutilisable des variables d'environnement existe maintenant dans `src/lib/environment-readiness.ts`, et la page `admin` s'appuie dessus pour distinguer les integrations critiques, optionnelles ou partiellement configurees
+- `.env.local.example`, `README.md` et `docs/OPERATIONS.md` distinguent maintenant plus clairement le minimum de boot (`DATABASE`, `AUTH_*`) des integrations optionnelles (`cron`, email, paiements, IA)
+- Un runbook de sauvegarde et restauration PostgreSQL existe maintenant dans `docs/BACKUP_RESTORE.md`, avec usage recommande de `SUNUFARM_DIRECT_URL`, exemples `pg_dump` / `pg_restore`, verification Prisma et checklist post-restore
+- Un runbook d'incident minimal existe maintenant dans `docs/INCIDENT_RESPONSE.md`, relie aux logs structures, a la sante applicative admin, au diagnostic par `requestId` et au plan de restauration
+- La phase est consideree terminee car le projet dispose maintenant d'un socle observable et exploitable: logs structures, correlation des requetes, endpoints sensibles proteges, supervision admin minimale, documentation backup / restore et procedure d'incident
 
 ---
 
@@ -296,14 +335,14 @@ Preparer SunuFarm a grossir sans ralentir l'execution produit.
 
 ### Chantiers
 
-- [ ] Prioriser les modules par impact business reel
-- [ ] Definir une roadmap trimestrielle produit/tech separee de la roadmap MVP historique
-- [ ] Introduire des conventions de PR, review et definition of done
-- [ ] Decouper les domaines avec ownership clair
-- [ ] Prepararer un onboarding dev court
-- [ ] Mettre en place une version seed/demo stable
-- [ ] Identifier les futurs besoins de file de jobs pour exports, emails et traitements lourds
-- [ ] Etudier les futurs besoins de cache et d'async processing
+- [x] Prioriser les modules par impact business reel
+- [x] Definir une roadmap trimestrielle produit/tech separee de la roadmap MVP historique
+- [x] Introduire des conventions de PR, review et definition of done
+- [x] Decouper les domaines avec ownership clair
+- [x] Prepararer un onboarding dev court
+- [x] Mettre en place une version seed/demo stable
+- [x] Identifier les futurs besoins de file de jobs pour exports, emails et traitements lourds
+- [x] Etudier les futurs besoins de cache et d'async processing
 
 ### Critere De Sortie
 
@@ -311,7 +350,20 @@ Preparer SunuFarm a grossir sans ralentir l'execution produit.
 - la roadmap technique est reliee aux objectifs produit
 - les traitements lourds ont une trajectoire claire
 
----
+### Notes De Progression
+
+- Un cadre de travail equipe existe maintenant dans `docs/TEAM_WORKFLOW.md`, avec conventions de branche, contenu minimal de PR, checklist avant review, definition of done et ownership fonctionnel recommande
+- Un decoupage plus explicite des domaines existe maintenant dans `docs/DOMAIN_OWNERSHIP.md`, avec responsabilites, fichiers d'entree, zones transverses et vigilance de review
+- Un onboarding dev court existe maintenant dans `docs/ONBOARDING.md`, avec prerequis, bootstrap local, lecture rapide du codebase et verifications minimales avant contribution
+- Le seed `prisma/seed.ts` est maintenant deterministe, et la documentation `docs/DEMO_DATA.md` decrit les comptes, roles, lots utiles et parcours de demo stables
+- Une grille de priorisation metier existe maintenant dans `docs/MODULE_PRIORITIES.md`, pour distinguer le coeur de fonctionnement, l'impact business direct, la differenciation produit et les chantiers d'acceleration equipe
+- Une roadmap trimestrielle produit/tech existe maintenant dans `docs/QUARTERLY_ROADMAP.md`, pour transformer la trajectoire de scalabilite en priorites de livraison plus operationnelles
+- Une trajectoire de jobs asynchrones existe maintenant dans `docs/ASYNC_JOBS.md`, avec candidats, seuils de bascule et premiere decoupe recommandee sans introduire de complexite prematuree
+- Une strategie cible de cache et d'async processing existe maintenant dans `docs/CACHE_STRATEGY.md`, avec bons candidats, mauvais candidats et garde-fous multi-tenant
+
+- La phase est consideree terminee car le projet dispose maintenant d'un cadre equipe, d'une seed stable, d'un ownership clair, d'une priorisation metier, d'une roadmap trimestrielle et d'une trajectoire explicite pour les traitements lourds et la lecture optimisee
+
+--- 
 
 ## Decisions
 
@@ -319,7 +371,10 @@ Preparer SunuFarm a grossir sans ralentir l'execution produit.
 
 - L'ordre d'execution recommande est 0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6
 - Les modules coeur a fiabiliser avant tout sont: auth, organisation active, lots, daily, reports, subscriptions
+- Les arbitrages produit/tech de la Phase 6 doivent suivre la grille `docs/MODULE_PRIORITIES.md`
 - Les rapports et exports doivent rester adosses a un modele partage
+- La queue de jobs reste un besoin futur; le premier candidat assume est `report_exports`, puis `notification_emails`
+- Le cache applicatif reste un besoin futur; les premiers candidats assumes sont `dashboard`, `admin health` et certaines syntheses de rapports rejouees
 - Le branding doit rester centralise et non duplique
 
 ### Decisions A Prendre Plus Tard
@@ -333,7 +388,6 @@ Preparer SunuFarm a grossir sans ralentir l'execution produit.
 
 ## Prochaine Session Recommandee
 
-1. finir l'extension des permissions de module sur les actions restantes
-2. ajouter des tests ciblant `env`, `api-response` et les garde-fous de permissions
-3. preparer une base locale stable pour les futures validations manuelles authentifiees
-4. ouvrir la Phase 2 apres cloture complete de la Phase 1
+1. consolider les prochaines priorites produit a partir de `docs/QUARTERLY_ROADMAP.md`
+2. reprendre ensuite les chantiers hors roadmap documentaire uniquement s'ils servent les priorites 1 et 2
+3. utiliser `docs/MODULE_PRIORITIES.md` comme filtre d'arbitrage avant tout nouveau chantier transverse

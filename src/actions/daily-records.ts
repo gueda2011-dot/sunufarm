@@ -37,6 +37,7 @@ import {
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
+import { isDailyRecordLocked, toUtcDate } from "@/src/lib/daily-record-rules"
 import {
   canPerformAction,
   canAccessFarm,
@@ -160,36 +161,6 @@ export interface DailyRecordDetail {
 // ---------------------------------------------------------------------------
 // Helpers internes
 // ---------------------------------------------------------------------------
-
-/**
- * Calcule si une saisie est verrouillée pour les rôles standard (TECHNICIAN, DATA_ENTRY).
- *
- * Règle : verrouillée à partir de J+2 00:00:00 UTC.
- * Le champ lockedAt est un court-circuit si jamais pré-calculé par un job.
- * MANAGER+ peut toujours modifier — vérifier en aval avec hasMinimumRole.
- */
-function isDailyRecordLocked(recordDate: Date, lockedAt: Date | null): boolean {
-  if (lockedAt) return true
-
-  const lockThreshold = new Date(
-    Date.UTC(
-      recordDate.getUTCFullYear(),
-      recordDate.getUTCMonth(),
-      recordDate.getUTCDate() + 2, // J+2
-    ),
-  )
-  return Date.now() >= lockThreshold.getTime()
-}
-
-/**
- * Normalise une date à minuit UTC pour correspondre au type @db.Date de Prisma.
- * Évite les décalages dus aux heures et fuseaux horaires dans les comparaisons.
- */
-function toUtcDate(date: Date): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-  )
-}
 
 /**
  * Retourne un lot actif avec son farmId résolu via building, ou null.

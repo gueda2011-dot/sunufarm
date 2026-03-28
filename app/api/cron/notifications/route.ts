@@ -1,6 +1,7 @@
 import prisma from "@/src/lib/prisma"
 import { getServerEnv } from "@/src/lib/env"
 import { logger } from "@/src/lib/logger"
+import { getRequestId } from "@/src/lib/request-security"
 import { generateNotificationsForOrganization } from "@/src/actions/notifications"
 import { sendOrganizationNotificationDigestEmails } from "@/src/lib/notification-emails"
 
@@ -18,9 +19,14 @@ function isAuthorized(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const requestId = getRequestId(request.headers)
+
   if (!isAuthorized(request)) {
+    logger.warn("notifications.cron_unauthorized", { requestId })
     return Response.json({ success: false, error: "Unauthorized" }, { status: 401 })
   }
+
+  logger.info("notifications.cron_started", { requestId })
 
   const organizations = await prisma.organization.findMany({
     where: { deletedAt: null },
@@ -49,6 +55,7 @@ export async function GET(request: Request) {
       }
     } catch (error) {
       logger.error("notifications.cron_failed_for_organization", {
+        requestId,
         organizationId: organization.id,
         organizationName: organization.name,
         error,
@@ -57,6 +64,7 @@ export async function GET(request: Request) {
   }
 
   logger.info("notifications.cron_completed", {
+    requestId,
     organizationsProcessed,
     notificationsCreated,
     emailsSent,
