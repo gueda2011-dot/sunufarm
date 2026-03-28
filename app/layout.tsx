@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import { Toaster } from "sonner"
 import { QueryProvider } from "@/src/components/providers/QueryProvider"
 import { ServiceWorkerRegistration } from "@/src/components/pwa/ServiceWorkerRegistration"
+import { getServerEnv } from "@/src/lib/env"
 import "./globals.css"
 
 const BASE_METADATA: Metadata = {
@@ -29,7 +30,7 @@ const BASE_METADATA: Metadata = {
 }
 
 function getConfiguredAppHost(): string | null {
-  const configuredUrl = process.env.NEXT_PUBLIC_APP_URL
+  const configuredUrl = getServerEnv().NEXT_PUBLIC_APP_URL
   if (!configuredUrl) return null
 
   try {
@@ -47,7 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
     ""
 
   const configuredHost = getConfiguredAppHost()
-  const vercelEnv = process.env.VERCEL_ENV
+  const vercelEnv = getServerEnv().VERCEL_ENV
 
   const isPreviewDeployment =
     vercelEnv === "preview" ||

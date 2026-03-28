@@ -16,6 +16,7 @@ import type { Metadata }                  from "next"
 import { auth }                           from "@/src/auth"
 import { getBatch }                       from "@/src/actions/batches"
 import type { ActionResult }             from "@/src/lib/auth"
+import { actionFailure } from "@/src/lib/action-result"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getDailyRecords }                from "@/src/actions/daily-records"
@@ -75,10 +76,12 @@ export default async function BatchDetailPage({
     getTreatments({ organizationId, batchId: id, limit: 10 }),
     canSeeProfitability
       ? getBatchProfitability({ organizationId, batchId: id })
-      : Promise.resolve<ActionResult<BatchProfitability>>({
-          success: false,
-          error: getFeatureUpgradeMessage("PROFITABILITY"),
-        }),
+      : Promise.resolve<ActionResult<BatchProfitability>>(
+          actionFailure(getFeatureUpgradeMessage("PROFITABILITY"), {
+            code: "PLAN_UPGRADE_REQUIRED",
+            status: 403,
+          }),
+        ),
     listStoredBatchAnalyses(organizationId, id, 5),
   ])
 

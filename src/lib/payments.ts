@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual, randomUUID } from "node:crypto"
 import prisma from "@/src/lib/prisma"
+import { getServerEnv } from "@/src/lib/env"
 import {
   type Prisma,
   PaymentMethod,
@@ -156,9 +157,10 @@ function verifyWaveSignature(
 }
 
 function getAppBaseUrl(): string {
+  const env = getServerEnv()
   return (
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.AUTH_URL ??
+    env.NEXT_PUBLIC_APP_URL ??
+    env.AUTH_URL ??
     "http://localhost:3000"
   ).replace(/\/$/, "")
 }
@@ -166,7 +168,7 @@ function getAppBaseUrl(): string {
 export async function createWaveCheckoutSessionForTransaction(
   transactionId: string,
 ) {
-  const apiKey = process.env.WAVE_API_KEY
+  const apiKey = getServerEnv().WAVE_API_KEY
   if (!apiKey) {
     throw new Error("WAVE_NOT_CONFIGURED")
   }

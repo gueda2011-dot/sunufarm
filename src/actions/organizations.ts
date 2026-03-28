@@ -36,6 +36,7 @@ import { Prisma } from "@/src/generated/prisma/client"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -102,6 +103,12 @@ const updateUserModulePermissionsSchema = z.object({
   modulePermissions: z.array(appModuleSchema).nullable(),
 })
 
+const updateUserNotificationPreferenceSchema = z.object({
+  organizationId: requiredIdSchema,
+  targetUserId: requiredIdSchema,
+  emailNotificationsEnabled: z.boolean(),
+})
+
 const removeUserFromOrganizationSchema = z.object({
   organizationId: requiredIdSchema,
   targetUserId:   requiredIdSchema,
@@ -115,6 +122,7 @@ export interface OrgMember {
   id:              string
   userId:          string
   role:            UserRole
+  emailNotificationsEnabled: boolean
   modulePermissions: unknown
   farmPermissions: unknown
   createdAt:       Date
@@ -145,6 +153,7 @@ const memberSelect = {
   id:              true,
   userId:          true,
   role:            true,
+  emailNotificationsEnabled: true,
   modulePermissions: true,
   farmPermissions: true,
   createdAt:       true,
@@ -186,6 +195,8 @@ export async function getOrganizationMembers(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "TEAM")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const members = await prisma.userOrganization.findMany({
       where: {
@@ -232,6 +243,8 @@ export async function addUserToOrganization(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "TEAM")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
       return { success: false, error: "Permission refusée" }
@@ -348,6 +361,8 @@ export async function updateUserRole(
 
   const membershipResult = await requireMembership(actorId, organizationId)
   if (!membershipResult.success) return membershipResult
+  const moduleAccessResult = requireModuleAccess(membershipResult.data, "TEAM")
+  if (!moduleAccessResult.success) return moduleAccessResult
 
   if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusée" }
@@ -431,6 +446,8 @@ export async function updateUserModulePermissions(
 
   const membershipResult = await requireMembership(actorId, organizationId)
   if (!membershipResult.success) return membershipResult
+  const moduleAccessResult = requireModuleAccess(membershipResult.data, "TEAM")
+  if (!moduleAccessResult.success) return moduleAccessResult
 
   if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusee" }
@@ -486,6 +503,66 @@ export async function updateUserModulePermissions(
   return { success: true, data: updated }
 }
 
+export async function updateUserNotificationPreference(
+  data: unknown,
+): Promise<ActionResult<OrgMember>> {
+  const sessionResult = await requireSession()
+  if (!sessionResult.success) return sessionResult
+
+  const parsed = updateUserNotificationPreferenceSchema.safeParse(data)
+  if (!parsed.success) {
+    return { success: false, error: "Donnees invalides" }
+  }
+
+  const { organizationId, targetUserId, emailNotificationsEnabled } = parsed.data
+  const actorId = sessionResult.data.user.id
+
+  const membershipResult = await requireMembership(actorId, organizationId)
+  if (!membershipResult.success) return membershipResult
+  const moduleAccessResult = requireModuleAccess(membershipResult.data, "TEAM")
+  if (!moduleAccessResult.success) return moduleAccessResult
+
+  if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
+    return { success: false, error: "Permission refusee" }
+  }
+
+  const targetMembership = await prisma.userOrganization.findUnique({
+    where: { userId_organizationId: { userId: targetUserId, organizationId } },
+    select: {
+      id: true,
+      emailNotificationsEnabled: true,
+    },
+  })
+
+  if (!targetMembership) {
+    return { success: false, error: "Membre introuvable dans cette organisation" }
+  }
+
+  const updated = await prisma.userOrganization.update({
+    where: { userId_organizationId: { userId: targetUserId, organizationId } },
+    data: {
+      emailNotificationsEnabled,
+    },
+    select: memberSelect,
+  })
+
+  await createAuditLog({
+    userId: actorId,
+    organizationId,
+    action: AuditAction.UPDATE,
+    resourceType: "ORGANIZATION_MEMBER_NOTIFICATION_PREFERENCE",
+    resourceId: updated.id,
+    before: {
+      emailNotificationsEnabled: targetMembership.emailNotificationsEnabled,
+    },
+    after: {
+      emailNotificationsEnabled,
+    },
+  })
+
+  return { success: true, data: updated }
+}
+
 // ---------------------------------------------------------------------------
 // 4. removeUserFromOrganization
 // ---------------------------------------------------------------------------
@@ -518,6 +595,8 @@ export async function removeUserFromOrganization(
 
   const membershipResult = await requireMembership(actorId, organizationId)
   if (!membershipResult.success) return membershipResult
+  const moduleAccessResult = requireModuleAccess(membershipResult.data, "TEAM")
+  if (!moduleAccessResult.success) return moduleAccessResult
 
   if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusée" }

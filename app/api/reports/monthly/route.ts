@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server"
 import { renderToBuffer } from "@react-pdf/renderer"
 import React from "react"
 import { auth } from "@/src/auth"
 import { MonthlyReportDocument } from "@/src/components/pdf/MonthlyReportDocument"
 import { getSunuFarmLogoDataUri } from "@/src/lib/branding.server"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { apiError, parseBoundedIntegerParam } from "@/src/lib/api-response"
+import { hasModuleAccess } from "@/src/lib/permissions"
 import {
   buildMonthlyReportCsv,
   buildMonthlyReportWorkbook,
@@ -21,27 +22,52 @@ export const dynamic = "force-dynamic"
 export async function GET(request: Request) {
   const session = await auth()
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Non authentifie" }, { status: 401 })
+    return apiError("Non authentifie", { status: 401, code: "UNAUTHENTICATED" })
   }
 
   const { activeMembership } = await getCurrentOrganizationContext(session.user.id)
   if (!activeMembership) {
-    return NextResponse.json({ error: "Organisation introuvable" }, { status: 404 })
+    return apiError("Organisation introuvable", { status: 404, code: "ORG_NOT_FOUND" })
+  }
+
+  if (!hasModuleAccess(activeMembership.role, activeMembership.modulePermissions, "REPORTS")) {
+    return apiError("Acces refuse au module REPORTS.", {
+      status: 403,
+      code: "MODULE_ACCESS_DENIED",
+    })
   }
 
   const subscription = await getOrganizationSubscription(activeMembership.organizationId)
   if (!hasPlanFeature(subscription.plan, "REPORTS")) {
-    return NextResponse.json(
-      { error: getFeatureUpgradeMessage("REPORTS") },
-      { status: 403 },
-    )
+    return apiError(getFeatureUpgradeMessage("REPORTS"), {
+      status: 403,
+      code: "PLAN_UPGRADE_REQUIRED",
+    })
   }
 
   const { searchParams } = new URL(request.url)
   const now = new Date()
-  const year = Number(searchParams.get("year") ?? now.getFullYear())
-  const month = Number(searchParams.get("month") ?? now.getMonth() + 1)
+  const year = parseBoundedIntegerParam({
+    value: searchParams.get("year"),
+    fallback: now.getFullYear(),
+    minimum: 2020,
+    maximum: now.getFullYear() + 1,
+  })
+  const month = parseBoundedIntegerParam({
+    value: searchParams.get("month"),
+    fallback: now.getMonth() + 1,
+    minimum: 1,
+    maximum: 12,
+  })
   const format = (searchParams.get("format") ?? "xlsx").toLowerCase()
+  const allowedFormats = new Set(["xlsx", "pdf", "csv"])
+
+  if (year === null || month === null || !allowedFormats.has(format)) {
+    return apiError("Parametres de rapport invalides.", {
+      status: 400,
+      code: "INVALID_REPORT_PARAMS",
+    })
+  }
 
   const report = await getMonthlyReportData({
     organizationId: activeMembership.organizationId,
@@ -59,7 +85,7 @@ export async function GET(request: Request) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const buffer = await renderToBuffer(doc as any)
 
-    return new NextResponse(new Uint8Array(buffer), {
+    return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
@@ -70,7 +96,7 @@ export async function GET(request: Request) {
   }
 
   if (format === "csv") {
-    return new NextResponse(buildMonthlyReportCsv(report), {
+    return new Response(buildMonthlyReportCsv(report), {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -83,7 +109,7 @@ export async function GET(request: Request) {
   const workbook = await buildMonthlyReportWorkbook(report)
   const buffer = await workbook.xlsx.writeBuffer()
 
-  return new NextResponse(buffer, {
+  return new Response(buffer, {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

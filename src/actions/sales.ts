@@ -57,7 +57,6 @@ import { SaleProductType } from "@/src/generated/prisma/client"
 
 /** Unités de vente supportées au MVP */
 const SALE_UNITS = ["KG", "PIECE", "PLATEAU", "CAISSE"] as const
-type SaleUnit = typeof SALE_UNITS[number]
 
 // ---------------------------------------------------------------------------
 // Schémas Zod

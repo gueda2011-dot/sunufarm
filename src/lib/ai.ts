@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
+import { getServerEnv } from "@/src/lib/env"
 import type { OrganizationSubscriptionSummary } from "@/src/lib/subscriptions.server"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 
@@ -538,7 +539,7 @@ export async function generateBatchAnalysisWithOpenAI(
   input: BatchAnalysisInput,
   policy: AIPolicy,
 ): Promise<AIBatchAnalysisResult> {
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = getServerEnv().OPENAI_API_KEY
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY manquant")
   }

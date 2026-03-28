@@ -21,6 +21,8 @@ const MONTHS = [
   "Decembre",
 ]
 
+const MONTHLY_REPORT_DETAIL_LIMIT = 500
+
 export interface MonthlyBatchRow {
   id: string
   number: string
@@ -93,6 +95,10 @@ export interface MonthlyReportData {
     expenses: MetricComparison
     mortality: MetricComparison
   }
+  detailRowLimit: number
+  expensesTruncated: boolean
+  salesTruncated: boolean
+  purchasesTruncated: boolean
   expenses: MonthlyExpenseRow[]
   sales: MonthlySaleRow[]
   purchases: MonthlyPurchaseRow[]
@@ -278,6 +284,7 @@ export async function getMonthlyReportData(args: {
         date: { gte: fromDate, lte: toDate },
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      take: MONTHLY_REPORT_DETAIL_LIMIT,
       select: {
         date: true,
         description: true,
@@ -293,6 +300,7 @@ export async function getMonthlyReportData(args: {
         saleDate: { gte: fromDate, lte: toDate },
       },
       orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
+      take: MONTHLY_REPORT_DETAIL_LIMIT,
       select: {
         saleDate: true,
         productType: true,
@@ -308,6 +316,7 @@ export async function getMonthlyReportData(args: {
         purchaseDate: { gte: fromDate, lte: toDate },
       },
       orderBy: [{ purchaseDate: "desc" }, { createdAt: "desc" }],
+      take: MONTHLY_REPORT_DETAIL_LIMIT,
       select: {
         purchaseDate: true,
         reference: true,
@@ -385,6 +394,10 @@ export async function getMonthlyReportData(args: {
       expenses: buildMetricComparison(totalExpenses, previousExpensesAgg._sum.amountFcfa ?? 0),
       mortality: buildMetricComparison(totalMortality, previousMortalityAgg._sum.mortality ?? 0),
     },
+    detailRowLimit: MONTHLY_REPORT_DETAIL_LIMIT,
+    expensesTruncated: expenses.length < expensesAgg._count.id,
+    salesTruncated: sales.length < salesAgg._count.id,
+    purchasesTruncated: purchases.length < purchasesAgg._count.id,
     expenses: expenses.map((expense) => ({
       date: expense.date,
       category: expense.category?.name ?? "Non classe",
@@ -499,6 +512,20 @@ export async function buildMonthlyReportWorkbook(report: MonthlyReportData) {
     report.comparison.mortality.current,
     `${report.comparison.mortality.deltaPercent?.toFixed(1) ?? "n/a"}%`,
   )
+  if (report.expensesTruncated || report.salesTruncated || report.purchasesTruncated) {
+    summarySheet.addRow([])
+    styleWorksheetTableHeader(summarySheet.addRow(["Export detaille", "Statut", "Note"]))
+    addKpiRow(summarySheet, "Lignes max par onglet", report.detailRowLimit, "Borne de performance")
+    if (report.expensesTruncated) {
+      addKpiRow(summarySheet, "Depenses", "Partiel", "Le detail a ete borne pour ce mois")
+    }
+    if (report.salesTruncated) {
+      addKpiRow(summarySheet, "Ventes", "Partiel", "Le detail a ete borne pour ce mois")
+    }
+    if (report.purchasesTruncated) {
+      addKpiRow(summarySheet, "Achats", "Partiel", "Le detail a ete borne pour ce mois")
+    }
+  }
   autosizeColumns(summarySheet)
 
   const batchesSheet = workbook.addWorksheet("Lots", {

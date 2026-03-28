@@ -19,6 +19,7 @@ import prisma          from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 }                      from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -107,6 +108,8 @@ export async function getPurchases(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "PURCHASES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const purchases = await prisma.purchase.findMany({
       where:   { organizationId },
@@ -170,6 +173,8 @@ export async function createPurchase(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "PURCHASES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
       return { success: false, error: "Permission refusée" }
@@ -250,6 +255,8 @@ export async function deletePurchase(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "PURCHASES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
       return { success: false, error: "Permission refusée" }
@@ -303,6 +310,8 @@ export async function getSuppliers(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "PURCHASES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const suppliers = await prisma.supplier.findMany({
       where:   { organizationId },

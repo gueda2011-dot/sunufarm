@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server"
 import { createSubscriptionPaymentRequest } from "@/src/actions/subscriptions"
+import { apiError, apiFromActionResult } from "@/src/lib/api-response"
 import { getRequestAuditContext, isTrustedMutationOrigin } from "@/src/lib/request-security"
 
 export async function POST(request: Request) {
   if (!isTrustedMutationOrigin(request)) {
-    return NextResponse.json(
-      { success: false, error: "Origine de requete non autorisee." },
-      { status: 403 },
-    )
+    return apiError("Origine de requete non autorisee.", {
+      status: 403,
+      code: "UNTRUSTED_ORIGIN",
+    })
   }
 
   const body = await request.json()
@@ -16,12 +16,5 @@ export async function POST(request: Request) {
     getRequestAuditContext(request.headers),
   )
 
-  if (!result.success) {
-    return NextResponse.json(
-      { success: false, error: result.error },
-      { status: 400 },
-    )
-  }
-
-  return NextResponse.json(result)
+  return apiFromActionResult(result)
 }

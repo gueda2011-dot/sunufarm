@@ -22,6 +22,7 @@ import prisma from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -55,6 +56,7 @@ const listSchema = z.object({
   organizationId: requiredIdSchema,
   search:         z.string().optional(),
   type:           z.string().optional(),
+  limit:          z.number().int().min(1).max(200).default(100),
 })
 
 const createCustomerSchema = z.object({
@@ -99,13 +101,15 @@ export async function getCustomers(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, search, type } = parsed.data
+    const { organizationId, search, type, limit } = parsed.data
 
     const membershipResult = await requireMembership(
       sessionResult.data.user.id,
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const customers = await prisma.customer.findMany({
       where: {
@@ -119,20 +123,54 @@ export async function getCustomers(
         } : {}),
         ...(type ? { type } : {}),
       },
-      include: {
-        sales: {
+      select: {
+        id:        true,
+        name:      true,
+        phone:     true,
+        email:     true,
+        address:   true,
+        type:      true,
+        notes:     true,
+        createdAt: true,
+        _count: {
           select: {
-            totalFcfa: true,
-            paidFcfa:  true,
+            sales: true,
           },
         },
       },
       orderBy: { name: "asc" },
+      take:    limit,
     })
 
+    const salesByCustomerId = customers.length > 0
+      ? await prisma.sale.groupBy({
+          by: ["customerId"],
+          where: {
+            organizationId,
+            customerId: { in: customers.map((customer) => customer.id) },
+          },
+          _sum: {
+            totalFcfa: true,
+            paidFcfa: true,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      : []
+
+    const salesMap = new Map(
+      salesByCustomerId.flatMap((entry) => (
+        entry.customerId
+          ? [[entry.customerId, entry]]
+          : []
+      )),
+    )
+
     const result: CustomerSummary[] = customers.map((c) => {
-      const totalFcfa   = c.sales.reduce((s, sale) => s + sale.totalFcfa, 0)
-      const paidFcfa    = c.sales.reduce((s, sale) => s + sale.paidFcfa,  0)
+      const salesAggregate = salesMap.get(c.id)
+      const totalFcfa = salesAggregate?._sum.totalFcfa ?? 0
+      const paidFcfa = salesAggregate?._sum.paidFcfa ?? 0
       return {
         id:          c.id,
         name:        c.name,
@@ -142,7 +180,7 @@ export async function getCustomers(
         type:        c.type,
         notes:       c.notes,
         createdAt:   c.createdAt,
-        salesCount:  c.sales.length,
+        salesCount:  salesAggregate?._count._all ?? c._count.sales,
         totalFcfa,
         paidFcfa,
         balanceFcfa: totalFcfa - paidFcfa,
@@ -178,6 +216,8 @@ export async function createCustomer(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
       return { success: false, error: "Permission refusée" }
@@ -234,6 +274,8 @@ export async function updateCustomer(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
       return { success: false, error: "Permission refusée" }
@@ -298,6 +340,8 @@ export async function deleteCustomer(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "CUSTOMERS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
       return { success: false, error: "Permission refusée" }

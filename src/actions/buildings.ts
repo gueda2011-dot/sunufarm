@@ -43,6 +43,7 @@ import { BuildingType, BatchStatus } from "@/src/generated/prisma/client"
 const getBuildingsSchema = z.object({
   organizationId: requiredIdSchema,
   farmId:         requiredIdSchema,
+  limit:          z.number().int().min(1).max(100).default(50),
 })
 
 const getBuildingSchema = z.object({
@@ -180,7 +181,7 @@ export async function getBuildings(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, farmId } = parsed.data
+      const { organizationId, farmId, limit } = parsed.data
 
     const membershipResult = await requireMembership(
       sessionResult.data.user.id,
@@ -200,11 +201,12 @@ export async function getBuildings(
       return { success: false, error: "Ferme introuvable" }
     }
 
-    const buildings = await prisma.building.findMany({
-      where:   { farmId, organizationId, deletedAt: null },
-      select:  buildingSummarySelect,
-      orderBy: { name: "asc" },
-    })
+      const buildings = await prisma.building.findMany({
+        where:   { farmId, organizationId, deletedAt: null },
+        select:  buildingSummarySelect,
+        orderBy: { name: "asc" },
+        take:    limit,
+      })
 
     return { success: true, data: buildings }
   } catch {

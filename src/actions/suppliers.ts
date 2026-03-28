@@ -5,6 +5,7 @@ import prisma from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -31,6 +32,7 @@ const listSchema = z.object({
   organizationId: requiredIdSchema,
   search: z.string().optional(),
   type: z.string().optional(),
+  limit: z.number().int().min(1).max(200).default(100),
 })
 
 const createSupplierSchema = z.object({
@@ -60,13 +62,15 @@ export async function getSuppliers(
       return { success: false, error: "Donnees invalides" }
     }
 
-    const { organizationId, search, type } = parsed.data
+    const { organizationId, search, type, limit } = parsed.data
 
     const membershipResult = await requireMembership(
       sessionResult.data.user.id,
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "SUPPLIERS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const suppliers = await prisma.supplier.findMany({
       where: {
@@ -80,13 +84,15 @@ export async function getSuppliers(
         } : {}),
         ...(type ? { type } : {}),
       },
-      include: {
-        purchases: {
-          select: {
-            totalFcfa: true,
-            paidFcfa: true,
-          },
-        },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        address: true,
+        type: true,
+        notes: true,
+        createdAt: true,
         _count: {
           select: {
             purchases: true,
@@ -95,13 +101,40 @@ export async function getSuppliers(
         },
       },
       orderBy: { name: "asc" },
+      take: limit,
     })
+
+    const purchasesBySupplierId = suppliers.length > 0
+      ? await prisma.purchase.groupBy({
+          by: ["supplierId"],
+          where: {
+            organizationId,
+            supplierId: { in: suppliers.map((supplier) => supplier.id) },
+          },
+          _sum: {
+            totalFcfa: true,
+            paidFcfa: true,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      : []
+
+    const purchasesMap = new Map(
+      purchasesBySupplierId.flatMap((entry) => (
+        entry.supplierId
+          ? [[entry.supplierId, entry]]
+          : []
+      )),
+    )
 
     return {
       success: true,
       data: suppliers.map((supplier) => {
-        const totalPurchasedFcfa = supplier.purchases.reduce((sum, purchase) => sum + purchase.totalFcfa, 0)
-        const paidFcfa = supplier.purchases.reduce((sum, purchase) => sum + purchase.paidFcfa, 0)
+        const purchaseAggregate = purchasesMap.get(supplier.id)
+        const totalPurchasedFcfa = purchaseAggregate?._sum.totalFcfa ?? 0
+        const paidFcfa = purchaseAggregate?._sum.paidFcfa ?? 0
 
         return {
           id: supplier.id,
@@ -112,7 +145,7 @@ export async function getSuppliers(
           type: supplier.type,
           notes: supplier.notes,
           createdAt: supplier.createdAt,
-          purchasesCount: supplier._count.purchases,
+          purchasesCount: purchaseAggregate?._count._all ?? supplier._count.purchases,
           batchesCount: supplier._count.batches,
           totalPurchasedFcfa,
           paidFcfa,
@@ -144,6 +177,8 @@ export async function createSupplier(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "SUPPLIERS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
       return { success: false, error: "Permission refusee" }
@@ -196,6 +231,8 @@ export async function deleteSupplier(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "SUPPLIERS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
       return { success: false, error: "Permission refusee" }

@@ -136,6 +136,13 @@ const notificationSelect = {
   createdAt:      true,
 } as const
 
+interface NotificationCandidate {
+  title: string
+  message: string
+  resourceId: string
+  metadata?: Record<string, unknown>
+}
+
 // ---------------------------------------------------------------------------
 // Helpers internes
 // ---------------------------------------------------------------------------
@@ -158,58 +165,65 @@ function calendarDayStart(date: Date): Date {
  *
  * Retourne true si la notification a été créée, false si déjà existante.
  */
-async function createNotificationIfAbsent(params: {
+async function createNotificationsIfAbsent(params: {
   organizationId: string
-  userId:         string
+  userIds:        string[]
   type:           NotificationType
-  title:          string
-  message:        string
-  resourceType?:  string
-  resourceId?:    string
-  metadata?:      Record<string, unknown>
-}): Promise<boolean> {
-  const todayStart = calendarDayStart(new Date())
+  resourceType:   string
+  candidates:     NotificationCandidate[]
+}): Promise<number> {
+  if (params.userIds.length === 0 || params.candidates.length === 0) {
+    return 0
+  }
 
-  const existing = await prisma.notification.findFirst({
+  const todayStart = calendarDayStart(new Date())
+  const resourceIds = [...new Set(params.candidates.map((candidate) => candidate.resourceId))]
+
+  const existing = await prisma.notification.findMany({
     where: {
-      userId:         params.userId,
       organizationId: params.organizationId,
+      userId:         { in: params.userIds },
       type:           params.type,
-      resourceType:   params.resourceType ?? null,
-      resourceId:     params.resourceId   ?? null,
+      resourceType:   params.resourceType,
+      resourceId:     { in: resourceIds },
       status:         { in: [NotificationStatus.NON_LU, NotificationStatus.LU] },
       createdAt:      { gte: todayStart },
     },
-    select: { id: true },
+    select: { userId: true, resourceId: true },
   })
 
-  if (existing) return false
+  const existingKeys = new Set(
+    existing.map((notification) => `${notification.userId}:${notification.resourceId ?? ""}`),
+  )
 
-  await prisma.notification.create({
-    data: {
-      organizationId: params.organizationId,
-      userId:         params.userId,
-      type:           params.type,
-      title:          params.title,
-      message:        params.message,
-      resourceType:   params.resourceType ?? null,
-      resourceId:     params.resourceId   ?? null,
-      ...(params.metadata !== undefined ? { metadata: params.metadata as Prisma.InputJsonValue } : {}),
-    },
+  const toCreate = params.userIds.flatMap((userId) => (
+    params.candidates
+      .filter((candidate) => !existingKeys.has(`${userId}:${candidate.resourceId}`))
+      .map((candidate) => ({
+        organizationId: params.organizationId,
+        userId,
+        type: params.type,
+        title: candidate.title,
+        message: candidate.message,
+        resourceType: params.resourceType,
+        resourceId: candidate.resourceId,
+        ...(candidate.metadata !== undefined
+          ? { metadata: candidate.metadata as Prisma.InputJsonValue }
+          : {}),
+      }))
+  ))
+
+  if (toCreate.length === 0) {
+    return 0
+  }
+
+  const result = await prisma.notification.createMany({
+    data: toCreate,
   })
 
-  return true
+  return result.count
 }
 
-// ---------------------------------------------------------------------------
-// Générateurs de signaux (helpers privés)
-// ---------------------------------------------------------------------------
-
-/**
- * Signal 1 — Stock aliment sous seuil.
- * Alerte si quantityKg <= alertThresholdKg (seuil > 0 requis pour éviter le bruit).
- * Prisma ne supporte pas la comparaison field-to-field : filtrage en mémoire.
- */
 async function checkFeedStockAlerts(
   organizationId: string,
   userIds:        string[],
@@ -227,30 +241,24 @@ async function checkFeedStockAlerts(
 
   const belowThreshold = stocks.filter((s) => s.quantityKg <= s.alertThresholdKg)
 
-  let created = 0
-  for (const stock of belowThreshold) {
-    for (const userId of userIds) {
-      const wasCreated = await createNotificationIfAbsent({
-        organizationId,
-        userId,
-        type:         NotificationType.STOCK_ALIMENT_CRITIQUE,
-        title:        "Stock aliment critique",
-        message:
-          `Le stock "${stock.name}" (${stock.feedType.name}) est à ` +
-          `${stock.quantityKg.toFixed(1)} kg, sous le seuil d'alerte ` +
-          `de ${stock.alertThresholdKg.toFixed(1)} kg.`,
-        resourceType: "FEED_STOCK",
-        resourceId:   stock.id,
-        metadata:     {
-          quantityKg:       stock.quantityKg,
-          alertThresholdKg: stock.alertThresholdKg,
-        },
-      })
-      if (wasCreated) created++
-    }
-  }
-
-  return created
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.STOCK_ALIMENT_CRITIQUE,
+    resourceType: "FEED_STOCK",
+    candidates: belowThreshold.map((stock) => ({
+      title: "Stock aliment critique",
+      message:
+        `Le stock "${stock.name}" (${stock.feedType.name}) est ? ` +
+        `${stock.quantityKg.toFixed(1)} kg, sous le seuil d'alerte ` +
+        `de ${stock.alertThresholdKg.toFixed(1)} kg.`,
+      resourceId: stock.id,
+      metadata: {
+        quantityKg: stock.quantityKg,
+        alertThresholdKg: stock.alertThresholdKg,
+      },
+    })),
+  })
 }
 
 /**
@@ -275,30 +283,24 @@ async function checkMedicineStockAlerts(
 
   const belowThreshold = stocks.filter((s) => s.quantityOnHand <= s.alertThreshold)
 
-  let created = 0
-  for (const stock of belowThreshold) {
-    for (const userId of userIds) {
-      const wasCreated = await createNotificationIfAbsent({
-        organizationId,
-        userId,
-        type:         NotificationType.AUTRE,
-        title:        "Stock médicament bas",
-        message:
-          `Le stock de "${stock.name}" est à ${stock.quantityOnHand} ${stock.unit}, ` +
-          `sous le seuil d'alerte de ${stock.alertThreshold} ${stock.unit}.`,
-        resourceType: "MEDICINE_STOCK",
-        resourceId:   stock.id,
-        metadata:     {
-          quantityOnHand: stock.quantityOnHand,
-          alertThreshold: stock.alertThreshold,
-          unit:           stock.unit,
-        },
-      })
-      if (wasCreated) created++
-    }
-  }
-
-  return created
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.AUTRE,
+    resourceType: "MEDICINE_STOCK",
+    candidates: belowThreshold.map((stock) => ({
+      title: "Stock m?dicament bas",
+      message:
+        `Le stock de "${stock.name}" est ? ${stock.quantityOnHand} ${stock.unit}, ` +
+        `sous le seuil d'alerte de ${stock.alertThreshold} ${stock.unit}.`,
+      resourceId: stock.id,
+      metadata: {
+        quantityOnHand: stock.quantityOnHand,
+        alertThreshold: stock.alertThreshold,
+        unit: stock.unit,
+      },
+    })),
+  })
 }
 
 /**
@@ -330,37 +332,35 @@ async function checkMedicineExpiryAlerts(
     },
   })
 
-  let created = 0
-  for (const stock of stocks) {
-    if (!stock.expiryDate) continue
+  const candidates = stocks.flatMap((stock) => {
+    if (!stock.expiryDate) return []
 
     const daysLeft = Math.ceil(
       (stock.expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
     )
 
-    for (const userId of userIds) {
-      const wasCreated = await createNotificationIfAbsent({
-        organizationId,
-        userId,
-        type:         NotificationType.AUTRE,
-        title:        "Médicament proche de la péremption",
-        message:
-          `"${stock.name}" (${stock.quantityOnHand} ${stock.unit}) expire dans ` +
-          `${daysLeft} jour${daysLeft > 1 ? "s" : ""}.`,
-        resourceType: "MEDICINE_STOCK_EXPIRY",
-        resourceId:   stock.id,
-        metadata:     {
-          daysLeft,
-          expiryDate:     stock.expiryDate.toISOString(),
-          quantityOnHand: stock.quantityOnHand,
-          unit:           stock.unit,
-        },
-      })
-      if (wasCreated) created++
-    }
-  }
+    return [{
+      title: "M?dicament proche de la p?remption",
+      message:
+        `"${stock.name}" (${stock.quantityOnHand} ${stock.unit}) expire dans ` +
+        `${daysLeft} jour${daysLeft > 1 ? "s" : ""}.`,
+      resourceId: stock.id,
+      metadata: {
+        daysLeft,
+        expiryDate: stock.expiryDate.toISOString(),
+        quantityOnHand: stock.quantityOnHand,
+        unit: stock.unit,
+      },
+    }]
+  })
 
-  return created
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.AUTRE,
+    resourceType: "MEDICINE_STOCK_EXPIRY",
+    candidates,
+  })
 }
 
 /**
@@ -378,10 +378,8 @@ async function checkMissedDailyRecords(
 ): Promise<number> {
   const now        = new Date()
   const todayStart = calendarDayStart(now)
-  // yesterday = toute la journée d'hier = [hier 00:00 UTC, aujourd'hui 00:00 UTC[
   const yesterday  = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
 
-  // Lots actifs existant avant aujourd'hui (entryDate < todayStart)
   const activeBatches = await prisma.batch.findMany({
     where: {
       organizationId,
@@ -394,7 +392,6 @@ async function checkMissedDailyRecords(
 
   if (activeBatches.length === 0) return 0
 
-  // Lots ayant une saisie pour hier
   const recordedYesterday = await prisma.dailyRecord.findMany({
     where: {
       batchId: { in: activeBatches.map((b) => b.id) },
@@ -413,27 +410,21 @@ async function checkMissedDailyRecords(
     month:   "long",
   })
 
-  let created = 0
-  for (const batch of missingBatches) {
-    for (const userId of userIds) {
-      const wasCreated = await createNotificationIfAbsent({
-        organizationId,
-        userId,
-        type:         NotificationType.AUTRE,
-        title:        "Saisie journalière manquante",
-        message:      `Aucune saisie enregistrée pour le lot ${batch.number} le ${yesterdayLabel}.`,
-        resourceType: "DAILY_RECORD_MISSING",
-        resourceId:   batch.id,
-        metadata:     {
-          batchNumber: batch.number,
-          missingDate: yesterday.toISOString(),
-        },
-      })
-      if (wasCreated) created++
-    }
-  }
-
-  return created
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.AUTRE,
+    resourceType: "DAILY_RECORD_MISSING",
+    candidates: missingBatches.map((batch) => ({
+      title: "Saisie journali?re manquante",
+      message: `Aucune saisie enregistr?e pour le lot ${batch.number} le ${yesterdayLabel}.`,
+      resourceId: batch.id,
+      metadata: {
+        batchNumber: batch.number,
+        missingDate: yesterday.toISOString(),
+      },
+    })),
+  })
 }
 
 /**
@@ -456,7 +447,6 @@ async function checkMissingMortalityReasons(
   const yesterday    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
   const threeDaysAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 3))
 
-  // DailyRecords avec mortalité > 0 et aucun motif renseigné dans la fenêtre
   const records = await prisma.dailyRecord.findMany({
     where: {
       organizationId,
@@ -474,7 +464,6 @@ async function checkMissingMortalityReasons(
     },
   })
 
-  // Compter les jours sans motif par lot dans la fenêtre
   const batchCount = new Map<string, { count: number; number: string }>()
   for (const record of records) {
     const entry = batchCount.get(record.batchId)
@@ -485,34 +474,28 @@ async function checkMissingMortalityReasons(
     }
   }
 
-  // La fenêtre est de 3 jours — count === 3 signifie 3 jours consécutifs sans motif
   const alertBatches = Array.from(batchCount.entries())
     .filter(([, data]) => data.count >= 3)
     .map(([batchId, data]) => ({ batchId, ...data }))
 
-  let created = 0
-  for (const batch of alertBatches) {
-    for (const userId of userIds) {
-      const wasCreated = await createNotificationIfAbsent({
-        organizationId,
-        userId,
-        type:         NotificationType.MOTIF_MORTALITE_MANQUANT,
-        title:        "Motif de mortalité non renseigné",
-        message:
-          `Le lot ${batch.number} a enregistré des mortalités sur ` +
-          `3 jours consécutifs sans motif renseigné.`,
-        resourceType: "BATCH",
-        resourceId:   batch.batchId,
-        metadata:     { batchNumber: batch.number, daysCount: batch.count },
-      })
-      if (wasCreated) created++
-    }
-  }
-
-  return created
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.MOTIF_MORTALITE_MANQUANT,
+    resourceType: "BATCH",
+    candidates: alertBatches.map((batch) => ({
+      title: "Motif de mortalit? non renseign?",
+      message:
+        `Le lot ${batch.number} a enregistr? des mortalit?s sur ` +
+        `3 jours cons?cutifs sans motif renseign?.`,
+      resourceId: batch.batchId,
+      metadata: { batchNumber: batch.number, daysCount: batch.count },
+    })),
+  })
 }
 
 // ---------------------------------------------------------------------------
+// 1. getNotifications// ---------------------------------------------------------------------------
 // 1. getNotifications
 // ---------------------------------------------------------------------------
 
@@ -781,60 +764,67 @@ export async function generateNotifications(
     const membershipResult = await requireMembership(userId, organizationId)
     if (!membershipResult.success) return membershipResult
 
-    // Cibler les membres OWNER et MANAGER actifs (non soft-deleted)
-    const targetMembers = await prisma.userOrganization.findMany({
-      where: {
-        organizationId,
-        role:    { in: [UserRole.OWNER, UserRole.MANAGER] },
-        user:    { deletedAt: null },
-      },
-      select: { userId: true },
-    })
-
-    if (targetMembers.length === 0) {
-      return { success: true, data: { created: 0 } }
-    }
-
-    const userIds = targetMembers.map((m) => m.userId)
-    let totalCreated = 0
-
-    // Signal 1 — Stock aliment sous seuil (Ajustement 2 : try/catch indépendant)
-    try {
-      totalCreated += await checkFeedStockAlerts(organizationId, userIds)
-    } catch {
-      // Erreur silencieuse — ne bloque pas les autres signaux
-    }
-
-    // Signal 2 — Stock médicament sous seuil
-    try {
-      totalCreated += await checkMedicineStockAlerts(organizationId, userIds)
-    } catch {
-      // Erreur silencieuse
-    }
-
-    // Signal 3 — Médicament proche de la péremption
-    try {
-      totalCreated += await checkMedicineExpiryAlerts(organizationId, userIds)
-    } catch {
-      // Erreur silencieuse
-    }
-
-    // Signal 4 — Saisie journalière manquante (lots existant avant aujourd'hui)
-    try {
-      totalCreated += await checkMissedDailyRecords(organizationId, userIds)
-    } catch {
-      // Erreur silencieuse
-    }
-
-    // Signal 5 — Motif de mortalité manquant (3 jours consécutifs)
-    try {
-      totalCreated += await checkMissingMortalityReasons(organizationId, userIds)
-    } catch {
-      // Erreur silencieuse
-    }
-
-    return { success: true, data: { created: totalCreated } }
+    const result = await generateNotificationsForOrganization(organizationId)
+    return { success: true, data: { created: result.created } }
   } catch {
     return { success: false, error: "Impossible de générer les notifications" }
   }
+}
+
+export async function generateNotificationsForOrganization(
+  organizationId: string,
+): Promise<{ created: number; targetUserIds: string[] }> {
+  // Cibler les membres OWNER et MANAGER actifs (non soft-deleted)
+  const targetMembers = await prisma.userOrganization.findMany({
+    where: {
+      organizationId,
+      role:    { in: [UserRole.OWNER, UserRole.MANAGER] },
+      user:    { deletedAt: null },
+    },
+    select: { userId: true },
+  })
+
+  if (targetMembers.length === 0) {
+    return { created: 0, targetUserIds: [] }
+  }
+
+  const userIds = targetMembers.map((m) => m.userId)
+  let totalCreated = 0
+
+  // Signal 1 — Stock aliment sous seuil (Ajustement 2 : try/catch indépendant)
+  try {
+    totalCreated += await checkFeedStockAlerts(organizationId, userIds)
+  } catch {
+    // Erreur silencieuse — ne bloque pas les autres signaux
+  }
+
+  // Signal 2 — Stock médicament sous seuil
+  try {
+    totalCreated += await checkMedicineStockAlerts(organizationId, userIds)
+  } catch {
+    // Erreur silencieuse
+  }
+
+  // Signal 3 — Médicament proche de la péremption
+  try {
+    totalCreated += await checkMedicineExpiryAlerts(organizationId, userIds)
+  } catch {
+    // Erreur silencieuse
+  }
+
+  // Signal 4 — Saisie journalière manquante (lots existant avant aujourd'hui)
+  try {
+    totalCreated += await checkMissedDailyRecords(organizationId, userIds)
+  } catch {
+    // Erreur silencieuse
+  }
+
+  // Signal 5 — Motif de mortalité manquant (3 jours consécutifs)
+  try {
+    totalCreated += await checkMissingMortalityReasons(organizationId, userIds)
+  } catch {
+    // Erreur silencieuse
+  }
+
+  return { created: totalCreated, targetUserIds: userIds }
 }

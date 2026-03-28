@@ -40,8 +40,17 @@
  */
 
 import { auth } from "@/src/auth"
+import {
+  actionSuccess,
+  forbidden,
+  type ActionResult,
+  unauthenticated,
+} from "@/src/lib/action-result"
+import { hasModuleAccess, type AppModule } from "@/src/lib/permissions"
 import prisma from "@/src/lib/prisma"
 import type { UserOrganization } from "@/src/generated/prisma/client"
+
+export type { ActionResult } from "@/src/lib/action-result"
 
 // ---------------------------------------------------------------------------
 // ActionResult — type discriminant pour toutes les Server Actions
@@ -52,10 +61,6 @@ import type { UserOrganization } from "@/src/generated/prisma/client"
 //                    fieldErrors (optionnel) mappe un champ Zod à ses erreurs
 //                    (utilisé en V2 pour les retours de formulaire granulaires)
 // ---------------------------------------------------------------------------
-
-export type ActionResult<T = void> =
-  | { success: true; data: T }
-  | { success: false; error: string; fieldErrors?: Record<string, string[]> }
 
 // ---------------------------------------------------------------------------
 // Types session
@@ -124,9 +129,9 @@ export async function getSession(): Promise<AppSession | null> {
 export async function requireSession(): Promise<ActionResult<AppSession>> {
   const session = await getSession()
   if (!session) {
-    return { success: false, error: "Non authentifié" }
+    return unauthenticated()
   }
-  return { success: true, data: session }
+  return actionSuccess(session)
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +144,7 @@ export async function requireSession(): Promise<ActionResult<AppSession>> {
  */
 export type MembershipWithRole = Pick<
   UserOrganization,
-  "userId" | "organizationId" | "role" | "farmPermissions"
+  "userId" | "organizationId" | "role" | "modulePermissions" | "farmPermissions"
 >
 
 // ---------------------------------------------------------------------------
@@ -162,6 +167,7 @@ export async function getMembership(
       userId:         true,
       organizationId: true,
       role:           true,
+      modulePermissions: true,
       farmPermissions: true,
     },
   })
@@ -176,6 +182,7 @@ export async function getMembership(
     select: {
       userId: true,
       role: true,
+      modulePermissions: true,
       farmPermissions: true,
     },
   })
@@ -186,6 +193,7 @@ export async function getMembership(
     userId,
     organizationId,
     role: superAdminMembership.role,
+    modulePermissions: superAdminMembership.modulePermissions,
     farmPermissions: superAdminMembership.farmPermissions,
   }
 }
@@ -213,7 +221,18 @@ export async function requireMembership(
 ): Promise<ActionResult<MembershipWithRole>> {
   const membership = await getMembership(userId, organizationId)
   if (!membership) {
-    return { success: false, error: "Accès refusé à cette organisation" }
+    return forbidden("Acces refuse a cette organisation", "ORG_ACCESS_DENIED")
   }
-  return { success: true, data: membership }
+  return actionSuccess(membership)
+}
+
+export function requireModuleAccess(
+  membership: Pick<MembershipWithRole, "role" | "modulePermissions">,
+  module: AppModule,
+): ActionResult<void> {
+  if (!hasModuleAccess(membership.role, membership.modulePermissions, module)) {
+    return forbidden(`Acces refuse au module ${module}.`, "MODULE_ACCESS_DENIED")
+  }
+
+  return actionSuccess(undefined)
 }

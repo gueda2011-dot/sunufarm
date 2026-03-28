@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server"
 import { auth } from "@/src/auth"
 import { requireMembership } from "@/src/lib/auth"
+import { apiError, apiSuccess } from "@/src/lib/api-response"
+import { hasModuleAccess } from "@/src/lib/permissions"
 import prisma from "@/src/lib/prisma"
 import { createWaveCheckoutSessionForTransaction } from "@/src/lib/payments"
 import {
@@ -15,15 +16,15 @@ export async function POST(
   { params }: { params: Promise<{ transactionId: string }> },
 ) {
   if (!isTrustedMutationOrigin(request)) {
-    return NextResponse.json(
-      { success: false, error: "Origine de requete non autorisee." },
-      { status: 403 },
-    )
+    return apiError("Origine de requete non autorisee.", {
+      status: 403,
+      code: "UNTRUSTED_ORIGIN",
+    })
   }
 
   const session = await auth()
   if (!session?.user?.id) {
-    return NextResponse.json({ success: false, error: "Non authentifie" }, { status: 401 })
+    return apiError("Non authentifie", { status: 401, code: "UNAUTHENTICATED" })
   }
 
   const { transactionId } = await params
@@ -34,10 +35,11 @@ export async function POST(
   })
 
   if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { success: false, error: "Trop de tentatives de paiement. Reessayez dans un instant." },
-      { status: 429, headers: createRateLimitHeaders(rateLimit, 5) },
-    )
+    return apiError("Trop de tentatives de paiement. Reessayez dans un instant.", {
+      status: 429,
+      code: "RATE_LIMITED",
+      headers: createRateLimitHeaders(rateLimit, 5),
+    })
   }
 
   const transaction = await prisma.paymentTransaction.findUnique({
@@ -51,7 +53,7 @@ export async function POST(
   })
 
   if (!transaction) {
-    return NextResponse.json({ success: false, error: "Transaction introuvable" }, { status: 404 })
+    return apiError("Transaction introuvable", { status: 404, code: "TRANSACTION_NOT_FOUND" })
   }
 
   const membershipResult = await requireMembership(
@@ -60,41 +62,48 @@ export async function POST(
   )
 
   if (!membershipResult.success) {
-    return NextResponse.json({ success: false, error: membershipResult.error }, { status: 403 })
+    return apiError(membershipResult.error, {
+      status: membershipResult.status,
+      code: membershipResult.code,
+    })
+  }
+
+  if (!hasModuleAccess(membershipResult.data.role, membershipResult.data.modulePermissions, "SETTINGS")) {
+    return apiError("Acces refuse au module SETTINGS.", {
+      status: 403,
+      code: "MODULE_ACCESS_DENIED",
+    })
   }
 
   try {
     const checkout = await createWaveCheckoutSessionForTransaction(transaction.id)
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        provider: transaction.provider,
-        checkoutUrl: checkout.checkoutUrl,
-        checkoutId: checkout.checkoutId,
-        expiresAt: checkout.expiresAt,
-      },
+    return apiSuccess({
+      provider: transaction.provider,
+      checkoutUrl: checkout.checkoutUrl,
+      checkoutId: checkout.checkoutId,
+      expiresAt: checkout.expiresAt,
     }, { headers: createRateLimitHeaders(rateLimit, 5) })
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN_ERROR"
 
     if (message === "WAVE_NOT_CONFIGURED") {
-      return NextResponse.json(
-        { success: false, error: "Wave n'est pas encore configure dans l'environnement." },
-        { status: 503 },
-      )
+      return apiError("Wave n'est pas encore configure dans l'environnement.", {
+        status: 503,
+        code: "WAVE_NOT_CONFIGURED",
+      })
     }
 
     if (message === "PROVIDER_NOT_SUPPORTED") {
-      return NextResponse.json(
-        { success: false, error: "Ce provider mobile money n'est pas encore actif." },
-        { status: 400 },
-      )
+      return apiError("Ce provider mobile money n'est pas encore actif.", {
+        status: 400,
+        code: "PROVIDER_NOT_SUPPORTED",
+      })
     }
 
-    return NextResponse.json(
-      { success: false, error: "Impossible d'initialiser le paiement Wave." },
-      { status: 500 },
-    )
+    return apiError("Impossible d'initialiser le paiement Wave.", {
+      status: 500,
+      code: "CHECKOUT_INIT_FAILED",
+    })
   }
 }

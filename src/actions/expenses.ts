@@ -36,6 +36,7 @@ import prisma from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -254,6 +255,8 @@ export async function getExpenses(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FINANCES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
       return { success: false, error: "Accès aux données financières refusé" }
@@ -313,6 +316,8 @@ export async function getExpense(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FINANCES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "VIEW_FINANCES")) {
       return { success: false, error: "Accès aux données financières refusé" }
@@ -363,6 +368,8 @@ export async function createExpense(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FINANCES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_EXPENSE")) {
       return { success: false, error: "Permission refusée" }
@@ -439,6 +446,8 @@ export async function updateExpense(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FINANCES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "CREATE_EXPENSE")) {
       return { success: false, error: "Permission refusée" }
@@ -506,6 +515,8 @@ export async function deleteExpense(
 
   const membershipResult = await requireMembership(actorId, organizationId)
   if (!membershipResult.success) return membershipResult
+  const moduleAccessResult = requireModuleAccess(membershipResult.data, "FINANCES")
+  if (!moduleAccessResult.success) return moduleAccessResult
 
   if (!canPerformAction(membershipResult.data.role, "CREATE_EXPENSE")) {
     return { success: false, error: "Permission refusée" }

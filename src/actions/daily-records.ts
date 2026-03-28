@@ -35,6 +35,7 @@ import prisma from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -284,6 +285,8 @@ export async function getDailyRecords(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "DAILY")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -340,6 +343,8 @@ export async function getDailyRecord(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "DAILY")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -407,6 +412,8 @@ export async function createDailyRecord(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "DAILY")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -534,6 +541,8 @@ export async function updateDailyRecord(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "DAILY")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 

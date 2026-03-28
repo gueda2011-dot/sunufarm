@@ -31,6 +31,7 @@ import prisma from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -343,6 +344,8 @@ export async function getBatches(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "BATCHES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -406,6 +409,8 @@ export async function getBatch(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "BATCHES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -457,6 +462,8 @@ export async function createBatch(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "BATCHES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -547,6 +554,8 @@ export async function updateBatch(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "BATCHES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -624,6 +633,8 @@ export async function closeBatch(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "BATCHES")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -709,6 +720,8 @@ export async function deleteBatch(
 
   const membershipResult = await requireMembership(actorId, organizationId)
   if (!membershipResult.success) return membershipResult
+  const moduleAccessResult = requireModuleAccess(membershipResult.data, "BATCHES")
+  if (!moduleAccessResult.success) return moduleAccessResult
 
   const { role, farmPermissions } = membershipResult.data
 

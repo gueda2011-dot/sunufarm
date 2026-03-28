@@ -23,6 +23,7 @@ import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
+import { getServerEnv } from "@/src/lib/env"
 import { logger } from "@/src/lib/logger"
 import { normalizePhoneNumber } from "@/src/lib/validators"
 
@@ -90,7 +91,7 @@ function clearImpersonation(token: JWT) {
 // ---------------------------------------------------------------------------
 
 export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  secret: getServerEnv().AUTH_SECRET,
   trustHost: true,
   // -------------------------------------------------------------------------
   // Provider Credentials

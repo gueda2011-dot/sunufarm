@@ -455,6 +455,7 @@ model UserOrganization {
   userId          String
   organizationId  String
   role            UserRole @default(VIEWER)
+  emailNotificationsEnabled Boolean @default(true)
   // null = modules par defaut du role, tableau JSON = acces personnalises
   modulePermissions Json?
   // Tableau JSON : [{farmId: string, canRead: bool, canWrite: bool, canDelete: bool}]
@@ -571,6 +572,8 @@ model Batch {
   @@index([organizationId])
   @@index([buildingId])
   @@index([status])
+  @@index([organizationId, status, deletedAt])
+  @@index([organizationId, entryDate])
 }
 
 // =============================================================================
@@ -610,6 +613,7 @@ model DailyRecord {
   @@index([batchId])
   @@index([organizationId])
   @@index([date])
+  @@index([organizationId, date])
 }
 
 // Détail des mortalités par motif (optionnel — motif "Non précisé" si non renseigné)
@@ -939,6 +943,8 @@ model Sale {
   @@index([organizationId])
   @@index([customerId])
   @@index([saleDate])
+  @@index([organizationId, saleDate])
+  @@index([organizationId, customerId, saleDate])
 }
 
 model SaleItem {
@@ -986,6 +992,9 @@ model Purchase {
 
   @@index([organizationId])
   @@index([supplierId])
+  @@index([purchaseDate])
+  @@index([organizationId, purchaseDate])
+  @@index([organizationId, supplierId, purchaseDate])
 }
 
 model PurchaseItem {
@@ -1049,6 +1058,10 @@ model Expense {
   @@index([organizationId])
   @@index([batchId])
   @@index([date])
+  @@index([organizationId, date])
+  @@index([organizationId, batchId, date])
+  @@index([organizationId, farmId, date])
+  @@index([organizationId, categoryId, date])
 }
 
 // =============================================================================
@@ -1155,6 +1168,7 @@ model Notification {
   @@index([userId])
   @@index([organizationId])
   @@index([status])
+  @@index([userId, organizationId, status, createdAt])
 }
 
 // =============================================================================

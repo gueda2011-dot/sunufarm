@@ -30,6 +30,7 @@ import prisma from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -189,6 +190,8 @@ export async function getFarms(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FARMS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -236,6 +239,8 @@ export async function getFarm(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FARMS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -290,6 +295,8 @@ export async function createFarm(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FARMS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     if (!canPerformAction(membershipResult.data.role, "MANAGE_FARMS")) {
       return { success: false, error: "Permission refusée" }
@@ -355,6 +362,8 @@ export async function updateFarm(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FARMS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -428,10 +437,12 @@ export async function deleteFarm(
   const { organizationId, farmId } = parsed.data
   const actorId = sessionResult.data.user.id
 
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
+    const membershipResult = await requireMembership(actorId, organizationId)
+    if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "FARMS")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
-  const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = membershipResult.data
 
   if (!canPerformAction(role, "MANAGE_FARMS")) {
     return { success: false, error: "Permission refusée" }
