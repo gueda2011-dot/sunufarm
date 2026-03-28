@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
+import { getBatchOperationalSnapshot } from "@/src/lib/batch-metrics"
+import { getServerEnv } from "@/src/lib/env"
 import type { OrganizationSubscriptionSummary } from "@/src/lib/subscriptions.server"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 
@@ -270,7 +272,6 @@ export async function buildBatchAnalysisInput(
 
   const totalMortality = mortalityAgg._sum.mortality ?? 0
   const totalFeedKg = mortalityAgg._sum.feedKg ?? 0
-  const liveCount = Math.max(0, batch.entryCount - totalMortality)
   const operationalCostFcfa = expenses._sum.amountFcfa ?? 0
   const purchaseCostFcfa = batch.totalCostFcfa
   const totalCostFcfa = purchaseCostFcfa + operationalCostFcfa
@@ -282,9 +283,13 @@ export async function buildBatchAnalysisInput(
   const costPerBird = batch.entryCount > 0
     ? Math.round(totalCostFcfa / batch.entryCount)
     : null
-  const mortalityRatePct = batch.entryCount > 0
-    ? Math.round((totalMortality / batch.entryCount) * 1000) / 10
-    : 0
+  const snapshot = getBatchOperationalSnapshot({
+    entryDate: batch.entryDate,
+    entryAgeDay: batch.entryAgeDay,
+    entryCount: batch.entryCount,
+    status: batch.status,
+    totalMortality,
+  })
 
   const benchmarkSource = options?.includeBenchmark
     ? comparableBatches
@@ -332,25 +337,17 @@ export async function buildBatchAnalysisInput(
       }
     : null
 
-  const endDate = batch.status === "ACTIVE"
-    ? new Date()
-    : new Date()
-  const ageDay = batch.entryAgeDay + Math.max(
-    0,
-    Math.floor((endDate.getTime() - new Date(batch.entryDate).getTime()) / 86_400_000),
-  )
-
   return analyzeBatchDataSchema.parse({
     batchId: batch.id,
     batchNumber: batch.number,
     batchType: batch.type,
     batchStatus: batch.status,
     entryDate: new Date(batch.entryDate).toISOString(),
-    ageDay,
+    ageDay: snapshot.ageDay,
     entryCount: batch.entryCount,
-    liveCount,
-    totalMortality,
-    mortalityRatePct,
+    liveCount: snapshot.liveCount,
+    totalMortality: snapshot.totalMortality,
+    mortalityRatePct: snapshot.mortalityRatePct,
     totalFeedKg,
     totalFeedCostFcfa: operationalCostFcfa,
     operationalCostFcfa,
@@ -538,7 +535,7 @@ export async function generateBatchAnalysisWithOpenAI(
   input: BatchAnalysisInput,
   policy: AIPolicy,
 ): Promise<AIBatchAnalysisResult> {
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = getServerEnv().OPENAI_API_KEY
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY manquant")
   }

@@ -20,13 +20,13 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { canPerformAction } from "@/src/lib/permissions"
 import { requiredIdSchema } from "@/src/lib/validators"
+import { UserRole } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Types retournés
@@ -55,6 +55,7 @@ const listSchema = z.object({
   organizationId: requiredIdSchema,
   search:         z.string().optional(),
   type:           z.string().optional(),
+  limit:          z.number().int().min(1).max(200).default(100),
 })
 
 const createCustomerSchema = z.object({
@@ -91,21 +92,15 @@ export async function getCustomers(
   data: unknown,
 ): Promise<ActionResult<CustomerSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = listSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, search, type } = parsed.data
+    const { organizationId, search, type, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
 
     const customers = await prisma.customer.findMany({
       where: {
@@ -119,20 +114,54 @@ export async function getCustomers(
         } : {}),
         ...(type ? { type } : {}),
       },
-      include: {
-        sales: {
+      select: {
+        id:        true,
+        name:      true,
+        phone:     true,
+        email:     true,
+        address:   true,
+        type:      true,
+        notes:     true,
+        createdAt: true,
+        _count: {
           select: {
-            totalFcfa: true,
-            paidFcfa:  true,
+            sales: true,
           },
         },
       },
       orderBy: { name: "asc" },
+      take:    limit,
     })
 
+    const salesByCustomerId = customers.length > 0
+      ? await prisma.sale.groupBy({
+          by: ["customerId"],
+          where: {
+            organizationId,
+            customerId: { in: customers.map((customer) => customer.id) },
+          },
+          _sum: {
+            totalFcfa: true,
+            paidFcfa: true,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      : []
+
+    const salesMap = new Map(
+      salesByCustomerId.flatMap((entry) => (
+        entry.customerId
+          ? [[entry.customerId, entry]]
+          : []
+      )),
+    )
+
     const result: CustomerSummary[] = customers.map((c) => {
-      const totalFcfa   = c.sales.reduce((s, sale) => s + sale.totalFcfa, 0)
-      const paidFcfa    = c.sales.reduce((s, sale) => s + sale.paidFcfa,  0)
+      const salesAggregate = salesMap.get(c.id)
+      const totalFcfa = salesAggregate?._sum.totalFcfa ?? 0
+      const paidFcfa = salesAggregate?._sum.paidFcfa ?? 0
       return {
         id:          c.id,
         name:        c.name,
@@ -142,7 +171,7 @@ export async function getCustomers(
         type:        c.type,
         notes:       c.notes,
         createdAt:   c.createdAt,
-        salesCount:  c.sales.length,
+        salesCount:  salesAggregate?._count._all ?? c._count.sales,
         totalFcfa,
         paidFcfa,
         balanceFcfa: totalFcfa - paidFcfa,
@@ -163,9 +192,6 @@ export async function createCustomer(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createCustomerSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
@@ -173,15 +199,14 @@ export async function createCustomer(
 
     const { organizationId, ...fields } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     const customer = await prisma.customer.create({
       data: {
@@ -197,7 +222,7 @@ export async function createCustomer(
     })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.CREATE,
       resourceType:   "Customer",
@@ -219,9 +244,6 @@ export async function updateCustomer(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateCustomerSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
@@ -229,15 +251,14 @@ export async function updateCustomer(
 
     const { organizationId, customerId, ...fields } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.customer.findFirst({
       where: { id: customerId, organizationId },
@@ -261,7 +282,7 @@ export async function updateCustomer(
     })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.UPDATE,
       resourceType:   "Customer",
@@ -283,9 +304,6 @@ export async function deleteCustomer(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = deleteCustomerSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -293,15 +311,14 @@ export async function deleteCustomer(
 
     const { organizationId, customerId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "CUSTOMERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_SALE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.customer.findFirst({
       where:  { id: customerId, organizationId },
@@ -321,7 +338,7 @@ export async function deleteCustomer(
     await prisma.customer.delete({ where: { id: customerId } })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.DELETE,
       resourceType:   "Customer",

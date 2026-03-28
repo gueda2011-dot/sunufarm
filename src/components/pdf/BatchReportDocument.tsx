@@ -15,6 +15,7 @@
 
 import {
   Document,
+  Image,
   Page,
   Text,
   View,
@@ -48,6 +49,8 @@ const s = StyleSheet.create({
     borderBottomColor: "#e5e7eb",
   },
   brand:     { fontSize: 18, fontFamily: "Helvetica-Bold", color: "#16a34a" },
+  brandRow:  { flexDirection: "row", alignItems: "center", gap: 10 },
+  brandLogo: { width: 72, height: 48, objectFit: "contain" },
   orgName:   { fontSize: 11, color: "#6b7280", marginTop: 2 },
   genDate:   { fontSize: 9, color: "#9ca3af", textAlign: "right", marginTop: 4 },
 
@@ -239,6 +242,7 @@ interface Props {
   profitability?: BatchProfitability | null
   recentRecords:  DailyRow[]
   generatedAt:    Date
+  logoSrc?:       string
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +268,7 @@ export function BatchReportDocument({
   profitability,
   recentRecords,
   generatedAt,
+  logoSrc,
 }: Props) {
   const statusCfg = STATUS_CONFIG[batchStatus] ?? STATUS_CONFIG.CLOSED
   const isActive  = batchStatus === "ACTIVE"
@@ -278,9 +283,13 @@ export function BatchReportDocument({
 
         {/* ── En-tête ─────────────────────────────────────────────────────── */}
         <View style={s.header}>
-          <View>
-            <Text style={s.brand}>SunuFarm</Text>
-            <Text style={s.orgName}>{orgName}</Text>
+          <View style={s.brandRow}>
+            {/* eslint-disable-next-line jsx-a11y/alt-text */}
+            {logoSrc ? <Image src={logoSrc} style={s.brandLogo} /> : null}
+            <View>
+              <Text style={s.brand}>SunuFarm</Text>
+              <Text style={s.orgName}>{orgName}</Text>
+            </View>
           </View>
           <View>
             <Text style={s.genDate}>Généré le {fmtDate(generatedAt)}</Text>

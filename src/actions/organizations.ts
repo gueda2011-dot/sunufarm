@@ -34,8 +34,7 @@ import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import { Prisma } from "@/src/generated/prisma/client"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -102,6 +101,12 @@ const updateUserModulePermissionsSchema = z.object({
   modulePermissions: z.array(appModuleSchema).nullable(),
 })
 
+const updateUserNotificationPreferenceSchema = z.object({
+  organizationId: requiredIdSchema,
+  targetUserId: requiredIdSchema,
+  emailNotificationsEnabled: z.boolean(),
+})
+
 const removeUserFromOrganizationSchema = z.object({
   organizationId: requiredIdSchema,
   targetUserId:   requiredIdSchema,
@@ -115,6 +120,7 @@ export interface OrgMember {
   id:              string
   userId:          string
   role:            UserRole
+  emailNotificationsEnabled: boolean
   modulePermissions: unknown
   farmPermissions: unknown
   createdAt:       Date
@@ -145,6 +151,7 @@ const memberSelect = {
   id:              true,
   userId:          true,
   role:            true,
+  emailNotificationsEnabled: true,
   modulePermissions: true,
   farmPermissions: true,
   createdAt:       true,
@@ -170,9 +177,6 @@ export async function getOrganizationMembers(
   data: unknown,
 ): Promise<ActionResult<OrgMember[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getOrganizationMembersSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -181,11 +185,8 @@ export async function getOrganizationMembers(
     const { organizationId } = parsed.data
 
     // Lecture : tout membre est autorisé
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "TEAM")
+    if (!accessResult.success) return accessResult
 
     const members = await prisma.userOrganization.findMany({
       where: {
@@ -219,21 +220,22 @@ export async function addUserToOrganization(
   data: unknown,
 ): Promise<ActionResult<OrgMember>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = addUserToOrganizationSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, userId, role } = parsed.data
-    const actorId = sessionResult.data.user.id
+    const accessResult = await requireOrganizationModuleContext(organizationId, "TEAM")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
 
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    
+    
+    
+    
 
-    if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
+  if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
       return { success: false, error: "Permission refusée" }
     }
 
@@ -335,21 +337,17 @@ export async function addUserToOrganizationByEmail(
 export async function updateUserRole(
   data: unknown,
 ): Promise<ActionResult<OrgMember>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = updateUserRoleSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, targetUserId, role } = parsed.data
-  const actorId = sessionResult.data.user.id
+  const accessResult = await requireOrganizationModuleContext(organizationId, "TEAM")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
 
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
-
-  if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
+  if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusée" }
   }
 
@@ -418,21 +416,17 @@ export async function updateUserRole(
 export async function updateUserModulePermissions(
   data: unknown,
 ): Promise<ActionResult<OrgMember>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = updateUserModulePermissionsSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Donnees invalides" }
   }
 
   const { organizationId, targetUserId, modulePermissions } = parsed.data
-  const actorId = sessionResult.data.user.id
+  const accessResult = await requireOrganizationModuleContext(organizationId, "TEAM")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
 
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
-
-  if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
+  if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusee" }
   }
 
@@ -486,6 +480,60 @@ export async function updateUserModulePermissions(
   return { success: true, data: updated }
 }
 
+export async function updateUserNotificationPreference(
+  data: unknown,
+): Promise<ActionResult<OrgMember>> {
+  const parsed = updateUserNotificationPreferenceSchema.safeParse(data)
+  if (!parsed.success) {
+    return { success: false, error: "Donnees invalides" }
+  }
+
+  const { organizationId, targetUserId, emailNotificationsEnabled } = parsed.data
+  const accessResult = await requireOrganizationModuleContext(organizationId, "TEAM")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
+
+  if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
+    return { success: false, error: "Permission refusee" }
+  }
+
+  const targetMembership = await prisma.userOrganization.findUnique({
+    where: { userId_organizationId: { userId: targetUserId, organizationId } },
+    select: {
+      id: true,
+      emailNotificationsEnabled: true,
+    },
+  })
+
+  if (!targetMembership) {
+    return { success: false, error: "Membre introuvable dans cette organisation" }
+  }
+
+  const updated = await prisma.userOrganization.update({
+    where: { userId_organizationId: { userId: targetUserId, organizationId } },
+    data: {
+      emailNotificationsEnabled,
+    },
+    select: memberSelect,
+  })
+
+  await createAuditLog({
+    userId: actorId,
+    organizationId,
+    action: AuditAction.UPDATE,
+    resourceType: "ORGANIZATION_MEMBER_NOTIFICATION_PREFERENCE",
+    resourceId: updated.id,
+    before: {
+      emailNotificationsEnabled: targetMembership.emailNotificationsEnabled,
+    },
+    after: {
+      emailNotificationsEnabled,
+    },
+  })
+
+  return { success: true, data: updated }
+}
+
 // ---------------------------------------------------------------------------
 // 4. removeUserFromOrganization
 // ---------------------------------------------------------------------------
@@ -505,21 +553,22 @@ export async function updateUserModulePermissions(
 export async function removeUserFromOrganization(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = removeUserFromOrganizationSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, targetUserId } = parsed.data
-  const actorId = sessionResult.data.user.id
+  const accessResult = await requireOrganizationModuleContext(organizationId, "TEAM")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
 
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
+  
+  
+  
+  
 
-  if (!canPerformAction(membershipResult.data.role, "INVITE_USER")) {
+  if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusée" }
   }
 

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual, randomUUID } from "node:crypto"
 import prisma from "@/src/lib/prisma"
+import { getServerEnv } from "@/src/lib/env"
 import {
   type Prisma,
   PaymentMethod,
@@ -8,10 +9,7 @@ import {
   SubscriptionPaymentStatus,
   SubscriptionPlan,
 } from "@/src/generated/prisma/client"
-import {
-  PLAN_DEFINITIONS,
-  UNLIMITED_AI,
-} from "@/src/lib/subscriptions"
+import { activateOrganizationSubscription } from "@/src/lib/subscription-lifecycle"
 
 const MOBILE_MONEY_TRANSACTION_TTL_MS = 15 * 60 * 1000
 const WAVE_API_BASE_URL = "https://api.wave.com"
@@ -156,9 +154,10 @@ function verifyWaveSignature(
 }
 
 function getAppBaseUrl(): string {
+  const env = getServerEnv()
   return (
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.AUTH_URL ??
+    env.NEXT_PUBLIC_APP_URL ??
+    env.AUTH_URL ??
     "http://localhost:3000"
   ).replace(/\/$/, "")
 }
@@ -166,7 +165,7 @@ function getAppBaseUrl(): string {
 export async function createWaveCheckoutSessionForTransaction(
   transactionId: string,
 ) {
-  const apiKey = process.env.WAVE_API_KEY
+  const apiKey = getServerEnv().WAVE_API_KEY
   if (!apiKey) {
     throw new Error("WAVE_NOT_CONFIGURED")
   }
@@ -369,34 +368,12 @@ export async function confirmPaymentTransaction(input: {
         isRenewal && existingSubscription?.currentPeriodEnd
           ? existingSubscription.currentPeriodEnd
           : now
-      const periodEnd = new Date(periodStart)
-      periodEnd.setDate(periodEnd.getDate() + 30)
-
-      await tx.subscription.upsert({
-        where: { organizationId: payment.organizationId },
-        update: {
-          plan: payment.requestedPlan,
-          status: "ACTIVE",
-          amountFcfa: PLAN_DEFINITIONS[payment.requestedPlan].monthlyPriceFcfa,
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
-          trialEndsAt: null,
-          aiCreditsTotal: UNLIMITED_AI,
-          aiCreditsUsed: 0,
-          canceledAt: null,
-        },
-        create: {
-          organizationId: payment.organizationId,
-          plan: payment.requestedPlan,
-          status: "ACTIVE",
-          amountFcfa: payment.amountFcfa,
-          startedAt: now,
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
-          trialEndsAt: null,
-          aiCreditsTotal: UNLIMITED_AI,
-          aiCreditsUsed: 0,
-        },
+      await activateOrganizationSubscription(tx, {
+        organizationId: payment.organizationId,
+        plan: payment.requestedPlan,
+        amountFcfa: payment.amountFcfa,
+        now,
+        periodStart,
       })
     }
 

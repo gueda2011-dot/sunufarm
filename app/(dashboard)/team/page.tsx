@@ -62,6 +62,7 @@ export default async function TeamPage() {
       id: true,
       userId: true,
       role: true,
+      emailNotificationsEnabled: true,
       modulePermissions: true,
       createdAt: true,
       user: {
@@ -165,6 +166,9 @@ export default async function TeamPage() {
                     .map((module) => APP_MODULE_LABELS[module])
                     .join(", ")}
                 </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Emails de notification: {member.emailNotificationsEnabled ? "actifs" : "desactives"}
+                </p>
               </div>
 
               <div className="flex items-center">
@@ -193,6 +197,7 @@ export default async function TeamPage() {
               id: member.id,
               userId: member.userId,
               role: member.role,
+              emailNotificationsEnabled: member.emailNotificationsEnabled,
               modulePermissions: member.modulePermissions,
               farmPermissions: [],
               createdAt: member.createdAt,

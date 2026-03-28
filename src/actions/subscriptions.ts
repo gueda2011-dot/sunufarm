@@ -5,9 +5,18 @@ import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
   requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
+import {
+  actionSuccess,
+  conflict,
+  forbidden,
+  invalidInput,
+  notFound,
+  technicalError,
+} from "@/src/lib/action-result"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
 import {
   PaymentMethod,
@@ -18,13 +27,15 @@ import {
 import { requiredIdSchema } from "@/src/lib/validators"
 import {
   PLAN_DEFINITIONS,
-  TRIAL_DAYS,
-  TRIAL_AI_CREDITS,
   UNLIMITED_AI,
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { createPaymentTransaction } from "@/src/lib/payments"
 import type { AuditRequestContext } from "@/src/lib/request-security"
+import {
+  activateOrganizationSubscription,
+  startOrganizationTrial,
+} from "@/src/lib/subscription-lifecycle"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -61,12 +72,9 @@ export async function createSubscriptionPaymentRequest(
   auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ paymentId: string; transactionId: string; checkoutToken: string | null }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createSubscriptionPaymentSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Donnees invalides" }
+      return invalidInput()
     }
 
     const {
@@ -76,14 +84,13 @@ export async function createSubscriptionPaymentRequest(
       paymentReference,
       notes,
     } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
 
     const currentSubscription = await getOrganizationSubscription(organizationId)
     if (currentSubscription.plan === requestedPlan) {
-      return { success: false, error: "Votre organisation est deja sur ce plan." }
+      return conflict("Votre organisation est deja sur ce plan.", "PLAN_ALREADY_ACTIVE")
     }
 
     const existingPending = await prisma.subscriptionPayment.findFirst({
@@ -97,8 +104,10 @@ export async function createSubscriptionPaymentRequest(
 
     if (existingPending) {
       return {
-        success: false,
-        error: "Une demande de paiement est deja en attente pour ce plan.",
+        ...conflict(
+          "Une demande de paiement est deja en attente pour ce plan.",
+          "PENDING_PAYMENT_EXISTS",
+        ),
       }
     }
 
@@ -143,19 +152,13 @@ export async function createSubscriptionPaymentRequest(
 
     revalidatePath("/settings")
 
-    return {
-      success: true,
-      data: {
-        paymentId: payment.id,
-        transactionId: transaction.id,
-        checkoutToken: transaction.checkoutToken ?? null,
-      },
-    }
+    return actionSuccess({
+      paymentId: payment.id,
+      transactionId: transaction.id,
+      checkoutToken: transaction.checkoutToken ?? null,
+    })
   } catch {
-    return {
-      success: false,
-      error: "Impossible d'enregistrer la demande de paiement.",
-    }
+    return technicalError("Impossible d'enregistrer la demande de paiement.")
   }
 }
 
@@ -164,23 +167,21 @@ export async function confirmSubscriptionPayment(
   auditContext?: AuditRequestContext,
 ): Promise<ActionResult<{ plan: SubscriptionPlan }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = manageSubscriptionPaymentSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Donnees invalides" }
+      return invalidInput()
     }
 
     const { organizationId, paymentId } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (membershipResult.data.role !== UserRole.OWNER) {
-      return { success: false, error: "Seul un proprietaire peut confirmer un paiement." }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const ownerRoleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.OWNER],
+      "Seul un proprietaire peut confirmer un paiement.",
+    )
+    if (!ownerRoleResult.success) return ownerRoleResult
 
     const payment = await prisma.subscriptionPayment.findFirst({
       where: {
@@ -196,7 +197,7 @@ export async function confirmSubscriptionPayment(
     })
 
     if (!payment) {
-      return { success: false, error: "Paiement en attente introuvable." }
+      return notFound("Paiement en attente introuvable.", "SUBSCRIPTION_PAYMENT_NOT_FOUND")
     }
 
     const existingSubscription = await prisma.subscription.findUnique({
@@ -218,9 +219,6 @@ export async function confirmSubscriptionPayment(
       isRenewal && existingSubscription?.currentPeriodEnd
         ? existingSubscription.currentPeriodEnd
         : now
-    const periodEnd = new Date(periodStart)
-    periodEnd.setDate(periodEnd.getDate() + 30)
-
     await prisma.$transaction(async (tx) => {
       await tx.subscriptionPayment.update({
         where: { id: payment.id },
@@ -231,37 +229,13 @@ export async function confirmSubscriptionPayment(
         },
       })
 
-      if (existingSubscription) {
-        await tx.subscription.update({
-          where: { organizationId },
-          data: {
-            plan: payment.requestedPlan,
-            status: "ACTIVE",
-            amountFcfa: payment.amountFcfa,
-            currentPeriodStart: periodStart,
-            currentPeriodEnd: periodEnd,
-            trialEndsAt: null,
-            aiCreditsTotal: UNLIMITED_AI,
-            aiCreditsUsed: 0,
-            canceledAt: null,
-          },
-        })
-      } else {
-        await tx.subscription.create({
-          data: {
-            organizationId,
-            plan: payment.requestedPlan,
-            status: "ACTIVE",
-            amountFcfa: payment.amountFcfa,
-            startedAt: now,
-            currentPeriodStart: periodStart,
-            currentPeriodEnd: periodEnd,
-            trialEndsAt: null,
-            aiCreditsTotal: UNLIMITED_AI,
-            aiCreditsUsed: 0,
-          },
-        })
-      }
+      await activateOrganizationSubscription(tx, {
+        organizationId,
+        plan: payment.requestedPlan,
+        amountFcfa: payment.amountFcfa,
+        now,
+        periodStart,
+      })
     })
 
     await createAuditLog({
@@ -282,12 +256,9 @@ export async function confirmSubscriptionPayment(
     revalidatePath("/admin")
     revalidatePath(`/admin/organizations/${organizationId}`)
 
-    return {
-      success: true,
-      data: { plan: payment.requestedPlan },
-    }
+    return actionSuccess({ plan: payment.requestedPlan })
   } catch {
-    return { success: false, error: "Impossible de confirmer ce paiement." }
+    return technicalError("Impossible de confirmer ce paiement.")
   }
 }
 
@@ -296,23 +267,21 @@ export async function rejectSubscriptionPayment(
   auditContext?: AuditRequestContext,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = manageSubscriptionPaymentSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Donnees invalides" }
+      return invalidInput()
     }
 
     const { organizationId, paymentId } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    if (membershipResult.data.role !== UserRole.OWNER) {
-      return { success: false, error: "Seul un proprietaire peut refuser un paiement." }
-    }
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const ownerRoleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.OWNER],
+      "Seul un proprietaire peut refuser un paiement.",
+    )
+    if (!ownerRoleResult.success) return ownerRoleResult
 
     const payment = await prisma.subscriptionPayment.findFirst({
       where: {
@@ -324,7 +293,7 @@ export async function rejectSubscriptionPayment(
     })
 
     if (!payment) {
-      return { success: false, error: "Paiement en attente introuvable." }
+      return notFound("Paiement en attente introuvable.", "SUBSCRIPTION_PAYMENT_NOT_FOUND")
     }
 
     await prisma.subscriptionPayment.update({
@@ -349,9 +318,9 @@ export async function rejectSubscriptionPayment(
 
     revalidatePath("/settings")
 
-    return { success: true, data: undefined }
+    return actionSuccess(undefined)
   } catch {
-    return { success: false, error: "Impossible de refuser ce paiement." }
+    return technicalError("Impossible de refuser ce paiement.")
   }
 }
 
@@ -364,7 +333,7 @@ export async function adminStartTrial(
     if (!sessionResult.success) return sessionResult
 
     const parsed = adminStartTrialSchema.safeParse(data)
-    if (!parsed.success) return { success: false, error: "Donnees invalides" }
+    if (!parsed.success) return invalidInput()
 
     const { organizationId } = parsed.data
     const actorId = sessionResult.data.user.id
@@ -374,7 +343,7 @@ export async function adminStartTrial(
       select: { id: true },
     })
     if (!isSuperAdmin) {
-      return { success: false, error: "Seul un super admin peut demarrer un essai." }
+      return forbidden("Seul un super admin peut demarrer un essai.")
     }
 
     const org = await prisma.organization.findFirst({
@@ -382,7 +351,7 @@ export async function adminStartTrial(
       select: { id: true },
     })
     if (!org) {
-      return { success: false, error: "Organisation introuvable." }
+      return notFound("Organisation introuvable.", "ORG_NOT_FOUND")
     }
 
     const existingSubscription = await prisma.subscription.findUnique({
@@ -406,37 +375,17 @@ export async function adminStartTrial(
 
     if (hasActivePaidPlan) {
       return {
-        success: false,
-        error: "Impossible de demarrer un essai sur une organisation avec un abonnement payant actif.",
+        ...conflict(
+          "Impossible de demarrer un essai sur une organisation avec un abonnement payant actif.",
+          "ACTIVE_PAID_PLAN_EXISTS",
+        ),
       }
     }
 
     const now = new Date()
-    const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 86_400_000)
-
-    await prisma.subscription.upsert({
-      where: { organizationId },
-      update: {
-        plan: SubscriptionPlan.BASIC,
-        status: "TRIAL",
-        amountFcfa: 0,
-        currentPeriodStart: null,
-        currentPeriodEnd: null,
-        trialEndsAt,
-        aiCreditsTotal: TRIAL_AI_CREDITS,
-        aiCreditsUsed: 0,
-        canceledAt: null,
-      },
-      create: {
-        organizationId,
-        plan: SubscriptionPlan.BASIC,
-        status: "TRIAL",
-        amountFcfa: 0,
-        startedAt: now,
-        trialEndsAt,
-        aiCreditsTotal: TRIAL_AI_CREDITS,
-        aiCreditsUsed: 0,
-      },
+    const { trialEndsAt } = await startOrganizationTrial(prisma, {
+      organizationId,
+      now,
     })
 
     await createAuditLog({
@@ -453,9 +402,9 @@ export async function adminStartTrial(
     revalidatePath("/admin")
     revalidatePath(`/admin/organizations/${organizationId}`)
 
-    return { success: true, data: { trialEndsAt } }
+    return actionSuccess({ trialEndsAt })
   } catch {
-    return { success: false, error: "Impossible de demarrer l'essai." }
+    return technicalError("Impossible de demarrer l'essai.")
   }
 }
 
@@ -463,17 +412,12 @@ export async function consumeAiCredit(
   data: unknown,
 ): Promise<ActionResult<{ creditsRemaining: number }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = consumeAiCreditSchema.safeParse(data)
-    if (!parsed.success) return { success: false, error: "Donnees invalides" }
+    if (!parsed.success) return invalidInput()
 
     const { organizationId } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
+    if (!accessResult.success) return accessResult
 
     const result = await prisma.$transaction(async (tx) => {
       const sub = await tx.subscription.findUnique({
@@ -488,7 +432,7 @@ export async function consumeAiCredit(
       })
 
       if (!sub) {
-        return { ok: false as const, error: "Abonnement introuvable." }
+        return { ok: false as const, error: notFound("Abonnement introuvable.", "SUBSCRIPTION_NOT_FOUND") }
       }
 
       const hasUnlimitedAI =
@@ -512,7 +456,10 @@ export async function consumeAiCredit(
       if (updated.count === 0) {
         return {
           ok: false as const,
-          error: "Vos credits IA sont epuises. Passez au plan Pro pour des analyses illimitees.",
+          error: conflict(
+            "Vos credits IA sont epuises. Passez au plan Pro pour des analyses illimitees.",
+            "AI_CREDITS_EXHAUSTED",
+          ),
         }
       }
 
@@ -525,7 +472,7 @@ export async function consumeAiCredit(
       })
 
       if (!refreshed) {
-        return { ok: false as const, error: "Abonnement introuvable." }
+        return { ok: false as const, error: notFound("Abonnement introuvable.", "SUBSCRIPTION_NOT_FOUND") }
       }
 
       return {
@@ -535,12 +482,12 @@ export async function consumeAiCredit(
     })
 
     if (!result.ok) {
-      return { success: false, error: result.error }
+      return result.error
     }
 
-    return { success: true, data: { creditsRemaining: result.creditsRemaining } }
+    return actionSuccess({ creditsRemaining: result.creditsRemaining })
   } catch {
-    return { success: false, error: "Impossible de consommer un credit IA." }
+    return technicalError("Impossible de consommer un credit IA.")
   }
 }
 
@@ -554,7 +501,7 @@ export async function adminUpdateOrganizationSubscription(
 
     const parsed = adminUpdateOrganizationSubscriptionSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Donnees invalides" }
+      return invalidInput()
     }
 
     const { organizationId, plan } = parsed.data
@@ -569,7 +516,7 @@ export async function adminUpdateOrganizationSubscription(
     })
 
     if (!superAdminMembership) {
-      return { success: false, error: "Seul un super admin peut modifier cet abonnement." }
+      return forbidden("Seul un super admin peut modifier cet abonnement.")
     }
 
     const organization = await prisma.organization.findFirst({
@@ -578,38 +525,15 @@ export async function adminUpdateOrganizationSubscription(
     })
 
     if (!organization) {
-      return { success: false, error: "Organisation introuvable." }
+      return notFound("Organisation introuvable.", "ORG_NOT_FOUND")
     }
 
     const now = new Date()
-    const periodEnd = new Date(now)
-    periodEnd.setDate(periodEnd.getDate() + 30)
-
-    await prisma.subscription.upsert({
-      where: { organizationId },
-      update: {
-        plan,
-        status: "ACTIVE",
-        amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        trialEndsAt: null,
-        aiCreditsTotal: UNLIMITED_AI,
-        aiCreditsUsed: 0,
-        canceledAt: null,
-      },
-      create: {
-        organizationId,
-        plan,
-        status: "ACTIVE",
-        amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
-        startedAt: now,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        trialEndsAt: null,
-        aiCreditsTotal: UNLIMITED_AI,
-        aiCreditsUsed: 0,
-      },
+    await activateOrganizationSubscription(prisma, {
+      organizationId,
+      plan,
+      amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
+      now,
     })
 
     await createAuditLog({
@@ -629,12 +553,9 @@ export async function adminUpdateOrganizationSubscription(
     revalidatePath("/admin")
     revalidatePath(`/admin/organizations/${organizationId}`)
 
-    return {
-      success: true,
-      data: { plan },
-    }
+    return actionSuccess({ plan })
   } catch {
-    return { success: false, error: "Impossible de mettre a jour l'abonnement." }
+    return technicalError("Impossible de mettre a jour l'abonnement.")
   }
 }
 
@@ -648,7 +569,7 @@ export async function adminConfirmPaymentTransaction(
 
     const parsed = managePaymentTransactionSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Donnees invalides" }
+      return invalidInput()
     }
 
     const actorId = sessionResult.data.user.id
@@ -658,7 +579,7 @@ export async function adminConfirmPaymentTransaction(
     })
 
     if (!isSuperAdmin) {
-      return { success: false, error: "Seul un super admin peut confirmer une transaction." }
+      return forbidden("Seul un super admin peut confirmer une transaction.")
     }
 
     const transaction = await prisma.paymentTransaction.findUnique({
@@ -670,7 +591,7 @@ export async function adminConfirmPaymentTransaction(
     })
 
     if (!transaction) {
-      return { success: false, error: "Transaction introuvable." }
+      return notFound("Transaction introuvable.", "TRANSACTION_NOT_FOUND")
     }
 
     const { confirmPaymentTransaction } = await import("@/src/lib/payments")
@@ -694,9 +615,9 @@ export async function adminConfirmPaymentTransaction(
     revalidatePath(`/admin/organizations/${transaction.organizationId}`)
     revalidatePath("/settings")
 
-    return { success: true, data: { transactionId: transaction.id } }
+    return actionSuccess({ transactionId: transaction.id })
   } catch {
-    return { success: false, error: "Impossible de confirmer cette transaction." }
+    return technicalError("Impossible de confirmer cette transaction.")
   }
 }
 
@@ -710,7 +631,7 @@ export async function adminRejectPaymentTransaction(
 
     const parsed = managePaymentTransactionSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Donnees invalides" }
+      return invalidInput()
     }
 
     const actorId = sessionResult.data.user.id
@@ -720,7 +641,7 @@ export async function adminRejectPaymentTransaction(
     })
 
     if (!isSuperAdmin) {
-      return { success: false, error: "Seul un super admin peut refuser une transaction." }
+      return forbidden("Seul un super admin peut refuser une transaction.")
     }
 
     const transaction = await prisma.paymentTransaction.findUnique({
@@ -733,7 +654,7 @@ export async function adminRejectPaymentTransaction(
     })
 
     if (!transaction) {
-      return { success: false, error: "Transaction introuvable." }
+      return notFound("Transaction introuvable.", "TRANSACTION_NOT_FOUND")
     }
 
     await prisma.$transaction(async (tx) => {
@@ -772,8 +693,8 @@ export async function adminRejectPaymentTransaction(
     revalidatePath(`/admin/organizations/${transaction.organizationId}`)
     revalidatePath("/settings")
 
-    return { success: true, data: { transactionId: transaction.id } }
+    return actionSuccess({ transactionId: transaction.id })
   } catch {
-    return { success: false, error: "Impossible de refuser cette transaction." }
+    return technicalError("Impossible de refuser cette transaction.")
   }
 }

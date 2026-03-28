@@ -8,44 +8,17 @@ import {
   formatMoneyFCFACompact,
   formatNumber,
 } from "@/src/lib/formatters"
+import type { MonthlyReportData } from "@/src/lib/monthly-report-view"
 import { FinancialChart } from "../../_components/FinancialChart"
-import { formatTrendLabel, type MetricComparison } from "@/src/lib/reporting"
+import { formatTrendLabel } from "@/src/lib/reporting"
 
 const MONTHS = [
   "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin",
   "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre",
 ]
 
-interface BatchInfo {
-  id: string
-  number: string
-  status: string
-  entryCount: number
-  totalCostFcfa: number
-  entryDate: Date
-}
-
 interface Props {
-  year: number
-  month: number
-  batchesActive: BatchInfo[]
-  batchesClosedCount: number
-  totalMortality: number
-  totalFeedKg: number
-  totalExpenses: number
-  expensesCount: number
-  totalSales: number
-  totalPaid: number
-  salesCount: number
-  totalPurchases: number
-  purchasesCount: number
-  dailyRecordsCount: number
-  netResult: number
-  comparison: {
-    sales: MetricComparison
-    expenses: MetricComparison
-    mortality: MetricComparison
-  }
+  report: MonthlyReportData
 }
 
 function KpiCard({
@@ -75,24 +48,7 @@ function KpiCard({
   )
 }
 
-export function ReportsPageClient({
-  year,
-  month,
-  batchesActive,
-  batchesClosedCount,
-  totalMortality,
-  totalFeedKg,
-  totalExpenses,
-  expensesCount,
-  totalSales,
-  totalPaid,
-  salesCount,
-  totalPurchases,
-  purchasesCount,
-  dailyRecordsCount,
-  netResult,
-  comparison,
-}: Props) {
+export function ReportsPageClient({ report }: Props) {
   const router = useRouter()
 
   function navigate(newMonth: number, newYear: number) {
@@ -100,24 +56,27 @@ export function ReportsPageClient({
   }
 
   function prevMonth() {
-    if (month === 1) navigate(12, year - 1)
-    else navigate(month - 1, year)
+    if (report.month === 1) navigate(12, report.year - 1)
+    else navigate(report.month - 1, report.year)
   }
 
   function nextMonth() {
     const now = new Date()
-    if (year > now.getFullYear() || (year === now.getFullYear() && month >= now.getMonth() + 1)) {
+    if (
+      report.year > now.getFullYear() ||
+      (report.year === now.getFullYear() && report.month >= now.getMonth() + 1)
+    ) {
       return
     }
 
-    if (month === 12) navigate(1, year + 1)
-    else navigate(month + 1, year)
+    if (report.month === 12) navigate(1, report.year + 1)
+    else navigate(report.month + 1, report.year)
   }
 
   const isCurrentMonth =
-    year === new Date().getFullYear() && month === new Date().getMonth() + 1
+    report.year === new Date().getFullYear() && report.month === new Date().getMonth() + 1
 
-  const totalEntryCount = batchesActive.reduce((sum, batch) => sum + batch.entryCount, 0)
+  const totalEntryCount = report.batchesActive.reduce((sum, batch) => sum + batch.entryCount, 0)
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -131,7 +90,7 @@ export function ReportsPageClient({
             {"<-"}
           </button>
           <span className="font-semibold text-gray-900">
-            {MONTHS[month - 1]} {year}
+            {MONTHS[report.month - 1]} {report.year}
           </span>
           <button
             onClick={nextMonth}
@@ -141,19 +100,33 @@ export function ReportsPageClient({
             {"->"}
           </button>
           <Link
-            href={`/api/reports/monthly?month=${month}&year=${year}`}
+            href={`/api/reports/monthly?month=${report.month}&year=${report.year}&format=xlsx`}
             className="inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 transition-colors hover:bg-green-100"
           >
             <Download className="h-4 w-4" />
-            Export CSV
+            Export Excel
+          </Link>
+          <Link
+            href={`/api/reports/monthly?month=${report.month}&year=${report.year}&format=pdf`}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            <Download className="h-4 w-4" />
+            Export PDF
+          </Link>
+          <Link
+            href={`/api/reports/monthly?month=${report.month}&year=${report.year}&format=csv`}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            <Download className="h-4 w-4" />
+            CSV
           </Link>
         </div>
       </div>
 
       <FinancialChart
-        totalSales={totalSales}
-        totalExpenses={totalExpenses}
-        totalPurchases={totalPurchases}
+        totalSales={report.totalSales}
+        totalExpenses={report.totalExpenses}
+        totalPurchases={report.totalPurchases}
       />
 
       <section className="grid gap-3 sm:grid-cols-3">
@@ -162,10 +135,10 @@ export function ReportsPageClient({
             Ventes
           </p>
           <p className="mt-2 text-sm font-medium text-gray-900">
-            {formatTrendLabel(comparison.sales, "up")}
+            {formatTrendLabel(report.comparison.sales, "up")}
           </p>
           <p className="mt-1 text-xs text-gray-500">
-            Mois precedent : {formatMoneyFCFA(comparison.sales.previous)}
+            Mois precedent : {formatMoneyFCFA(report.comparison.sales.previous)}
           </p>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -173,10 +146,10 @@ export function ReportsPageClient({
             Depenses
           </p>
           <p className="mt-2 text-sm font-medium text-gray-900">
-            {formatTrendLabel(comparison.expenses, "down")}
+            {formatTrendLabel(report.comparison.expenses, "down")}
           </p>
           <p className="mt-1 text-xs text-gray-500">
-            Mois precedent : {formatMoneyFCFA(comparison.expenses.previous)}
+            Mois precedent : {formatMoneyFCFA(report.comparison.expenses.previous)}
           </p>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -184,10 +157,10 @@ export function ReportsPageClient({
             Mortalite
           </p>
           <p className="mt-2 text-sm font-medium text-gray-900">
-            {formatTrendLabel(comparison.mortality, "down")}
+            {formatTrendLabel(report.comparison.mortality, "down")}
           </p>
           <p className="mt-1 text-xs text-gray-500">
-            Mois precedent : {formatNumber(comparison.mortality.previous)} sujets
+            Mois precedent : {formatNumber(report.comparison.mortality.previous)} sujets
           </p>
         </div>
       </section>
@@ -199,25 +172,25 @@ export function ReportsPageClient({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiCard
             label="Revenus ventes"
-            value={formatMoneyFCFACompact(totalSales)}
-            sub={`${salesCount} vente${salesCount > 1 ? "s" : ""}`}
+            value={formatMoneyFCFACompact(report.totalSales)}
+            sub={`${report.salesCount} vente${report.salesCount > 1 ? "s" : ""}`}
             accent="green"
           />
           <KpiCard
             label="Depenses"
-            value={formatMoneyFCFACompact(totalExpenses)}
-            sub={`${expensesCount} entree${expensesCount > 1 ? "s" : ""}`}
+            value={formatMoneyFCFACompact(report.totalExpenses)}
+            sub={`${report.expensesCount} entree${report.expensesCount > 1 ? "s" : ""}`}
           />
           <div className={`col-span-2 rounded-xl border p-4 sm:col-span-1 ${
-            netResult >= 0
+            report.netResult >= 0
               ? "border-green-200 bg-green-50"
               : "border-red-100 bg-red-50"
           }`}>
             <div className="mb-1 text-xs text-gray-400">Resultat net</div>
             <div className={`text-xl font-bold leading-tight tabular-nums ${
-              netResult >= 0 ? "text-green-700" : "text-red-600"
+              report.netResult >= 0 ? "text-green-700" : "text-red-600"
             }`}>
-              {formatMoneyFCFACompact(netResult)}
+              {formatMoneyFCFACompact(report.netResult)}
             </div>
             <div className="mt-0.5 text-xs text-gray-400">revenus - depenses</div>
           </div>
@@ -225,14 +198,14 @@ export function ReportsPageClient({
         <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3">
           <span className="text-sm text-gray-500">Achats fournisseurs</span>
           <span className="text-sm font-medium text-gray-900 tabular-nums">
-            {formatMoneyFCFA(totalPurchases)}
-            <span className="ml-1 text-xs text-gray-400">({purchasesCount})</span>
+            {formatMoneyFCFA(report.totalPurchases)}
+            <span className="ml-1 text-xs text-gray-400">({report.purchasesCount})</span>
           </span>
         </div>
         <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3">
           <span className="text-sm text-gray-500">Encaissements</span>
           <span className="text-sm font-medium text-green-700 tabular-nums">
-            {formatMoneyFCFA(totalPaid)}
+            {formatMoneyFCFA(report.totalPaid)}
           </span>
         </div>
       </section>
@@ -244,45 +217,45 @@ export function ReportsPageClient({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <KpiCard
             label="Lots actifs"
-            value={String(batchesActive.length)}
+            value={String(report.batchesActive.length)}
             sub={`${formatNumber(totalEntryCount)} sujets`}
             accent="blue"
           />
           <KpiCard
             label="Lots clotures"
-            value={String(batchesClosedCount)}
+            value={String(report.batchesClosedCount)}
             sub="ce mois"
           />
           <KpiCard
             label="Mortalite"
-            value={formatNumber(totalMortality)}
+            value={formatNumber(report.totalMortality)}
             sub="sujets ce mois"
-            accent={totalMortality > 0 ? "orange" : undefined}
+            accent={report.totalMortality > 0 ? "orange" : undefined}
           />
           <KpiCard
             label="Saisies"
-            value={String(dailyRecordsCount)}
+            value={String(report.dailyRecordsCount)}
             sub="enregistrements"
           />
         </div>
 
-        {totalFeedKg > 0 && (
+        {report.totalFeedKg > 0 && (
           <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3">
             <span className="text-sm text-gray-500">Aliment distribue</span>
             <span className="text-sm font-medium text-gray-900 tabular-nums">
-              {formatNumber(totalFeedKg)} kg
+              {formatNumber(report.totalFeedKg)} kg
             </span>
           </div>
         )}
       </section>
 
-      {batchesActive.length > 0 && (
+      {report.batchesActive.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
             Lots de la periode
           </h2>
           <div className="divide-y divide-gray-50 rounded-xl border border-gray-100 bg-white">
-            {batchesActive.map((batch) => (
+            {report.batchesActive.map((batch) => (
               <Link
                 key={batch.id}
                 href={`/batches/${batch.id}`}
@@ -297,9 +270,15 @@ export function ReportsPageClient({
                   }`}>
                     {batch.status === "ACTIVE" ? "Actif" : "Cloture"}
                   </span>
+                  <div className="mt-1 text-xs text-gray-400">
+                    {batch.farmName} · {batch.buildingName}
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="text-xs text-gray-400">{formatNumber(batch.entryCount)} sujets</div>
+                  <div className="text-xs text-gray-400">
+                    {formatNumber(batch.periodMortality)} morts · {formatNumber(batch.periodFeedKg)} kg
+                  </div>
                   <div className="text-xs text-gray-400">{formatMoneyFCFA(batch.totalCostFcfa)}</div>
                 </div>
               </Link>
@@ -309,7 +288,7 @@ export function ReportsPageClient({
       )}
 
       <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-center text-sm text-gray-500">
-        Export CSV disponible maintenant. PDF et Excel pourront suivre ensuite sans changer la structure du rapport.
+        Les exports Excel, PDF et CSV reposent maintenant sur la meme structure mensuelle pour garder des chiffres coherents.
       </div>
     </div>
   )

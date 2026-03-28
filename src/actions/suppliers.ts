@@ -3,13 +3,13 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { canPerformAction } from "@/src/lib/permissions"
 import { requiredIdSchema } from "@/src/lib/validators"
+import { UserRole } from "@/src/generated/prisma/client"
 
 export interface SupplierSummary {
   id: string
@@ -31,6 +31,7 @@ const listSchema = z.object({
   organizationId: requiredIdSchema,
   search: z.string().optional(),
   type: z.string().optional(),
+  limit: z.number().int().min(1).max(200).default(100),
 })
 
 const createSupplierSchema = z.object({
@@ -52,21 +53,15 @@ export async function getSuppliers(
   data: unknown,
 ): Promise<ActionResult<SupplierSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = listSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Donnees invalides" }
     }
 
-    const { organizationId, search, type } = parsed.data
+    const { organizationId, search, type, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SUPPLIERS")
+    if (!accessResult.success) return accessResult
 
     const suppliers = await prisma.supplier.findMany({
       where: {
@@ -80,13 +75,15 @@ export async function getSuppliers(
         } : {}),
         ...(type ? { type } : {}),
       },
-      include: {
-        purchases: {
-          select: {
-            totalFcfa: true,
-            paidFcfa: true,
-          },
-        },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        address: true,
+        type: true,
+        notes: true,
+        createdAt: true,
         _count: {
           select: {
             purchases: true,
@@ -95,13 +92,40 @@ export async function getSuppliers(
         },
       },
       orderBy: { name: "asc" },
+      take: limit,
     })
+
+    const purchasesBySupplierId = suppliers.length > 0
+      ? await prisma.purchase.groupBy({
+          by: ["supplierId"],
+          where: {
+            organizationId,
+            supplierId: { in: suppliers.map((supplier) => supplier.id) },
+          },
+          _sum: {
+            totalFcfa: true,
+            paidFcfa: true,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      : []
+
+    const purchasesMap = new Map(
+      purchasesBySupplierId.flatMap((entry) => (
+        entry.supplierId
+          ? [[entry.supplierId, entry]]
+          : []
+      )),
+    )
 
     return {
       success: true,
       data: suppliers.map((supplier) => {
-        const totalPurchasedFcfa = supplier.purchases.reduce((sum, purchase) => sum + purchase.totalFcfa, 0)
-        const paidFcfa = supplier.purchases.reduce((sum, purchase) => sum + purchase.paidFcfa, 0)
+        const purchaseAggregate = purchasesMap.get(supplier.id)
+        const totalPurchasedFcfa = purchaseAggregate?._sum.totalFcfa ?? 0
+        const paidFcfa = purchaseAggregate?._sum.paidFcfa ?? 0
 
         return {
           id: supplier.id,
@@ -112,7 +136,7 @@ export async function getSuppliers(
           type: supplier.type,
           notes: supplier.notes,
           createdAt: supplier.createdAt,
-          purchasesCount: supplier._count.purchases,
+          purchasesCount: purchaseAggregate?._count._all ?? supplier._count.purchases,
           batchesCount: supplier._count.batches,
           totalPurchasedFcfa,
           paidFcfa,
@@ -129,9 +153,6 @@ export async function createSupplier(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createSupplierSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0]?.message ?? "Donnees invalides" }
@@ -139,15 +160,14 @@ export async function createSupplier(
 
     const { organizationId, ...fields } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SUPPLIERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusee",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
-      return { success: false, error: "Permission refusee" }
-    }
+    if (!roleResult.success) return roleResult
 
     const supplier = await prisma.supplier.create({
       data: {
@@ -163,7 +183,7 @@ export async function createSupplier(
     })
 
     await createAuditLog({
-      userId: sessionResult.data.user.id,
+      userId: accessResult.data.session.user.id,
       organizationId,
       action: AuditAction.CREATE,
       resourceType: "Supplier",
@@ -181,9 +201,6 @@ export async function deleteSupplier(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = deleteSupplierSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Donnees invalides" }
@@ -191,15 +208,14 @@ export async function deleteSupplier(
 
     const { organizationId, supplierId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "SUPPLIERS")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusee",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
-      return { success: false, error: "Permission refusee" }
-    }
+    if (!roleResult.success) return roleResult
 
     const existing = await prisma.supplier.findFirst({
       where: { id: supplierId, organizationId },
@@ -229,7 +245,7 @@ export async function deleteSupplier(
     await prisma.supplier.delete({ where: { id: supplierId } })
 
     await createAuditLog({
-      userId: sessionResult.data.user.id,
+      userId: accessResult.data.session.user.id,
       organizationId,
       action: AuditAction.DELETE,
       resourceType: "Supplier",

@@ -2,11 +2,12 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { toast } from "sonner"
-import { Mail, RotateCcw, ShieldCheck, Trash2, UserPlus2 } from "lucide-react"
+import { BellRing, Mail, RotateCcw, ShieldCheck, Trash2, UserPlus2 } from "lucide-react"
 import {
   addUserToOrganizationByEmail,
   removeUserFromOrganization,
   updateUserModulePermissions,
+  updateUserNotificationPreference,
   updateUserRole,
   type OrgMember,
 } from "@/src/actions/organizations"
@@ -159,6 +160,26 @@ export function TeamManagementClient({
     })
   }
 
+  const handleToggleNotificationEmail = (member: OrgMember) => {
+    startTransition(async () => {
+      const result = await updateUserNotificationPreference({
+        organizationId,
+        targetUserId: member.userId,
+        emailNotificationsEnabled: !member.emailNotificationsEnabled,
+      })
+
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+
+      setMembers((previous) => previous.map((item) => (
+        item.userId === member.userId ? result.data : item
+      )))
+      toast.success("Preference email mise a jour")
+    })
+  }
+
   return (
     <div className="space-y-4">
       <div className={`rounded-2xl border p-4 ${
@@ -270,6 +291,27 @@ export function TeamManagementClient({
               )}
 
               <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                <div className="flex flex-col gap-2 rounded-2xl border border-gray-100 bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Emails automatiques</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Recoit le recap des alertes generees automatiquement par SunuFarm.
+                      </p>
+                    </div>
+
+                    <Button
+                      variant={member.emailNotificationsEnabled ? "primary" : "outline"}
+                      size="sm"
+                      disabled={!canManageTeam || isPending}
+                      onClick={() => handleToggleNotificationEmail(member)}
+                    >
+                      <BellRing className="h-4 w-4" />
+                      {member.emailNotificationsEnabled ? "Actifs" : "Desactives"}
+                    </Button>
+                  </div>
+                </div>
+
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-semibold text-gray-900">Acces modules</p>

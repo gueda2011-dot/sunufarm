@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server"
 import { adminRejectPaymentTransaction } from "@/src/actions/subscriptions"
+import { apiError, apiFromActionResult } from "@/src/lib/api-response"
 import {
   applyRateLimit,
   createRateLimitHeaders,
@@ -12,10 +12,10 @@ export async function POST(
   { params }: { params: Promise<{ transactionId: string }> },
 ) {
   if (!isTrustedMutationOrigin(request)) {
-    return NextResponse.json(
-      { success: false, error: "Origine de requete non autorisee." },
-      { status: 403 },
-    )
+    return apiError("Origine de requete non autorisee.", {
+      status: 403,
+      code: "UNTRUSTED_ORIGIN",
+    })
   }
 
   const { transactionId } = await params
@@ -26,10 +26,11 @@ export async function POST(
   })
 
   if (!rateLimit.allowed) {
-    return NextResponse.json(
-      { success: false, error: "Trop de tentatives de rejet. Reessayez dans un instant." },
-      { status: 429, headers: createRateLimitHeaders(rateLimit, 10) },
-    )
+    return apiError("Trop de tentatives de rejet. Reessayez dans un instant.", {
+      status: 429,
+      code: "RATE_LIMITED",
+      headers: createRateLimitHeaders(rateLimit, 10),
+    })
   }
 
   const result = await adminRejectPaymentTransaction(
@@ -37,12 +38,5 @@ export async function POST(
     getRequestAuditContext(request.headers),
   )
 
-  if (!result.success) {
-    return NextResponse.json(
-      { success: false, error: result.error },
-      { status: 400 },
-    )
-  }
-
-  return NextResponse.json(result)
+  return apiFromActionResult(result)
 }

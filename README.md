@@ -36,12 +36,29 @@ npm install
 2. Configurer les variables d'environnement a partir de `.env.example`
 
 Variables importantes :
-- `DATABASE_URL`
-- `AUTH_SECRET` ou `NEXTAUTH_SECRET`
+- `SUNUFARM_DATABASE_URL`
+- `SUNUFARM_DIRECT_URL`
+- `AUTH_SECRET`
+- `AUTH_URL`
+- `NEXTAUTH_SECRET` et `NEXTAUTH_URL` restent acceptes comme alias de compatibilite
 - variables Resend si l'envoi d'email est active
+- `MAIL_FROM` si l'envoi d'email est active
+- `CRON_SECRET` pour securiser les notifications automatiques
 - variables paiements si les transactions sont activees
 
 3. Generer Prisma et appliquer les migrations
+
+```bash
+npx prisma generate
+```
+
+Pour un premier demarrage en local :
+
+```bash
+npx prisma db push
+```
+
+Pour un environnement deja migre ou un deploiement :
 
 ```bash
 npx prisma migrate deploy
@@ -104,7 +121,9 @@ Cela couvre actuellement :
 - journalisation structuree dans `src/lib/logger.ts`
 - audit log metier dans `src/lib/audit.ts`
 - checklist de deploiement dans [docs/OPERATIONS.md](./docs/OPERATIONS.md)
-- exports CSV mensuels disponibles dans les rapports
+- roadmap de scalabilite dans [docs/SCALABILITY_ROADMAP.md](./docs/SCALABILITY_ROADMAP.md)
+- exports CSV, Excel et PDF disponibles dans les rapports
+- cron automatique toutes les 6 heures pour generer les notifications et envoyer un digest email si Resend est configure
 - base PWA avec `manifest`, `icon` et `apple-icon`
 
 ## Tests

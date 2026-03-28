@@ -29,8 +29,7 @@
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -327,9 +326,6 @@ export async function getBatches(
   data: unknown,
 ): Promise<ActionResult<BatchSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -338,13 +334,10 @@ export async function getBatches(
     const { organizationId, status, type, farmId, buildingId, cursor, limit } =
       parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "BATCHES")
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     // Résoudre les fermes accessibles pour ce rôle
     const accessibleFarmIds = getAccessibleFarmIds(role, farmPermissions, "canRead")
@@ -391,9 +384,6 @@ export async function getBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -401,13 +391,10 @@ export async function getBatch(
 
     const { organizationId, batchId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "BATCHES")
+    if (!accessResult.success) return accessResult
 
-    const { role, farmPermissions } = membershipResult.data
+    const { role, farmPermissions } = accessResult.data.membership
 
     const batch = await prisma.batch.findFirst({
       where:  { id: batchId, organizationId, deletedAt: null },
@@ -444,21 +431,16 @@ export async function createBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, buildingId, ...batchData } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "BATCHES")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (!canPerformAction(role, "CREATE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -534,21 +516,16 @@ export async function updateBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = updateBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
     }
 
     const { organizationId, batchId, ...updates } = parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "BATCHES")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (!canPerformAction(role, "UPDATE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -610,9 +587,6 @@ export async function closeBatch(
   data: unknown,
 ): Promise<ActionResult<BatchDetail>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = closeBatchSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -620,12 +594,10 @@ export async function closeBatch(
 
     const { organizationId, batchId, closeStatus, closeReason, closedAt } =
       parsed.data
-    const actorId = sessionResult.data.user.id
-
-    const membershipResult = await requireMembership(actorId, organizationId)
-    if (!membershipResult.success) return membershipResult
-
-    const { role, farmPermissions } = membershipResult.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "BATCHES")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
 
     if (!canPerformAction(role, "CLOSE_BATCH")) {
       return { success: false, error: "Permission refusée" }
@@ -696,21 +668,16 @@ export async function closeBatch(
 export async function deleteBatch(
   data: unknown,
 ): Promise<ActionResult<void>> {
-  const sessionResult = await requireSession()
-  if (!sessionResult.success) return sessionResult
-
   const parsed = deleteBatchSchema.safeParse(data)
   if (!parsed.success) {
     return { success: false, error: "Données invalides" }
   }
 
   const { organizationId, batchId } = parsed.data
-  const actorId = sessionResult.data.user.id
-
-  const membershipResult = await requireMembership(actorId, organizationId)
-  if (!membershipResult.success) return membershipResult
-
-  const { role, farmPermissions } = membershipResult.data
+  const accessResult = await requireOrganizationModuleContext(organizationId, "BATCHES")
+  if (!accessResult.success) return accessResult
+  const actorId = accessResult.data.session.user.id
+  const { role, farmPermissions } = accessResult.data.membership
 
   if (!canPerformAction(role, "DELETE_BATCH")) {
     return { success: false, error: "Permission refusée" }

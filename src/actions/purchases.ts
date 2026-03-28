@@ -17,13 +17,13 @@
 import { z }           from "zod"
 import prisma          from "@/src/lib/prisma"
 import {
-  requireSession,
-  requireMembership,
+  requireOrganizationModuleContext,
+  requireRole,
   type ActionResult,
 }                      from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
-import { canPerformAction }            from "@/src/lib/permissions"
 import { requiredIdSchema, optionalIdSchema, positiveIntSchema } from "@/src/lib/validators"
+import { UserRole } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,9 +92,6 @@ export async function getPurchases(
   data: unknown,
 ): Promise<ActionResult<PurchaseSummary[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = getPurchasesSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -102,11 +99,8 @@ export async function getPurchases(
 
     const { organizationId, limit } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "PURCHASES")
+    if (!accessResult.success) return accessResult
 
     const purchases = await prisma.purchase.findMany({
       where:   { organizationId },
@@ -155,9 +149,6 @@ export async function createPurchase(
   data: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = createPurchaseSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: parsed.error.issues[0]?.message ?? "Données invalides" }
@@ -165,15 +156,14 @@ export async function createPurchase(
 
     const { organizationId, supplierId, purchaseDate, reference, notes, items } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "PURCHASES")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     // Vérifier le fournisseur si fourni
     if (supplierId) {
@@ -204,7 +194,7 @@ export async function createPurchase(
         notes:        notes     || null,
         totalFcfa,
         paidFcfa:     0,
-        createdById:  sessionResult.data.user.id,
+        createdById:  accessResult.data.session.user.id,
         items: {
           create: itemsWithTotal,
         },
@@ -213,7 +203,7 @@ export async function createPurchase(
     })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.CREATE,
       resourceType:   "Purchase",
@@ -235,9 +225,6 @@ export async function deletePurchase(
   data: unknown,
 ): Promise<ActionResult<void>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = deletePurchaseSchema.safeParse(data)
     if (!parsed.success) {
       return { success: false, error: "Données invalides" }
@@ -245,15 +232,14 @@ export async function deletePurchase(
 
     const { organizationId, purchaseId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
+    const accessResult = await requireOrganizationModuleContext(organizationId, "PURCHASES")
+    if (!accessResult.success) return accessResult
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
     )
-    if (!membershipResult.success) return membershipResult
-
-    if (!canPerformAction(membershipResult.data.role, "CREATE_PURCHASE")) {
-      return { success: false, error: "Permission refusée" }
-    }
+    if (!roleResult.success) return roleResult
 
     const purchase = await prisma.purchase.findFirst({
       where:  { id: purchaseId, organizationId },
@@ -268,7 +254,7 @@ export async function deletePurchase(
     await prisma.purchase.delete({ where: { id: purchaseId } })
 
     await createAuditLog({
-      userId:         sessionResult.data.user.id,
+      userId:         accessResult.data.session.user.id,
       organizationId,
       action:         AuditAction.DELETE,
       resourceType:   "Purchase",
@@ -290,19 +276,13 @@ export async function getSuppliers(
   data: unknown,
 ): Promise<ActionResult<{ id: string; name: string; type: string | null }[]>> {
   try {
-    const sessionResult = await requireSession()
-    if (!sessionResult.success) return sessionResult
-
     const parsed = z.object({ organizationId: requiredIdSchema }).safeParse(data)
     if (!parsed.success) return { success: false, error: "Données invalides" }
 
     const { organizationId } = parsed.data
 
-    const membershipResult = await requireMembership(
-      sessionResult.data.user.id,
-      organizationId,
-    )
-    if (!membershipResult.success) return membershipResult
+    const accessResult = await requireOrganizationModuleContext(organizationId, "PURCHASES")
+    if (!accessResult.success) return accessResult
 
     const suppliers = await prisma.supplier.findMany({
       where:   { organizationId },

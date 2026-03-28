@@ -1,38 +1,37 @@
 "use client"
 
 /**
- * SunuFarm — Header dashboard
+ * SunuFarm - Header dashboard
  *
  * Contenu :
- *   - Nom de l'organisation active (affiché à gauche, visible sur mobile)
+ *   - Nom de l'organisation active (affiche a gauche, visible sur mobile)
  *   - Cloche notifications (badge rouge si count > 0)
- *   - Avatar + nom utilisateur + dropdown (déconnexion)
+ *   - Avatar + nom utilisateur + dropdown (deconnexion)
  *
- * Note : Le Header est un Client Component car il gère le dropdown et
- * la déconnexion via signOut(). Les données (orgName, userName) sont
- * passées depuis le Server Component parent (dashboard layout).
+ * Note : Le Header est un Client Component car il gere le dropdown et
+ * la deconnexion via signOut(). Les donnees (orgName, userName) sont
+ * passees depuis le Server Component parent (dashboard layout).
  */
 
 import { useState, useRef, useEffect } from "react"
 import { signOut } from "next-auth/react"
 import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Bell, LogOut, User, ChevronDown } from "lucide-react"
-import { cn } from "@/src/lib/utils"
+import { SunuFarmLogo } from "@/src/components/branding/SunuFarmLogo"
 import { OrganizationSwitcher } from "@/src/components/layout/OrganizationSwitcher"
 import type { OrganizationMembershipSummary } from "@/src/lib/active-organization"
+import { formatAiCredits, formatRemainingDays } from "@/src/lib/formatters"
+import { cn } from "@/src/lib/utils"
 
 interface HeaderProps {
-  orgName:             string
-  plan:                SubscriptionPlan
-  memberships:         OrganizationMembershipSummary[]
+  orgName: string
+  plan: SubscriptionPlan
+  memberships: OrganizationMembershipSummary[]
   activeOrganizationId: string
-  userName:            string
-  userEmail:           string
-  /** Nombre de notifications non lues — 0 si aucune */
-  unreadCount?:        number
-  /** Jours restants dans l'essai (null si pas d'essai actif) */
+  userName: string
+  userEmail: string
+  unreadCount?: number
   trialDaysRemaining?: number | null
-  /** Crédits IA restants (-1 = illimité) */
   aiCreditsRemaining?: number
 }
 
@@ -50,7 +49,6 @@ export function Header({
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Ferme le dropdown si on clique en dehors
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -63,7 +61,6 @@ export function Header({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [dropdownOpen])
 
-  // Initiales de l'utilisateur pour l'avatar
   const initials = userName
     .split(" ")
     .map((word) => word[0]?.toUpperCase() ?? "")
@@ -79,17 +76,13 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-30 flex min-h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-2 shadow-sm sm:px-6 lg:px-8">
-      {/* Gauche : nom organisation (visible sur mobile quand sidebar est cachée) */}
       <div className="flex min-w-0 items-center gap-3 lg:hidden">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-green-600">
-          <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-white" aria-hidden="true">
-            <path
-              d="M12 3C9 3 6 5 6 8c0 2 1 3.5 2.5 4.5L8 18h8l-.5-5.5C17 11.5 18 10 18 8c0-3-3-5-6-5z"
-              fill="currentColor" opacity="0.9"
-            />
-            <circle cx="10" cy="7" r="1" fill="white" />
-          </svg>
-        </div>
+        <SunuFarmLogo
+          showText={false}
+          iconClassName="w-12"
+          className="shrink-0"
+          priority
+        />
         <div className="flex min-w-0 flex-col gap-1">
           <span className="max-w-[160px] truncate text-sm font-semibold text-gray-900">
             {orgName}
@@ -101,7 +94,6 @@ export function Header({
         </div>
       </div>
 
-      {/* Desktop : plan + bannière essai */}
       <div className="hidden lg:flex lg:items-center lg:gap-3">
         <OrganizationSwitcher
           memberships={memberships}
@@ -114,7 +106,7 @@ export function Header({
               ? "border-orange-200 bg-orange-50 text-orange-700"
               : "border-blue-200 bg-blue-50 text-blue-700",
           )}>
-            Essai — {trialDaysRemaining} jour{trialDaysRemaining > 1 ? "s" : ""} restant{trialDaysRemaining > 1 ? "s" : ""}
+            Essai - {formatRemainingDays(trialDaysRemaining)}
           </span>
         ) : (
           <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-green-700">
@@ -122,7 +114,6 @@ export function Header({
           </span>
         )}
 
-        {/* Crédits IA visibles si définis et limités */}
         {aiCreditsRemaining !== undefined && aiCreditsRemaining !== -1 && (
           <span className={cn(
             "rounded-full border px-3 py-1 text-xs font-semibold",
@@ -130,14 +121,11 @@ export function Header({
               ? "border-red-200 bg-red-50 text-red-600"
               : "border-purple-200 bg-purple-50 text-purple-700",
           )}>
-            {aiCreditsRemaining === 0
-              ? "IA épuisée"
-              : `${aiCreditsRemaining} analyse${aiCreditsRemaining > 1 ? "s" : ""} IA`}
+            {formatAiCredits(aiCreditsRemaining)}
           </span>
         )}
       </div>
 
-      {/* Mobile : bannière essai sous le nom org (si essai actif) */}
       {trialDaysRemaining !== null && (
         <div className="flex items-center lg:hidden">
           <span className={cn(
@@ -151,12 +139,10 @@ export function Header({
         </div>
       )}
 
-      {/* Droite : notifications + avatar */}
       <div className="flex items-center gap-2">
-        {/* Cloche notifications */}
         <button
           type="button"
-          className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+          className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
           aria-label={
             unreadCount > 0
               ? `${unreadCount} notification${unreadCount > 1 ? "s" : ""} non lue${unreadCount > 1 ? "s" : ""}`
@@ -174,16 +160,14 @@ export function Header({
           )}
         </button>
 
-        {/* Avatar + dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
             onClick={() => setDropdownOpen((v) => !v)}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-100 transition-colors"
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-gray-100"
             aria-expanded={dropdownOpen}
             aria-haspopup="true"
           >
-            {/* Avatar cercle avec initiales */}
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">
               {initials}
             </div>
@@ -199,10 +183,8 @@ export function Header({
             />
           </button>
 
-          {/* Dropdown menu */}
           {dropdownOpen && (
             <div className="absolute right-0 mt-1 w-56 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
-              {/* Infos utilisateur */}
               <div className="border-b border-gray-100 px-4 py-3">
                 <p className="truncate text-sm font-medium text-gray-900">
                   {userName || "Utilisateur"}
@@ -210,7 +192,6 @@ export function Header({
                 <p className="truncate text-xs text-gray-500">{userEmail}</p>
               </div>
 
-              {/* Profil (V2) */}
               <button
                 type="button"
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-900"
@@ -221,14 +202,13 @@ export function Header({
                 <span className="ml-auto text-xs text-gray-400">V2</span>
               </button>
 
-              {/* Déconnexion */}
               <button
                 type="button"
                 onClick={handleSignOut}
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
               >
                 <LogOut className="h-4 w-4" aria-hidden="true" />
-                Se déconnecter
+                Se deconnecter
               </button>
             </div>
           )}

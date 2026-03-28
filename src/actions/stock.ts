@@ -55,6 +55,7 @@ import prisma from "@/src/lib/prisma"
 import {
   requireSession,
   requireMembership,
+  requireModuleAccess,
   type ActionResult,
 } from "@/src/lib/auth"
 import { createAuditLog, AuditAction } from "@/src/lib/audit"
@@ -110,6 +111,7 @@ const movementDateSchema = z.coerce.date().refine(
 const getFeedStocksSchema = z.object({
   organizationId: requiredIdSchema,
   farmId:         optionalIdSchema,
+  limit:          z.number().int().min(1).max(100).default(50),
 })
 
 const getFeedMovementsSchema = z.object({
@@ -188,6 +190,7 @@ const createFeedMovementSchema = z.object({
 const getMedicineStocksSchema = z.object({
   organizationId: requiredIdSchema,
   farmId:         optionalIdSchema,
+  limit:          z.number().int().min(1).max(100).default(50),
 })
 
 const getMedicineMovementsSchema = z.object({
@@ -512,13 +515,15 @@ export async function getFeedStocks(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, farmId } = parsed.data
+      const { organizationId, farmId, limit } = parsed.data
 
     const membershipResult = await requireMembership(
       sessionResult.data.user.id,
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -539,11 +544,12 @@ export async function getFeedStocks(
       }
     }
 
-    const stocks = await prisma.feedStock.findMany({
-      where:   { organizationId, ...farmFilter },
-      select:  feedStockSelect,
-      orderBy: [{ farmId: "asc" }, { name: "asc" }],
-    })
+      const stocks = await prisma.feedStock.findMany({
+        where:   { organizationId, ...farmFilter },
+        select:  feedStockSelect,
+        orderBy: [{ farmId: "asc" }, { name: "asc" }],
+        take:    limit,
+      })
 
     return {
       success: true,
@@ -599,6 +605,8 @@ export async function getFeedMovements(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -700,6 +708,8 @@ export async function createFeedStock(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -768,6 +778,8 @@ export async function updateFeedStock(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -865,6 +877,8 @@ export async function createFeedMovement(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -988,13 +1002,15 @@ export async function getMedicineStocks(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, farmId } = parsed.data
+      const { organizationId, farmId, limit } = parsed.data
 
     const membershipResult = await requireMembership(
       sessionResult.data.user.id,
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -1013,11 +1029,12 @@ export async function getMedicineStocks(
       }
     }
 
-    const stocks = await prisma.medicineStock.findMany({
-      where:   { organizationId, ...farmFilter },
-      select:  medicineStockSelect,
-      orderBy: [{ farmId: "asc" }, { name: "asc" }],
-    })
+      const stocks = await prisma.medicineStock.findMany({
+        where:   { organizationId, ...farmFilter },
+        select:  medicineStockSelect,
+        orderBy: [{ farmId: "asc" }, { name: "asc" }],
+        take:    limit,
+      })
 
     return {
       success: true,
@@ -1073,6 +1090,8 @@ export async function getMedicineMovements(
       organizationId,
     )
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -1166,6 +1185,8 @@ export async function createMedicineStock(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -1238,6 +1259,8 @@ export async function updateMedicineStock(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 
@@ -1339,6 +1362,8 @@ export async function createMedicineMovement(
 
     const membershipResult = await requireMembership(actorId, organizationId)
     if (!membershipResult.success) return membershipResult
+    const moduleAccessResult = requireModuleAccess(membershipResult.data, "STOCK")
+    if (!moduleAccessResult.success) return moduleAccessResult
 
     const { role, farmPermissions } = membershipResult.data
 

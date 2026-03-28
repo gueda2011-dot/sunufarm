@@ -94,6 +94,7 @@ const vaccinationPlanItemSchema = z.object({
 const getVaccinationPlansSchema = z.object({
   organizationId: requiredIdSchema,
   batchType:      z.nativeEnum(BatchType).optional(),
+  limit:          z.number().int().min(1).max(100).default(50),
 })
 
 const createVaccinationPlanSchema = z.object({
@@ -455,7 +456,7 @@ export async function getVaccinationPlans(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, batchType } = parsed.data
+    const { organizationId, batchType, limit } = parsed.data
 
     const membershipResult = await requireMembership(
       sessionResult.data.user.id,
@@ -471,6 +472,7 @@ export async function getVaccinationPlans(
       },
       select:  vaccinationPlanSelect,
       orderBy: { name: "asc" },
+      take:    limit,
     })
 
     return { success: true, data: plans }
@@ -746,7 +748,8 @@ export async function getVaccination(
     }
 
     // Extraire batch du résultat avant de retourner (non inclus dans VaccinationSummary)
-    const { batch: _batch, ...vaccinationData } = vaccination
+    const { batch, ...vaccinationData } = vaccination
+    void batch
     return { success: true, data: vaccinationData }
   } catch {
     return { success: false, error: "Impossible de récupérer la vaccination" }
@@ -973,7 +976,8 @@ export async function updateVaccination(
       }
     }
 
-    const { batch: _batch, ...existingData } = existing
+    const { batch, ...existingData } = existing
+    void batch
 
     const vaccination = await prisma.vaccinationRecord.update({
       where:  { id: vaccinationId },
@@ -1124,7 +1128,8 @@ export async function getTreatment(
       return { success: false, error: "Accès refusé à cette ferme" }
     }
 
-    const { batch: _batch, ...treatmentData } = treatment
+    const { batch, ...treatmentData } = treatment
+    void batch
     return { success: true, data: treatmentData }
   } catch {
     return { success: false, error: "Impossible de récupérer le traitement" }
@@ -1364,7 +1369,8 @@ export async function updateTreatment(
       }
     }
 
-    const { batch: _batch, ...existingData } = existing
+    const { batch, ...existingData } = existing
+    void batch
 
     const treatment = await prisma.treatmentRecord.update({
       where:  { id: treatmentId },

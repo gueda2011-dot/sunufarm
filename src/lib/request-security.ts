@@ -1,3 +1,5 @@
+import { getServerEnv } from "@/src/lib/env"
+
 export interface AuditRequestContext {
   ipAddress?: string
   userAgent?: string
@@ -19,14 +21,14 @@ function normalizeOrigin(value: string): string {
 }
 
 function getAllowedOrigins(): string[] {
+  const env = getServerEnv()
   const values = [
-    process.env.AUTH_URL,
-    process.env.NEXTAUTH_URL,
-    process.env.NEXT_PUBLIC_APP_URL,
-    process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    env.AUTH_URL,
+    env.NEXT_PUBLIC_APP_URL,
+    env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`
       : undefined,
-    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+    env.VERCEL_URL ? `https://${env.VERCEL_URL}` : undefined,
   ].filter((value): value is string => Boolean(value))
 
   return [...new Set(values.map(normalizeOrigin))]

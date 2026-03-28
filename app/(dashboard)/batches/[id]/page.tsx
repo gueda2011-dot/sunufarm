@@ -16,6 +16,7 @@ import type { Metadata }                  from "next"
 import { auth }                           from "@/src/auth"
 import { getBatch }                       from "@/src/actions/batches"
 import type { ActionResult }             from "@/src/lib/auth"
+import { actionFailure } from "@/src/lib/action-result"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getDailyRecords }                from "@/src/actions/daily-records"
@@ -26,6 +27,10 @@ import { PlanGuardCard }                  from "@/src/components/subscription/Pl
 import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { getAIPolicy, listStoredBatchAnalyses } from "@/src/lib/ai"
+import {
+  getBatchOperationalSnapshot,
+  hasMissingBatchSaisie,
+} from "@/src/lib/batch-metrics"
 import { BatchHeader }                    from "./_components/BatchHeader"
 import { BatchAIAnalysisCard }            from "./_components/BatchAIAnalysisCard"
 import { BatchKpis }                      from "./_components/BatchKpis"
@@ -75,10 +80,12 @@ export default async function BatchDetailPage({
     getTreatments({ organizationId, batchId: id, limit: 10 }),
     canSeeProfitability
       ? getBatchProfitability({ organizationId, batchId: id })
-      : Promise.resolve<ActionResult<BatchProfitability>>({
-          success: false,
-          error: getFeatureUpgradeMessage("PROFITABILITY"),
-        }),
+      : Promise.resolve<ActionResult<BatchProfitability>>(
+          actionFailure(getFeatureUpgradeMessage("PROFITABILITY"), {
+            code: "PLAN_UPGRADE_REQUIRED",
+            status: 403,
+          }),
+        ),
     listStoredBatchAnalyses(organizationId, id, 5),
   ])
 
@@ -93,48 +100,37 @@ export default async function BatchDetailPage({
 
   // ── Agrégations opérationnelles (calculées une fois, propagées en props) ─
   const totalMortality = records.reduce((s, r) => s + r.mortality, 0)
-  const liveCount      = Math.max(0, batch.entryCount - totalMortality)
-  const mortalityRate  = batch.entryCount > 0
-    ? (totalMortality / batch.entryCount) * 100
-    : 0
 
   // records est trié date desc par l'action getDailyRecords
   const lastRecordDate = records[0]?.date ?? null
 
-  const nowMs = new Date().getTime()
-
-  // Alerte "saisie manquante" : ACTIVE + lot > 1 jour + aucune saisie récente
-  const daysSinceEntry = Math.floor(
-    (nowMs - new Date(batch.entryDate).getTime()) / 86_400_000,
-  )
-  const daysSinceLast = lastRecordDate
-    ? Math.floor((nowMs - new Date(lastRecordDate).getTime()) / 86_400_000)
-    : Infinity
-  const missingSaisie =
-    batch.status === "ACTIVE" && daysSinceEntry > 1 && daysSinceLast > 1
-
-  // Âge du lot : pour ACTIVE → aujourd'hui, pour terminé → à la date de clôture
-  const endMs  = batch.status === "ACTIVE"
-    ? nowMs
-    : new Date(batch.closedAt ?? nowMs).getTime()
-  const ageDay = batch.entryAgeDay + Math.max(
-    0,
-    Math.floor((endMs - new Date(batch.entryDate).getTime()) / 86_400_000),
-  )
+  const snapshot = getBatchOperationalSnapshot({
+    entryDate: batch.entryDate,
+    entryAgeDay: batch.entryAgeDay,
+    entryCount: batch.entryCount,
+    status: batch.status,
+    closedAt: batch.closedAt,
+    totalMortality,
+  })
+  const missingSaisie = hasMissingBatchSaisie({
+    status: batch.status,
+    entryDate: batch.entryDate,
+    lastRecordDate,
+  })
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <BatchHeader
         batch={batch}
-        ageDay={ageDay}
+        ageDay={snapshot.ageDay}
         missingSaisie={missingSaisie}
         userRole={role as string}
       />
 
       <BatchKpis
-        liveCount={liveCount}
-        totalMortality={totalMortality}
-        mortalityRate={mortalityRate}
+        liveCount={snapshot.liveCount}
+        totalMortality={snapshot.totalMortality}
+        mortalityRate={snapshot.mortalityRatePct}
         lastRecordDate={lastRecordDate}
         isActive={batch.status === "ACTIVE"}
       />
@@ -195,7 +191,7 @@ export default async function BatchDetailPage({
         entryDate={batch.entryDate}
         entryCount={batch.entryCount}
         batchType={batch.type}
-        ageDay={ageDay}
+        ageDay={snapshot.ageDay}
       />
 
       <RecentExpenses
