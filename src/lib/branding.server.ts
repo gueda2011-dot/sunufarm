@@ -4,7 +4,7 @@ import path from "node:path"
 let logoDataUriPromise: Promise<string> | null = null
 
 function getSunuFarmLogoAbsolutePath() {
-  return path.join(process.cwd(), "public", "branding", "logo-sunufarm.png")
+  return path.join(process.cwd(), "public", "branding", "icon-flat.png")
 }
 
 export function getSunuFarmLogoDataUri() {

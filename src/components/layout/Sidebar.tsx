@@ -79,7 +79,12 @@ export function Sidebar({ orgName, plan, role, modulePermissions }: SidebarProps
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 lg:bg-white lg:shadow-sm">
       <div className="flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 px-5">
-        <SunuFarmLogo className="w-28 shrink-0" priority />
+        <SunuFarmLogo
+          iconClassName="w-10"
+          textClassName="text-2xl"
+          className="shrink-0"
+          priority
+        />
         <div className="min-w-0">
           <p className="truncate text-xs text-gray-500">{orgName}</p>
         </div>

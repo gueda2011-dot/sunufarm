@@ -82,7 +82,12 @@ export function Header({
     <header className="sticky top-0 z-30 flex min-h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-2 shadow-sm sm:px-6 lg:px-8">
       {/* Gauche : nom organisation (visible sur mobile quand sidebar est cachée) */}
       <div className="flex min-w-0 items-center gap-3 lg:hidden">
-        <SunuFarmLogo className="w-24 shrink-0" priority />
+        <SunuFarmLogo
+          showText={false}
+          iconClassName="w-12"
+          className="shrink-0"
+          priority
+        />
         <div className="flex min-w-0 flex-col gap-1">
           <span className="max-w-[160px] truncate text-sm font-semibold text-gray-900">
             {orgName}
