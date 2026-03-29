@@ -7,9 +7,16 @@ import type { OrganizationSubscriptionSummary } from "@/src/lib/subscriptions.se
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 
 const ANALYSIS_MODELS = {
-  standard: "gpt-5.4-mini",
-  advanced: "gpt-5.4-mini",
-  parser: "gpt-5.4-nano",
+  openai: {
+    standard: "gpt-5.4-mini",
+    advanced: "gpt-5.4-mini",
+    parser: "gpt-5.4-nano",
+  },
+  anthropic: {
+    standard: "claude-sonnet-4-20250514",
+    advanced: "claude-sonnet-4-20250514",
+    parser: "claude-3-5-haiku-latest",
+  },
 } as const
 
 const analyzeBatchDataSchema = z.object({
@@ -94,6 +101,15 @@ interface AIPolicy {
   priorityProcessing: boolean
 }
 
+type AIProvider = "openai" | "anthropic"
+
+function getConfiguredAIProvider(): AIProvider | null {
+  const env = getServerEnv()
+  if (env.ANTHROPIC_API_KEY) return "anthropic"
+  if (env.OPENAI_API_KEY) return "openai"
+  return null
+}
+
 export interface AIBatchUsage {
   dailyUsed: number
   dailyLimit: number
@@ -120,11 +136,16 @@ export interface StoredBatchAnalysisItem {
 }
 
 export function getAIPolicy(subscription: OrganizationSubscriptionSummary): AIPolicy {
+  const provider = getConfiguredAIProvider()
+  const providerModels = provider === "anthropic"
+    ? ANALYSIS_MODELS.anthropic
+    : ANALYSIS_MODELS.openai
+
   if (subscription.isTrialActive) {
     return {
       enabled: true,
       tier: "trial",
-      model: ANALYSIS_MODELS.standard,
+      model: providerModels.standard,
       dailyLimit: 3,
       monthlyLimit: 3,
       totalTrialLimit: 3,
@@ -138,7 +159,7 @@ export function getAIPolicy(subscription: OrganizationSubscriptionSummary): AIPo
     return {
       enabled: false,
       tier: "none",
-      model: ANALYSIS_MODELS.standard,
+      model: providerModels.standard,
       dailyLimit: 0,
       monthlyLimit: 0,
       totalTrialLimit: 0,
@@ -152,7 +173,7 @@ export function getAIPolicy(subscription: OrganizationSubscriptionSummary): AIPo
     return {
       enabled: true,
       tier: "business",
-      model: ANALYSIS_MODELS.advanced,
+      model: providerModels.advanced,
       dailyLimit: 20,
       monthlyLimit: 400,
       totalTrialLimit: 0,
@@ -165,7 +186,7 @@ export function getAIPolicy(subscription: OrganizationSubscriptionSummary): AIPo
   return {
     enabled: true,
     tier: "pro",
-    model: ANALYSIS_MODELS.standard,
+    model: providerModels.standard,
     dailyLimit: 5,
     monthlyLimit: 100,
     totalTrialLimit: 0,
@@ -531,10 +552,82 @@ function extractResponseText(payload: unknown): string | null {
   return firstText ?? null
 }
 
+function extractAnthropicText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null
+  const data = payload as {
+    content?: Array<{ type?: string; text?: string }>
+  }
+
+  return data.content
+    ?.find((item) => item.type === "text" && typeof item.text === "string" && item.text.trim().length > 0)
+    ?.text ?? null
+}
+
+async function generateBatchAnalysisWithAnthropic(
+  input: BatchAnalysisInput,
+  policy: AIPolicy,
+): Promise<AIBatchAnalysisResult> {
+  const apiKey = getServerEnv().ANTHROPIC_API_KEY
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY manquant")
+  }
+
+  const recommendationDepth = policy.advanced ? "avance" : "standard"
+  const prompt = JSON.stringify({
+    tier: policy.tier,
+    recommendationDepth,
+    maxRecommendations: policy.maxRecommendations,
+    batch: input,
+  })
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: policy.model,
+      max_tokens: 1600,
+      system:
+        "Tu es le moteur d'analyse avicole de SunuFarm. Reponds uniquement en JSON valide. " +
+        "Concentre-toi sur la rentabilite, les risques, et les actions concretes. " +
+        "Pas de texte hors JSON. Si un benchmark interne est present, utilise-le explicitement. " +
+        "Si aucun benchmark n'est present, renvoie comparisonInsights comme tableau vide.",
+      messages: [
+        {
+          role: "user",
+          content:
+            "Retourne un JSON strict avec les champs summary, keyRisks, profitabilityInsights, comparisonInsights et recommendations. " +
+            "N'ajoute aucun markdown.\n" + prompt,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Anthropic error ${response.status}`)
+  }
+
+  const payload = await response.json()
+  const rawText = extractAnthropicText(payload)
+  if (!rawText) {
+    throw new Error("Reponse Anthropic vide")
+  }
+
+  return aiBatchAnalysisResponseSchema.parse(JSON.parse(rawText))
+}
+
 export async function generateBatchAnalysisWithOpenAI(
   input: BatchAnalysisInput,
   policy: AIPolicy,
 ): Promise<AIBatchAnalysisResult> {
+  const provider = getConfiguredAIProvider()
+  if (provider === "anthropic") {
+    return generateBatchAnalysisWithAnthropic(input, policy)
+  }
+
   const apiKey = getServerEnv().OPENAI_API_KEY
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY manquant")

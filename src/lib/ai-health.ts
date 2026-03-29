@@ -57,6 +57,13 @@ const healthOverviewResponseSchema = z.object({
 
 export type HealthOverviewResult = z.infer<typeof healthOverviewResponseSchema>
 
+function getConfiguredAIProvider(): "openai" | "anthropic" | null {
+  const env = getServerEnv()
+  if (env.ANTHROPIC_API_KEY) return "anthropic"
+  if (env.OPENAI_API_KEY) return "openai"
+  return null
+}
+
 function extractResponseText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null
   const data = payload as {
@@ -72,6 +79,17 @@ function extractResponseText(payload: unknown): string | null {
     ?.flatMap((item) => item.content ?? [])
     .map((content) => content.text)
     .find((value): value is string => typeof value === "string" && value.trim().length > 0) ?? null
+}
+
+function extractAnthropicText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null
+  const data = payload as {
+    content?: Array<{ type?: string; text?: string }>
+  }
+
+  return data.content
+    ?.find((item) => item.type === "text" && typeof item.text === "string" && item.text.trim().length > 0)
+    ?.text ?? null
 }
 
 export async function buildHealthOverviewInput(
@@ -216,6 +234,51 @@ export async function generateHealthOverviewWithOpenAI(
   input: HealthOverviewInput,
   model: string,
 ): Promise<HealthOverviewResult> {
+  const provider = getConfiguredAIProvider()
+  if (provider === "anthropic") {
+    const apiKey = getServerEnv().ANTHROPIC_API_KEY
+    if (!apiKey) {
+      throw new Error("ANTHROPIC_API_KEY manquant")
+    }
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1600,
+        system:
+          "Tu es l'assistant sanitaire de SunuFarm. Reponds uniquement en JSON valide. " +
+          "Tu aides a surveiller un elevage avicole, sans poser de diagnostic veterinaire definitif. " +
+          "Priorise les risques operationnels, les actions terrain concretes et les cas qui demandent une escalation rapide vers un veterinaire.",
+        messages: [
+          {
+            role: "user",
+            content:
+              "Retourne un JSON strict avec overallStatus, summary, keySignals, focusBatches, recommendedActions et whenToEscalate. " +
+              "N'ajoute aucun markdown.\n" + JSON.stringify(input),
+          },
+        ],
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Anthropic error ${response.status}`)
+    }
+
+    const payload = await response.json()
+    const rawText = extractAnthropicText(payload)
+    if (!rawText) {
+      throw new Error("Reponse Anthropic sante vide")
+    }
+
+    return healthOverviewResponseSchema.parse(JSON.parse(rawText))
+  }
+
   const apiKey = getServerEnv().OPENAI_API_KEY
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY manquant")
