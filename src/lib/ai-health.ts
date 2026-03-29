@@ -136,13 +136,16 @@ function inferSeverity(value: string): "low" | "medium" | "high" {
 
 function normalizeStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    return value
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .slice(0, 4)
   }
   if (typeof value === "string" && value.trim().length > 0) {
     return value
       .split(/\n|;|•|-/)
       .map((item) => item.trim())
       .filter((item) => item.length > 0)
+      .slice(0, 4)
   }
   return []
 }
@@ -189,7 +192,7 @@ function normalizeHealthOverviewPayload(payload: unknown): unknown {
           severity: "medium" as const,
           detail: "Signal a verifier.",
         }
-      })
+      }).slice(0, 6)
     : []
 
   const recommendedActions = Array.isArray(data.recommendedActions)
@@ -233,7 +236,7 @@ function normalizeHealthOverviewPayload(payload: unknown): unknown {
           priority: "soon" as const,
           why: "Action proposee par l'analyse IA sanitaire.",
         }
-      })
+      }).slice(0, 6)
     : []
 
   const focusBatches = Array.isArray(data.focusBatches)
@@ -253,6 +256,7 @@ function normalizeHealthOverviewPayload(payload: unknown): unknown {
           : "monitor" as const,
         reason: typeof item.reason === "string" ? item.reason : "Lot a verifier en priorite.",
       }))
+      .slice(0, 5)
     : []
 
   return {
