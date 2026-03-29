@@ -8,6 +8,8 @@ import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { BatchListClient } from "./_components/BatchListClient"
 
 export const metadata: Metadata = { title: "Lots d'elevage" }
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 export default async function BatchesPage() {
   const session = await auth()

@@ -92,6 +92,170 @@ function extractAnthropicText(payload: unknown): string | null {
     ?.text ?? null
 }
 
+function normalizeOverallStatus(value: unknown): "stable" | "monitor" | "urgent" {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
+  if (["stable", "ok", "normal", "calm"].includes(normalized)) return "stable"
+  if (["urgent", "critical", "critique", "alerte rouge"].includes(normalized)) return "urgent"
+  return "monitor"
+}
+
+function inferSeverity(value: string): "low" | "medium" | "high" {
+  const normalized = value.toLowerCase()
+  if (
+    normalized.includes("urgent")
+    || normalized.includes("critique")
+    || normalized.includes("mort")
+    || normalized.includes("elevee")
+    || normalized.includes("retard")
+  ) {
+    return "high"
+  }
+
+  if (
+    normalized.includes("surve")
+    || normalized.includes("baisse")
+    || normalized.includes("attention")
+    || normalized.includes("traitement")
+  ) {
+    return "medium"
+  }
+
+  return "low"
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value
+      .split(/\n|;|•|-/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+  }
+  return []
+}
+
+function normalizeHealthOverviewPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload
+
+  const data = payload as Record<string, unknown>
+  const keySignals = Array.isArray(data.keySignals)
+    ? data.keySignals.map((item) => {
+        if (typeof item === "string") {
+          return {
+            label: item,
+            severity: inferSeverity(item),
+            detail: item,
+          }
+        }
+
+        if (item && typeof item === "object") {
+          const signal = item as Record<string, unknown>
+          const label = typeof signal.label === "string"
+            ? signal.label
+            : typeof signal.title === "string"
+              ? signal.title
+              : typeof signal.detail === "string"
+                ? signal.detail
+                : "Signal sanitaire"
+          const detail = typeof signal.detail === "string"
+            ? signal.detail
+            : typeof signal.reason === "string"
+              ? signal.reason
+              : label
+          return {
+            label,
+            severity: typeof signal.severity === "string"
+              ? inferSeverity(signal.severity)
+              : inferSeverity(detail),
+            detail,
+          }
+        }
+
+        return {
+          label: "Signal sanitaire",
+          severity: "medium" as const,
+          detail: "Signal a verifier.",
+        }
+      })
+    : []
+
+  const recommendedActions = Array.isArray(data.recommendedActions)
+    ? data.recommendedActions.map((item) => {
+        if (typeof item === "string") {
+          return {
+            action: item,
+            priority: inferSeverity(item) === "high" ? "immediate" : "soon",
+            why: "Action proposee par l'analyse IA sanitaire.",
+          }
+        }
+
+        if (item && typeof item === "object") {
+          const action = item as Record<string, unknown>
+          const actionLabel = typeof action.action === "string"
+            ? action.action
+            : typeof action.label === "string"
+              ? action.label
+              : "Action recommandee"
+          const why = typeof action.why === "string"
+            ? action.why
+            : typeof action.reason === "string"
+              ? action.reason
+              : "Action proposee par l'analyse IA sanitaire."
+          const priorityValue = typeof action.priority === "string" ? action.priority.toLowerCase() : ""
+          const priority = priorityValue === "immediate" || priorityValue === "soon" || priorityValue === "monitor"
+            ? priorityValue
+            : inferSeverity(`${actionLabel} ${why}`) === "high"
+              ? "immediate"
+              : "soon"
+
+          return {
+            action: actionLabel,
+            priority,
+            why,
+          }
+        }
+
+        return {
+          action: "Verifier la situation sanitaire",
+          priority: "soon" as const,
+          why: "Action proposee par l'analyse IA sanitaire.",
+        }
+      })
+    : []
+
+  const focusBatches = Array.isArray(data.focusBatches)
+    ? data.focusBatches
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      .map((item) => ({
+        batchId: typeof item.batchId === "string" ? item.batchId : "",
+        batchNumber: typeof item.batchNumber === "string"
+          ? item.batchNumber
+          : typeof item.batch === "string"
+            ? item.batch
+            : "Lot a surveiller",
+        urgency: inferSeverity(
+          `${typeof item.urgency === "string" ? item.urgency : ""} ${typeof item.reason === "string" ? item.reason : ""}`,
+        ) === "high"
+          ? "urgent" as const
+          : "monitor" as const,
+        reason: typeof item.reason === "string" ? item.reason : "Lot a verifier en priorite.",
+      }))
+    : []
+
+  return {
+    overallStatus: normalizeOverallStatus(data.overallStatus),
+    summary: typeof data.summary === "string"
+      ? data.summary
+      : "Analyse sanitaire generee par l'IA.",
+    keySignals,
+    focusBatches,
+    recommendedActions,
+    whenToEscalate: normalizeStringArray(data.whenToEscalate),
+  }
+}
+
 export async function buildHealthOverviewInput(
   organizationId: string,
   lookbackDays = 7,
@@ -276,7 +440,7 @@ export async function generateHealthOverviewWithOpenAI(
       throw new Error("Reponse Anthropic sante vide")
     }
 
-    return healthOverviewResponseSchema.parse(JSON.parse(rawText))
+    return healthOverviewResponseSchema.parse(normalizeHealthOverviewPayload(JSON.parse(rawText)))
   }
 
   const apiKey = getServerEnv().OPENAI_API_KEY
@@ -388,5 +552,5 @@ export async function generateHealthOverviewWithOpenAI(
     throw new Error("Reponse IA sante vide")
   }
 
-  return healthOverviewResponseSchema.parse(JSON.parse(rawText))
+  return healthOverviewResponseSchema.parse(normalizeHealthOverviewPayload(JSON.parse(rawText)))
 }

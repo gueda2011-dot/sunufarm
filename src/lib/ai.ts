@@ -563,6 +563,168 @@ function extractAnthropicText(payload: unknown): string | null {
     ?.text ?? null
 }
 
+function stripJsonCodeFence(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith("```")) return trimmed
+
+  return trimmed
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim()
+}
+
+function normalizeRiskSeverity(value: unknown): "low" | "medium" | "high" {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
+  if (["high", "critique", "critical", "eleve", "élevé"].includes(normalized)) return "high"
+  if (["medium", "moyen", "modere", "modéré"].includes(normalized)) return "medium"
+  return "low"
+}
+
+function normalizeRecommendationPriority(value: unknown, text = ""): "immediate" | "soon" | "monitor" {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
+  if (normalized === "immediate" || normalized === "soon" || normalized === "monitor") {
+    return normalized
+  }
+
+  if (typeof value === "number") {
+    if (value <= 2) return "immediate"
+    if (value <= 4) return "soon"
+    return "monitor"
+  }
+
+  const textValue = text.toLowerCase()
+  if (textValue.includes("urgent") || textValue.includes("immediat")) return "immediate"
+  if (textValue.includes("surve")) return "monitor"
+  return "soon"
+}
+
+function normalizeBatchAnalysisPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload
+
+  const data = payload as Record<string, unknown>
+  const summary = typeof data.summary === "string"
+    ? data.summary
+    : data.summary && typeof data.summary === "object"
+      ? Object.entries(data.summary as Record<string, unknown>)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join(" | ")
+      : "Analyse du lot generee par l'IA."
+
+  const keyRisks = Array.isArray(data.keyRisks)
+    ? data.keyRisks.map((item) => {
+        if (!item || typeof item !== "object") {
+          return {
+            title: "Risque a verifier",
+            severity: "medium" as const,
+            reason: "Signal detecte par l'analyse IA.",
+          }
+        }
+
+        const risk = item as Record<string, unknown>
+        const title = typeof risk.title === "string"
+          ? risk.title
+          : typeof risk.risk === "string"
+            ? risk.risk
+            : "Risque a verifier"
+        const reason = typeof risk.reason === "string"
+          ? risk.reason
+          : typeof risk.impact === "string"
+            ? risk.impact
+            : title
+
+        return {
+          title,
+          severity: normalizeRiskSeverity(risk.severity),
+          reason,
+        }
+      })
+    : []
+
+  const profitabilityInsights = Array.isArray(data.profitabilityInsights)
+    ? data.profitabilityInsights.map((item) => {
+        if (typeof item === "string") return item
+        if (item && typeof item === "object") {
+          const insight = item as Record<string, unknown>
+          const metric = typeof insight.metric === "string" ? insight.metric : "Indicateur"
+          const value = typeof insight.value === "number" || typeof insight.value === "string"
+            ? String(insight.value)
+            : ""
+          const benchmark = typeof insight.benchmark === "number" || typeof insight.benchmark === "string"
+            ? ` vs ${insight.benchmark}`
+            : ""
+          const variation = typeof insight.variation === "string" ? ` (${insight.variation})` : ""
+          const status = typeof insight.status === "string" ? ` - ${insight.status}` : ""
+          return `${metric}: ${value}${benchmark}${variation}${status}`.trim()
+        }
+        return "Indicateur de rentabilite a verifier."
+      })
+    : []
+
+  const comparisonInsights = Array.isArray(data.comparisonInsights)
+    ? data.comparisonInsights.map((item) => {
+        if (typeof item === "string") return item
+        if (item && typeof item === "object") {
+          const comparison = item as Record<string, unknown>
+          const aspect = typeof comparison.aspect === "string" ? comparison.aspect : "Comparaison"
+          const status = typeof comparison.status === "string"
+            ? comparison.status
+            : typeof comparison.detail === "string"
+              ? comparison.detail
+              : "A verifier"
+          return `${aspect}: ${status}`
+        }
+        return "Comparaison a verifier."
+      })
+    : []
+
+  const recommendations = Array.isArray(data.recommendations)
+    ? data.recommendations.map((item) => {
+        if (typeof item === "string") {
+          return {
+            action: item,
+            priority: normalizeRecommendationPriority(undefined, item),
+            why: "Action proposee par l'analyse IA du lot.",
+          }
+        }
+
+        if (item && typeof item === "object") {
+          const recommendation = item as Record<string, unknown>
+          const action = typeof recommendation.action === "string"
+            ? recommendation.action
+            : typeof recommendation.title === "string"
+              ? recommendation.title
+              : "Action recommandee"
+          const why = typeof recommendation.why === "string"
+            ? recommendation.why
+            : typeof recommendation.category === "string"
+              ? recommendation.category
+              : "Action proposee par l'analyse IA du lot."
+
+          return {
+            action,
+            priority: normalizeRecommendationPriority(recommendation.priority, `${action} ${why}`),
+            why,
+          }
+        }
+
+        return {
+          action: "Verifier la performance du lot",
+          priority: "soon" as const,
+          why: "Action proposee par l'analyse IA du lot.",
+        }
+      })
+    : []
+
+  return {
+    summary,
+    keyRisks,
+    profitabilityInsights,
+    comparisonInsights,
+    recommendations,
+  }
+}
+
 async function generateBatchAnalysisWithAnthropic(
   input: BatchAnalysisInput,
   policy: AIPolicy,
@@ -616,7 +778,9 @@ async function generateBatchAnalysisWithAnthropic(
     throw new Error("Reponse Anthropic vide")
   }
 
-  return aiBatchAnalysisResponseSchema.parse(JSON.parse(rawText))
+  return aiBatchAnalysisResponseSchema.parse(
+    normalizeBatchAnalysisPayload(JSON.parse(stripJsonCodeFence(rawText))),
+  )
 }
 
 export async function generateBatchAnalysisWithOpenAI(
