@@ -41,6 +41,7 @@ import {
   hasUnlimitedAiAccess,
   resolveAiCreditsRemaining,
 } from "@/src/lib/subscription-rules"
+import { getAdminBaseUrl, sendAdminAlertEmail } from "@/src/lib/admin-alerts"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -153,6 +154,19 @@ export async function createSubscriptionPaymentRequest(
         paymentReference: paymentReference || null,
         transactionId: transaction.id,
       },
+    })
+
+    await sendAdminAlertEmail({
+      title: "Nouvelle demande de paiement",
+      intro: "Une organisation a soumis une nouvelle demande de paiement d'abonnement.",
+      details: [
+        { label: "Organisation ID", value: organizationId },
+        { label: "Plan demande", value: requestedPlan },
+        { label: "Montant", value: `${PLAN_DEFINITIONS[requestedPlan].monthlyPriceFcfa.toLocaleString("fr-SN")} FCFA` },
+        { label: "Methode", value: paymentMethod },
+      ],
+      actionLabel: "Voir l'organisation",
+      actionUrl: getAdminBaseUrl(`/admin/organizations/${organizationId}`),
     })
 
     revalidatePath("/settings")
@@ -607,6 +621,18 @@ export async function adminConfirmPaymentTransaction(
       after: { status: "CONFIRMED_MANUALLY" },
     })
 
+    await sendAdminAlertEmail({
+      title: "Paiement confirme",
+      intro: "Une transaction d'abonnement vient d'etre confirmee.",
+      details: [
+        { label: "Organisation ID", value: transaction.organizationId },
+        { label: "Transaction ID", value: transaction.id },
+        { label: "Statut", value: "CONFIRMED_MANUALLY" },
+      ],
+      actionLabel: "Voir l'organisation",
+      actionUrl: getAdminBaseUrl(`/admin/organizations/${transaction.organizationId}`),
+    })
+
     revalidatePath("/admin")
     revalidatePath(`/admin/organizations/${transaction.organizationId}`)
     revalidatePath("/settings")
@@ -683,6 +709,18 @@ export async function adminRejectPaymentTransaction(
       ipAddress: auditContext?.ipAddress,
       userAgent: auditContext?.userAgent,
       after: { status: "REJECTED_MANUALLY" },
+    })
+
+    await sendAdminAlertEmail({
+      title: "Paiement rejete",
+      intro: "Une transaction d'abonnement a ete rejetee.",
+      details: [
+        { label: "Organisation ID", value: transaction.organizationId },
+        { label: "Transaction ID", value: transaction.id },
+        { label: "Statut", value: "REJECTED_MANUALLY" },
+      ],
+      actionLabel: "Voir l'organisation",
+      actionUrl: getAdminBaseUrl(`/admin/organizations/${transaction.organizationId}`),
     })
 
     revalidatePath("/admin")

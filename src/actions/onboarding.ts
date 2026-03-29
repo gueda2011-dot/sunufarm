@@ -24,6 +24,7 @@ import {
   TRIAL_DAYS,
 } from "@/src/lib/subscriptions"
 import { logger } from "@/src/lib/logger"
+import { getAdminBaseUrl, sendAdminAlertEmail } from "@/src/lib/admin-alerts"
 
 const registerUserSchema = z.object({
   name: z.string().trim().min(2, "Nom requis").max(120, "Nom trop long"),
@@ -152,6 +153,18 @@ export async function registerUserAccount(
         error: emailResult.error,
       }
     }
+
+    await sendAdminAlertEmail({
+      title: "Nouvelle inscription",
+      intro: "Un nouvel utilisateur vient de creer un compte SunuFarm.",
+      details: [
+        { label: "Nom", value: parsed.data.name.trim() },
+        { label: "Email", value: email },
+        { label: "Telephone", value: phone ?? "Non renseigne" },
+      ],
+      actionLabel: "Ouvrir l'administration",
+      actionUrl: getAdminBaseUrl("/admin"),
+    })
 
     return {
       success: true,
@@ -307,6 +320,18 @@ export async function completeOnboarding(
 
     revalidatePath("/dashboard")
     revalidatePath("/settings")
+
+    await sendAdminAlertEmail({
+      title: "Onboarding complete",
+      intro: "Une nouvelle organisation vient de terminer son onboarding.",
+      details: [
+        { label: "Organisation", value: created.organizationName },
+        { label: "Organization ID", value: created.organizationId },
+        { label: "Plan", value: "BASIC - TRIAL" },
+      ],
+      actionLabel: "Voir l'organisation",
+      actionUrl: getAdminBaseUrl(`/admin/organizations/${created.organizationId}`),
+    })
 
     return {
       success: true,

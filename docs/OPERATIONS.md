@@ -45,6 +45,7 @@
 
 - `CRON_SECRET` pour proteger `GET /api/cron/notifications`
 - `RESEND_API_KEY` + `MAIL_FROM` pour activer les emails transactionnels et le digest de notifications
+- `ADMIN_ALERT_EMAILS` pour forcer les destinataires des alertes admin email sur inscription et paiements
 - sur Vercel Hobby, le cron est volontairement limite a `1 fois par jour`
 - au moment du lancement commercial ou du passage sur un plan payant, remettre la frequence cible a `toutes les 6 heures`
 
