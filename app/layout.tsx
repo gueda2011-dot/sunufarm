@@ -1,9 +1,7 @@
 import type { Metadata, Viewport } from "next"
-import { headers } from "next/headers"
 import { Toaster } from "sonner"
 import { QueryProvider } from "@/src/components/providers/QueryProvider"
 import { ServiceWorkerRegistration } from "@/src/components/pwa/ServiceWorkerRegistration"
-import { getServerEnv } from "@/src/lib/env"
 import "./globals.css"
 
 const BASE_METADATA: Metadata = {
@@ -29,37 +27,10 @@ const BASE_METADATA: Metadata = {
   },
 }
 
-function getConfiguredAppHost(): string | null {
-  const configuredUrl = getServerEnv().NEXT_PUBLIC_APP_URL
-  if (!configuredUrl) return null
-
-  try {
-    return new URL(configuredUrl).host
-  } catch {
-    return null
-  }
-}
-
 export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers()
-  const currentHost =
-    requestHeaders.get("x-forwarded-host") ??
-    requestHeaders.get("host") ??
-    ""
-
-  const configuredHost = getConfiguredAppHost()
-  const vercelEnv = getServerEnv().VERCEL_ENV
-
-  const isPreviewDeployment =
-    vercelEnv === "preview" ||
-    (
-      currentHost.endsWith(".vercel.app") &&
-      (!configuredHost || currentHost !== configuredHost)
-    )
-
   return {
     ...BASE_METADATA,
-    ...(isPreviewDeployment ? {} : { manifest: "/manifest.webmanifest" }),
+    manifest: "/manifest.webmanifest",
   }
 }
 
