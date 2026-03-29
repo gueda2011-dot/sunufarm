@@ -256,6 +256,7 @@ function normalizeHealthOverviewPayload(payload: unknown): unknown {
           : "monitor" as const,
         reason: typeof item.reason === "string" ? item.reason : "Lot a verifier en priorite.",
       }))
+      .filter((item) => item.batchId.trim().length > 0)
       .slice(0, 5)
     : []
 
