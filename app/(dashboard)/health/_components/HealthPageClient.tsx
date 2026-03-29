@@ -10,6 +10,7 @@ import type {
   VaccinationSummary,
 } from "@/src/actions/health"
 import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
+import { HealthAIOverviewCard } from "./HealthAIOverviewCard"
 
 interface BatchInfo {
   number: string
@@ -17,8 +18,13 @@ interface BatchInfo {
 }
 
 interface Props {
+  organizationId: string
   currentPlan: SubscriptionPlan
   canViewAdvancedHealth: boolean
+  canUseHealthAI: boolean
+  healthAIUpsellMessage?: string
+  healthAIAccessLabel: string
+  planLabel: string
   vaccinations: VaccinationSummary[]
   treatments: TreatmentSummary[]
   vaccinationPlans: VaccinationPlanSummary[]
@@ -73,8 +79,13 @@ function KpiCard({
 type Tab = "vaccinations" | "traitements"
 
 export function HealthPageClient({
+  organizationId,
   currentPlan,
   canViewAdvancedHealth,
+  canUseHealthAI,
+  healthAIUpsellMessage,
+  healthAIAccessLabel,
+  planLabel,
   vaccinations,
   treatments,
   vaccinationPlans,
@@ -137,6 +148,14 @@ export function HealthPageClient({
           </>
         ) : null}
       </div>
+
+      <HealthAIOverviewCard
+        organizationId={organizationId}
+        enabled={canUseHealthAI}
+        planLabel={planLabel}
+        aiAccessLabel={healthAIAccessLabel}
+        upsellMessage={healthAIUpsellMessage}
+      />
 
       {canViewAdvancedHealth ? (
         <>

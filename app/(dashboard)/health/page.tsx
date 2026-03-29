@@ -15,6 +15,7 @@ import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { getAIPolicy } from "@/src/lib/ai"
 import { HealthPageClient }               from "./_components/HealthPageClient"
 
 export const metadata: Metadata = { title: "Santé animale" }
@@ -30,6 +31,7 @@ export default async function HealthPage() {
   const { organizationId } = activeMembership
   const subscription = await getOrganizationSubscription(organizationId)
   const canViewAdvancedHealth = hasPlanFeature(subscription.plan, "ADVANCED_HEALTH")
+  const aiPolicy = getAIPolicy(subscription)
 
   // Fetch parallèle : vaccinations + traitements + map lots actifs
   const [vaccinationsResult, treatmentsResult, vaccinationPlansResult, batches] = await Promise.all([
@@ -110,8 +112,21 @@ export default async function HealthPage() {
 
   return (
     <HealthPageClient
+      organizationId={organizationId}
       currentPlan={subscription.plan}
       canViewAdvancedHealth={canViewAdvancedHealth}
+      canUseHealthAI={aiPolicy.enabled && canViewAdvancedHealth}
+      healthAIUpsellMessage="Passe au plan Pro pour obtenir une synthese IA des risques sanitaires et des actions prioritaires."
+      healthAIAccessLabel={
+        subscription.isTrialActive
+          ? "Essai limite"
+          : aiPolicy.tier === "business"
+            ? "Business AI"
+            : aiPolicy.tier === "pro"
+              ? "Pro AI"
+              : "Upgrade"
+      }
+      planLabel={subscription.isTrialActive ? "Essai gratuit" : subscription.billingLabel}
       vaccinations={vaccinations}
       treatments={treatments}
       vaccinationPlans={vaccinationPlans}
