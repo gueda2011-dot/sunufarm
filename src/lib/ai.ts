@@ -574,6 +574,59 @@ function stripJsonCodeFence(value: string): string {
     .trim()
 }
 
+async function repairBatchAnalysisJsonWithAnthropic(rawText: string): Promise<unknown> {
+  const apiKey = getServerEnv().ANTHROPIC_API_KEY
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY manquant")
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANALYSIS_MODELS.anthropic.parser,
+      max_tokens: 1400,
+      system:
+        "Tu recois une reponse d'analyse de lot mal formatee. " +
+        "Reconstitue uniquement un JSON valide avec les champs summary, keyRisks, profitabilityInsights, comparisonInsights et recommendations. " +
+        "N'ajoute aucun markdown ni commentaire.",
+      messages: [
+        {
+          role: "user",
+          content:
+            "Repare ce JSON pour qu'il soit valide et parseable. " +
+            "Conserve le sens metier, meme si le texte source est tronque.\n" +
+            rawText,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Anthropic repair error ${response.status}`)
+  }
+
+  const payload = await response.json()
+  const repairedText = extractAnthropicText(payload)
+  if (!repairedText) {
+    throw new Error("Reponse Anthropic de reparation vide")
+  }
+
+  return JSON.parse(stripJsonCodeFence(repairedText))
+}
+
+async function parseBatchAnalysisPayload(rawText: string): Promise<unknown> {
+  try {
+    return JSON.parse(stripJsonCodeFence(rawText))
+  } catch {
+    return repairBatchAnalysisJsonWithAnthropic(rawText)
+  }
+}
+
 function normalizeRiskSeverity(value: unknown): "low" | "medium" | "high" {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
   if (["high", "critique", "critical", "eleve", "élevé"].includes(normalized)) return "high"
@@ -779,7 +832,7 @@ async function generateBatchAnalysisWithAnthropic(
   }
 
   return aiBatchAnalysisResponseSchema.parse(
-    normalizeBatchAnalysisPayload(JSON.parse(stripJsonCodeFence(rawText))),
+    normalizeBatchAnalysisPayload(await parseBatchAnalysisPayload(rawText)),
   )
 }
 
