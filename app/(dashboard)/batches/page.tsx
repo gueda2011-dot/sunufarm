@@ -2,9 +2,11 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import type { Metadata } from "next"
 import { auth } from "@/src/auth"
-import { getBatches } from "@/src/actions/batches"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
+import { getMembership } from "@/src/lib/auth"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
+import prisma from "@/src/lib/prisma"
+import { getAccessibleFarmIds } from "@/src/lib/batch-rules"
 import { BatchListClient } from "./_components/BatchListClient"
 
 export const metadata: Metadata = { title: "Lots d'elevage" }
@@ -20,8 +22,68 @@ export default async function BatchesPage() {
   ensureModuleAccess(activeMembership, "BATCHES")
 
   const { organizationId } = activeMembership
-  const result = await getBatches({ organizationId, limit: 200 })
-  const batches = result.success ? result.data : []
+  const membership = await getMembership(session.user.id, organizationId)
+  if (!membership) redirect("/start")
+
+  const accessibleFarmIds = getAccessibleFarmIds(
+    membership.role,
+    membership.farmPermissions,
+    "canRead",
+  )
+
+  const batches = accessibleFarmIds !== null && accessibleFarmIds.length === 0
+    ? []
+    : await prisma.batch.findMany({
+        where: {
+          organizationId,
+          deletedAt: null,
+          ...(accessibleFarmIds !== null
+            ? { building: { farmId: { in: accessibleFarmIds } } }
+            : {}),
+        },
+        select: {
+          id: true,
+          organizationId: true,
+          buildingId: true,
+          number: true,
+          type: true,
+          status: true,
+          entryDate: true,
+          entryCount: true,
+          entryAgeDay: true,
+          unitCostFcfa: true,
+          totalCostFcfa: true,
+          closedAt: true,
+          createdAt: true,
+          breed: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+          building: {
+            select: {
+              id: true,
+              name: true,
+              farmId: true,
+              farm: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              dailyRecords: true,
+            },
+          },
+        },
+        orderBy: { entryDate: "desc" },
+        take: 200,
+      })
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">

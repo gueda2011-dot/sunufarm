@@ -92,6 +92,17 @@ function extractAnthropicText(payload: unknown): string | null {
     ?.text ?? null
 }
 
+function stripJsonCodeFence(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith("```")) return trimmed
+
+  return trimmed
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim()
+}
+
 function normalizeOverallStatus(value: unknown): "stable" | "monitor" | "urgent" {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
   if (["stable", "ok", "normal", "calm"].includes(normalized)) return "stable"
@@ -440,7 +451,9 @@ export async function generateHealthOverviewWithOpenAI(
       throw new Error("Reponse Anthropic sante vide")
     }
 
-    return healthOverviewResponseSchema.parse(normalizeHealthOverviewPayload(JSON.parse(rawText)))
+    return healthOverviewResponseSchema.parse(
+      normalizeHealthOverviewPayload(JSON.parse(stripJsonCodeFence(rawText))),
+    )
   }
 
   const apiKey = getServerEnv().OPENAI_API_KEY
