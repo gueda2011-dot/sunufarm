@@ -129,7 +129,7 @@ export function NotificationDropdown({ organizationId, unreadCount: initialUnrea
       </button>
 
       {open && (
-        <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl border border-gray-200 bg-white shadow-lg">
+        <div className="fixed right-4 top-16 z-50 w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-gray-200 bg-white shadow-lg">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
             <span className="text-sm font-semibold text-gray-900">
               Notifications

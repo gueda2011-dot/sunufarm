@@ -249,7 +249,7 @@ async function checkFeedStockAlerts(
     candidates: belowThreshold.map((stock) => ({
       title: "Stock aliment critique",
       message:
-        `Le stock "${stock.name}" (${stock.feedType.name}) est ? ` +
+        `Le stock "${stock.name}" (${stock.feedType.name}) est a ` +
         `${stock.quantityKg.toFixed(1)} kg, sous le seuil d'alerte ` +
         `de ${stock.alertThresholdKg.toFixed(1)} kg.`,
       resourceId: stock.id,
@@ -289,9 +289,9 @@ async function checkMedicineStockAlerts(
     type: NotificationType.AUTRE,
     resourceType: "MEDICINE_STOCK",
     candidates: belowThreshold.map((stock) => ({
-      title: "Stock m?dicament bas",
+      title: "Stock medicament bas",
       message:
-        `Le stock de "${stock.name}" est ? ${stock.quantityOnHand} ${stock.unit}, ` +
+        `Le stock de "${stock.name}" est a ${stock.quantityOnHand} ${stock.unit}, ` +
         `sous le seuil d'alerte de ${stock.alertThreshold} ${stock.unit}.`,
       resourceId: stock.id,
       metadata: {
@@ -340,7 +340,7 @@ async function checkMedicineExpiryAlerts(
     )
 
     return [{
-      title: "M?dicament proche de la p?remption",
+      title: "Medicament proche de la peremption",
       message:
         `"${stock.name}" (${stock.quantityOnHand} ${stock.unit}) expire dans ` +
         `${daysLeft} jour${daysLeft > 1 ? "s" : ""}.`,
@@ -416,8 +416,8 @@ async function checkMissedDailyRecords(
     type: NotificationType.AUTRE,
     resourceType: "DAILY_RECORD_MISSING",
     candidates: missingBatches.map((batch) => ({
-      title: "Saisie journali?re manquante",
-      message: `Aucune saisie enregistr?e pour le lot ${batch.number} le ${yesterdayLabel}.`,
+      title: "Saisie journaliere manquante",
+      message: `Aucune saisie enregistree pour le lot ${batch.number} le ${yesterdayLabel}.`,
       resourceId: batch.id,
       metadata: {
         batchNumber: batch.number,
@@ -551,10 +551,10 @@ async function checkMissingMortalityReasons(
     type: NotificationType.MOTIF_MORTALITE_MANQUANT,
     resourceType: "BATCH",
     candidates: alertBatches.map((batch) => ({
-      title: "Motif de mortalit? non renseign?",
+      title: "Motif de mortalite non renseigne",
       message:
-        `Le lot ${batch.number} a enregistr? des mortalit?s sur ` +
-        `3 jours cons?cutifs sans motif renseign?.`,
+        `Le lot ${batch.number} a enregistre des mortalites sur ` +
+        `3 jours consecutifs sans motif renseigne.`,
       resourceId: batch.batchId,
       metadata: { batchNumber: batch.number, daysCount: batch.count },
     })),
