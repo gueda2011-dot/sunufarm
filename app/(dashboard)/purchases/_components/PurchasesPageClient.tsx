@@ -50,6 +50,7 @@ interface Props {
 }
 
 const UNIT_OPTIONS = ["KG", "SAC", "PIECE", "DOSE", "LITRE", "BOITE"] as const
+const FEED_SACK_WEIGHT_KG = 50
 const PAYMENT_METHODS = [
   { value: "ESPECES", label: "Especes" },
   { value: "VIREMENT", label: "Virement" },
@@ -73,11 +74,17 @@ function lineTotal(line: LineItem): number {
   return Math.round(quantity * unitPriceFcfa)
 }
 
-function emptyStockLinkDraft(quantity: number): StockLinkDraft {
+function getDefaultStockQuantity(quantity: number, unit: string) {
+  return unit.trim().toUpperCase() === "SAC"
+    ? String(quantity * FEED_SACK_WEIGHT_KG)
+    : String(quantity)
+}
+
+function emptyStockLinkDraft(quantity: number, unit: string): StockLinkDraft {
   return {
     stockType: "",
     stockId: "",
-    quantity: String(quantity),
+    quantity: getDefaultStockQuantity(quantity, unit),
     notes: "",
   }
 }
@@ -186,7 +193,12 @@ export function PurchasesPageClient({
           : {
               ...purchase,
               items: purchase.items.map((item) =>
-                item.id === purchaseItemId ? { ...item, stockLinked: true } : item,
+                item.id === purchaseItemId
+                  ? {
+                      ...item,
+                      stockLinked: true,
+                    }
+                  : item,
               ),
             },
       ),
@@ -333,7 +345,7 @@ export function PurchasesPageClient({
     setStockPurchaseId((current) => current === purchase.id ? null : purchase.id)
     setStockDrafts(
       Object.fromEntries(
-        purchase.items.map((item) => [item.id, emptyStockLinkDraft(item.quantity)]),
+        purchase.items.map((item) => [item.id, emptyStockLinkDraft(item.quantity, item.unit)]),
       ),
     )
   }
@@ -346,7 +358,7 @@ export function PurchasesPageClient({
     setStockDrafts((current) => ({
       ...current,
       [purchaseItemId]: {
-        ...(current[purchaseItemId] ?? emptyStockLinkDraft(0)),
+        ...(current[purchaseItemId] ?? emptyStockLinkDraft(0, "")),
         [field]: value,
       },
     }))
@@ -829,8 +841,9 @@ export function PurchasesPageClient({
 
                     <div className="mt-4 space-y-4">
                       {purchase.items.map((item) => {
-                        const draft = stockDrafts[item.id] ?? emptyStockLinkDraft(item.quantity)
+                        const draft = stockDrafts[item.id] ?? emptyStockLinkDraft(item.quantity, item.unit)
                         const stockOptions = draft.stockType === "FEED" ? feedStocks : medicineStocks
+                        const isFeedSackItem = item.unit.trim().toUpperCase() === "SAC"
 
                         return (
                           <div key={item.id} className="rounded-2xl border border-blue-100 bg-white p-4">
@@ -840,6 +853,11 @@ export function PurchasesPageClient({
                                 <p className="text-sm text-gray-500">
                                   {item.quantity} {item.unit} - {formatMoneyFCFA(item.totalFcfa)}
                                 </p>
+                                {item.unit.trim().toUpperCase() === "SAC" ? (
+                                  <p className="text-xs text-blue-700">
+                                    Conversion automatique pour le stock aliment: 1 sac = {FEED_SACK_WEIGHT_KG} kg
+                                  </p>
+                                ) : null}
                               </div>
                               {item.stockLinked ? (
                                 <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
@@ -886,7 +904,11 @@ export function PurchasesPageClient({
                                 </div>
 
                                 <div>
-                                  <label className="text-sm font-medium text-gray-700">Quantite a stocker</label>
+                                  <label className="text-sm font-medium text-gray-700">
+                                    {isFeedSackItem && draft.stockType === "FEED"
+                                      ? "Quantite a stocker (kg)"
+                                      : "Quantite a stocker"}
+                                  </label>
                                   <input
                                     type="number"
                                     min="0.01"
@@ -911,6 +933,12 @@ export function PurchasesPageClient({
                             {!item.stockLinked && draft.stockType && stockOptions.length === 0 ? (
                               <p className="mt-3 text-sm text-amber-700">
                                 Aucun article de stock disponible pour ce type. Cree d&apos;abord un stock.
+                              </p>
+                            ) : null}
+
+                            {!item.stockLinked && isFeedSackItem && draft.stockType === "FEED" ? (
+                              <p className="mt-3 text-xs text-blue-700">
+                                Valeur pre-remplie: {item.quantity} sac(s) = {item.quantity * FEED_SACK_WEIGHT_KG} kg.
                               </p>
                             ) : null}
 

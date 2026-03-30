@@ -23,6 +23,8 @@ import {
   UserRole,
 } from "@/src/generated/prisma/client"
 
+const FEED_SACK_WEIGHT_KG = 50
+
 export interface PurchaseItemData {
   id: string
   description: string
@@ -121,6 +123,17 @@ const purchaseSelect = {
 
 function getPurchaseItemStockReference(purchaseItemId: string) {
   return `purchase-item:${purchaseItemId}`
+}
+
+function getFeedUnitPricePerKg(
+  purchaseItem: {
+    unit: string
+    unitPriceFcfa: number
+  },
+) {
+  return purchaseItem.unit.trim().toUpperCase() === "SAC"
+    ? Math.round(purchaseItem.unitPriceFcfa / FEED_SACK_WEIGHT_KG)
+    : purchaseItem.unitPriceFcfa
 }
 
 async function decoratePurchasesWithStockLinks(
@@ -431,6 +444,7 @@ export async function linkPurchaseItemToStock(
     ].filter(Boolean).join(" | ")
 
     if (stockType === "FEED") {
+      const unitPriceFcfaPerKg = getFeedUnitPricePerKg(purchaseItem)
       const feedStock = await prisma.feedStock.findFirst({
         where: { id: stockId, organizationId },
         select: { id: true, farmId: true, feedTypeId: true, quantityKg: true },
@@ -462,8 +476,8 @@ export async function linkPurchaseItemToStock(
             feedTypeId: feedStock.feedTypeId,
             type: FeedMovementType.ENTREE,
             quantityKg: quantity,
-            unitPriceFcfa: purchaseItem.unitPriceFcfa,
-            totalFcfa: Math.round(quantity * purchaseItem.unitPriceFcfa),
+            unitPriceFcfa: unitPriceFcfaPerKg,
+            totalFcfa: Math.round(quantity * unitPriceFcfaPerKg),
             reference: movementReference,
             notes: movementNotes,
             recordedById: accessResult.data.session.user.id,
