@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  Bell,
   Building2,
   CheckCircle2,
   CreditCard,
@@ -29,6 +30,7 @@ import { AdminSignOutButton } from "./_components/AdminSignOutButton"
 import { AdminSubscriptionControl } from "./_components/AdminSubscriptionControl"
 import { AdminPaymentTransactions } from "./_components/AdminPaymentTransactions"
 import { AdminStockIntegrityPanel } from "./_components/AdminStockIntegrityPanel"
+import { AdminTriggerNotificationsButton } from "./_components/AdminTriggerNotificationsButton"
 
 export const metadata: Metadata = { title: "Admin Plateforme" }
 
@@ -483,6 +485,25 @@ export default async function AdminPage() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-6 py-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-green-50 text-green-700">
+                  <Bell className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Notifications</h2>
+                  <p className="text-sm text-gray-500">
+                    Declenche manuellement le cycle de notifications pour toutes les organisations.
+                  </p>
+                </div>
+              </div>
+              <AdminTriggerNotificationsButton />
             </div>
           </div>
         </section>
