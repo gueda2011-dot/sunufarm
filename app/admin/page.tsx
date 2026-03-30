@@ -24,9 +24,11 @@ import { PLAN_DEFINITIONS } from "@/src/lib/subscriptions"
 import { buildAppHealthReport, type AppHealthStatus } from "@/src/lib/app-health"
 import { buildEnvironmentReadiness } from "@/src/lib/environment-readiness"
 import { getServerEnv } from "@/src/lib/env"
+import { getStockOrphanIssues } from "@/src/actions/admin-stock-integrity"
 import { AdminSignOutButton } from "./_components/AdminSignOutButton"
 import { AdminSubscriptionControl } from "./_components/AdminSubscriptionControl"
 import { AdminPaymentTransactions } from "./_components/AdminPaymentTransactions"
+import { AdminStockIntegrityPanel } from "./_components/AdminStockIntegrityPanel"
 
 export const metadata: Metadata = { title: "Admin Plateforme" }
 
@@ -129,6 +131,7 @@ export default async function AdminPage() {
     stalePendingTransactionsCount,
     failedWebhookEventsLast24h,
     auditLogsLast24h,
+    stockOrphanIssuesResult,
   ] = await Promise.all([
     prisma.organization.findMany({
       where: {
@@ -257,6 +260,7 @@ export default async function AdminPage() {
         },
       },
     }),
+    getStockOrphanIssues(),
   ])
 
   const visibleOrganizations = organizations.filter((org) => org.slug !== "sunufarm-platform")
@@ -291,6 +295,7 @@ export default async function AdminPage() {
     warn: healthReport.checks.filter((check) => check.status === "warn").length,
     critical: healthReport.checks.filter((check) => check.status === "critical").length,
   }
+  const stockOrphanIssues = stockOrphanIssuesResult.success ? stockOrphanIssuesResult.data : []
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
@@ -481,6 +486,8 @@ export default async function AdminPage() {
             </div>
           </div>
         </section>
+
+        <AdminStockIntegrityPanel issues={stockOrphanIssues} />
 
         <section className="rounded-3xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-6 py-5">
