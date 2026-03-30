@@ -16,9 +16,10 @@
 import { useState, useRef, useEffect } from "react"
 import { signOut } from "next-auth/react"
 import { type SubscriptionPlan } from "@/src/generated/prisma/client"
-import { Bell, LogOut, User, ChevronDown } from "lucide-react"
+import { LogOut, User, ChevronDown } from "lucide-react"
 import { SunuFarmLogo } from "@/src/components/branding/SunuFarmLogo"
 import { OrganizationSwitcher } from "@/src/components/layout/OrganizationSwitcher"
+import { NotificationDropdown } from "@/src/components/layout/NotificationDropdown"
 import type { OrganizationMembershipSummary } from "@/src/lib/active-organization"
 import { formatAiCredits, formatRemainingDays } from "@/src/lib/formatters"
 import { cn } from "@/src/lib/utils"
@@ -140,25 +141,10 @@ export function Header({
       )}
 
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-          aria-label={
-            unreadCount > 0
-              ? `${unreadCount} notification${unreadCount > 1 ? "s" : ""} non lue${unreadCount > 1 ? "s" : ""}`
-              : "Notifications"
-          }
-        >
-          <Bell className="h-5 w-5" aria-hidden="true" />
-          {unreadCount > 0 && (
-            <span
-              className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white"
-              aria-hidden="true"
-            >
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
-        </button>
+        <NotificationDropdown
+          organizationId={activeOrganizationId}
+          unreadCount={unreadCount}
+        />
 
         <div className="relative" ref={dropdownRef}>
           <button
