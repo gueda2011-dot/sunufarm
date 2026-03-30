@@ -1,10 +1,14 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useTransition } from "react"
 import type {
   FeedMovementSummary,
   FeedStockSummary,
   MedicineStockSummary,
+} from "@/src/actions/stock"
+import {
+  createFeedStock,
+  createMedicineStock,
 } from "@/src/actions/stock"
 import {
   formatDate,
@@ -13,6 +17,10 @@ import {
 } from "@/src/lib/formatters"
 
 type Props = {
+  organizationId: string
+  canCreateStock: boolean
+  farms: Array<{ id: string; name: string }>
+  feedTypes: Array<{ id: string; name: string; code: string }>
   initialFeedStocks: FeedStockSummary[]
   initialFeedMovements: FeedMovementSummary[]
   initialMedicineStocks: MedicineStockSummary[]
@@ -69,19 +77,44 @@ function getMedicineAlertClass(stock: MedicineStockSummary) {
 }
 
 export function StockPageClient({
+  organizationId,
+  canCreateStock,
+  farms,
+  feedTypes,
   initialFeedStocks,
   initialFeedMovements,
   initialMedicineStocks,
 }: Props) {
   const [tab, setTab] = useState<StockTab>("ALIMENT")
+  const [isPending, startTransition] = useTransition()
   const [search, setSearch] = useState("")
   const [feedFilter, setFeedFilter] = useState<"ALL" | "ALERT">("ALL")
   const [medicineFilter, setMedicineFilter] = useState<"ALL" | "ALERT">("ALL")
+  const [feedStocks, setFeedStocks] = useState(initialFeedStocks)
+  const [medicineStocks, setMedicineStocks] = useState(initialMedicineStocks)
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const [feedFarmId, setFeedFarmId] = useState("")
+  const [feedTypeId, setFeedTypeId] = useState("")
+  const [feedName, setFeedName] = useState("")
+  const [feedSupplierName, setFeedSupplierName] = useState("")
+  const [feedUnitPriceFcfa, setFeedUnitPriceFcfa] = useState("")
+  const [feedAlertThresholdKg, setFeedAlertThresholdKg] = useState("")
+
+  const [medicineFarmId, setMedicineFarmId] = useState("")
+  const [medicineName, setMedicineName] = useState("")
+  const [medicineCategory, setMedicineCategory] = useState("")
+  const [medicineUnit, setMedicineUnit] = useState("boite")
+  const [medicineUnitPriceFcfa, setMedicineUnitPriceFcfa] = useState("")
+  const [medicineAlertThreshold, setMedicineAlertThreshold] = useState("")
+  const [medicineExpiryDate, setMedicineExpiryDate] = useState("")
+  const [medicineNotes, setMedicineNotes] = useState("")
 
   const normalizedSearch = search.trim().toLowerCase()
 
   const filteredFeedStocks = useMemo(() => {
-    return initialFeedStocks.filter((stock) => {
+    return feedStocks.filter((stock) => {
       const matchesSearch =
         normalizedSearch.length === 0 ||
         stock.name.toLowerCase().includes(normalizedSearch) ||
@@ -94,10 +127,10 @@ export function StockPageClient({
 
       return matchesSearch && matchesFilter
     })
-  }, [initialFeedStocks, normalizedSearch, feedFilter])
+  }, [feedStocks, normalizedSearch, feedFilter])
 
   const filteredMedicineStocks = useMemo(() => {
-    return initialMedicineStocks.filter((stock) => {
+    return medicineStocks.filter((stock) => {
       const matchesSearch =
         normalizedSearch.length === 0 ||
         stock.name.toLowerCase().includes(normalizedSearch) ||
@@ -111,25 +144,320 @@ export function StockPageClient({
 
       return matchesSearch && matchesFilter
     })
-  }, [initialMedicineStocks, normalizedSearch, medicineFilter])
+  }, [medicineStocks, normalizedSearch, medicineFilter])
 
-  const totalFeedKg = initialFeedStocks.reduce((sum, s) => sum + s.quantityKg, 0)
-  const totalFeedValue = initialFeedStocks.reduce(
+  const totalFeedKg = feedStocks.reduce((sum, s) => sum + s.quantityKg, 0)
+  const totalFeedValue = feedStocks.reduce(
     (sum, s) => sum + Math.round(s.quantityKg * s.unitPriceFcfa),
     0
   )
-  const feedAlertCount = initialFeedStocks.filter((s) => s.isBelowAlert).length
+  const feedAlertCount = feedStocks.filter((s) => s.isBelowAlert).length
 
-  const totalMedicineItems = initialMedicineStocks.length
-  const medicineAlertCount = initialMedicineStocks.filter(
+  const totalMedicineItems = medicineStocks.length
+  const medicineAlertCount = medicineStocks.filter(
     (s) => s.isBelowAlert || s.isExpiringSoon
   ).length
-  const expiringSoonCount = initialMedicineStocks.filter(
+  const expiringSoonCount = medicineStocks.filter(
     (s) => s.isExpiringSoon
   ).length
 
+  function resetCreateForm() {
+    setFormError(null)
+    setFeedFarmId("")
+    setFeedTypeId("")
+    setFeedName("")
+    setFeedSupplierName("")
+    setFeedUnitPriceFcfa("")
+    setFeedAlertThresholdKg("")
+    setMedicineFarmId("")
+    setMedicineName("")
+    setMedicineCategory("")
+    setMedicineUnit("boite")
+    setMedicineUnitPriceFcfa("")
+    setMedicineAlertThreshold("")
+    setMedicineExpiryDate("")
+    setMedicineNotes("")
+  }
+
+  function toggleCreateForm() {
+    if (showCreateForm) {
+      resetCreateForm()
+      setShowCreateForm(false)
+      return
+    }
+
+    setFormError(null)
+    setShowCreateForm(true)
+  }
+
+  function handleCreateFeedStock(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setFormError(null)
+
+    startTransition(async () => {
+      const result = await createFeedStock({
+        organizationId,
+        farmId: feedFarmId,
+        feedTypeId,
+        name: feedName,
+        supplierName: feedSupplierName || undefined,
+        unitPriceFcfa: feedUnitPriceFcfa ? Number.parseInt(feedUnitPriceFcfa, 10) : undefined,
+        alertThresholdKg: feedAlertThresholdKg ? Number.parseFloat(feedAlertThresholdKg) : undefined,
+      })
+
+      if (!result.success) {
+        setFormError(result.error)
+        return
+      }
+
+      setFeedStocks((current) => [...current, result.data].sort((a, b) => a.name.localeCompare(b.name)))
+      resetCreateForm()
+      setShowCreateForm(false)
+    })
+  }
+
+  function handleCreateMedicineStock(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setFormError(null)
+
+    startTransition(async () => {
+      const result = await createMedicineStock({
+        organizationId,
+        farmId: medicineFarmId,
+        name: medicineName,
+        category: medicineCategory || undefined,
+        unit: medicineUnit,
+        unitPriceFcfa: medicineUnitPriceFcfa ? Number.parseInt(medicineUnitPriceFcfa, 10) : undefined,
+        alertThreshold: medicineAlertThreshold ? Number.parseFloat(medicineAlertThreshold) : undefined,
+        expiryDate: medicineExpiryDate ? new Date(medicineExpiryDate) : undefined,
+        notes: medicineNotes || undefined,
+      })
+
+      if (!result.success) {
+        setFormError(result.error)
+        return
+      }
+
+      setMedicineStocks((current) => [...current, result.data].sort((a, b) => a.name.localeCompare(b.name)))
+      resetCreateForm()
+      setShowCreateForm(false)
+    })
+  }
+
   return (
     <div className="space-y-5">
+      {canCreateStock ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={toggleCreateForm}
+            className="rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700"
+          >
+            {showCreateForm
+              ? "Fermer le formulaire"
+              : tab === "ALIMENT"
+                ? "Nouvel article aliment"
+                : "Nouvel article medicament"}
+          </button>
+        </div>
+      ) : null}
+
+      {showCreateForm ? (
+        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+          {tab === "ALIMENT" ? (
+            <form onSubmit={handleCreateFeedStock} className="space-y-4">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Creer un article de stock aliment</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Cree d&apos;abord le stock cible, puis tu pourras y envoyer les achats fournisseur.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Ferme</label>
+                  <select
+                    required
+                    value={feedFarmId}
+                    onChange={(e) => setFeedFarmId(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  >
+                    <option value="">Selectionner</option>
+                    {farms.map((farm) => (
+                      <option key={farm.id} value={farm.id}>{farm.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Type d&apos;aliment</label>
+                  <select
+                    required
+                    value={feedTypeId}
+                    onChange={(e) => setFeedTypeId(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  >
+                    <option value="">Selectionner</option>
+                    {feedTypes.map((feedType) => (
+                      <option key={feedType.id} value={feedType.id}>{feedType.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Nom de l&apos;article</label>
+                  <input
+                    required
+                    value={feedName}
+                    onChange={(e) => setFeedName(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Fournisseur</label>
+                  <input
+                    value={feedSupplierName}
+                    onChange={(e) => setFeedSupplierName(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Prix unitaire</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={feedUnitPriceFcfa}
+                    onChange={(e) => setFeedUnitPriceFcfa(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Seuil d&apos;alerte (kg)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={feedAlertThresholdKg}
+                    onChange={(e) => setFeedAlertThresholdKg(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+              </div>
+
+              {formError ? <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div> : null}
+
+              <button
+                type="submit"
+                disabled={isPending}
+                className="rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
+              >
+                {isPending ? "Creation..." : "Creer l'article"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleCreateMedicineStock} className="space-y-4">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Creer un article de stock medicament</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Cet article servira de destination pour les achats et les futurs mouvements.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Ferme</label>
+                  <select
+                    required
+                    value={medicineFarmId}
+                    onChange={(e) => setMedicineFarmId(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  >
+                    <option value="">Selectionner</option>
+                    {farms.map((farm) => (
+                      <option key={farm.id} value={farm.id}>{farm.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Nom</label>
+                  <input
+                    required
+                    value={medicineName}
+                    onChange={(e) => setMedicineName(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Categorie</label>
+                  <input
+                    value={medicineCategory}
+                    onChange={(e) => setMedicineCategory(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Unite</label>
+                  <input
+                    required
+                    value={medicineUnit}
+                    onChange={(e) => setMedicineUnit(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Prix unitaire</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={medicineUnitPriceFcfa}
+                    onChange={(e) => setMedicineUnitPriceFcfa(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Seuil d&apos;alerte</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={medicineAlertThreshold}
+                    onChange={(e) => setMedicineAlertThreshold(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Date de peremption</label>
+                  <input
+                    type="date"
+                    value={medicineExpiryDate}
+                    onChange={(e) => setMedicineExpiryDate(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700">Notes</label>
+                <textarea
+                  rows={3}
+                  value={medicineNotes}
+                  onChange={(e) => setMedicineNotes(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
+                />
+              </div>
+
+              {formError ? <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div> : null}
+
+              <button
+                type="submit"
+                disabled={isPending}
+                className="rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
+              >
+                {isPending ? "Creation..." : "Creer l'article"}
+              </button>
+            </form>
+          )}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"

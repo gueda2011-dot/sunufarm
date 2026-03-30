@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation"
 import type { Metadata } from "next"
-
 import { auth } from "@/src/auth"
 import {
   getFeedMovements,
@@ -9,6 +8,8 @@ import {
 } from "@/src/actions/stock"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
+import prisma from "@/src/lib/prisma"
+import { canAccessFarm } from "@/src/lib/permissions"
 import { StockPageClient } from "./_components/StockPageClient"
 
 export const metadata: Metadata = { title: "Stock" }
@@ -26,18 +27,31 @@ export default async function StockPage() {
   }
   ensureModuleAccess(activeMembership, "STOCK")
 
-  const { organizationId } = activeMembership
+  const { organizationId, role, farmPermissions } = activeMembership
 
-  const [feedStocksResult, feedMovementsResult, medicineStocksResult] =
+  const [feedStocksResult, feedMovementsResult, medicineStocksResult, farms, feedTypes] =
     await Promise.all([
       getFeedStocks({ organizationId }),
       getFeedMovements({ organizationId, limit: 20 }),
       getMedicineStocks({ organizationId }),
+      prisma.farm.findMany({
+        where: { organizationId, deletedAt: null },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.feedType.findMany({
+        select: { id: true, name: true, code: true },
+        orderBy: { name: "asc" },
+      }),
     ])
 
   const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
   const feedMovements = feedMovementsResult.success ? feedMovementsResult.data : []
   const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
+  const writableFarms = farms.filter((farm) =>
+    canAccessFarm(role, farmPermissions, farm.id, "canWrite"),
+  )
+  const canCreateStock = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(role)
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -49,6 +63,10 @@ export default async function StockPage() {
       </div>
 
       <StockPageClient
+        organizationId={organizationId}
+        canCreateStock={canCreateStock}
+        farms={writableFarms}
+        feedTypes={feedTypes}
         initialFeedStocks={feedStocks}
         initialFeedMovements={feedMovements}
         initialMedicineStocks={medicineStocks}
