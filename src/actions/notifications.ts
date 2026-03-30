@@ -815,11 +815,11 @@ export async function generateNotifications(
 export async function generateNotificationsForOrganization(
   organizationId: string,
 ): Promise<{ created: number; targetUserIds: string[] }> {
-  // Cibler les membres OWNER et MANAGER actifs (non soft-deleted)
+  // Cibler les membres SUPER_ADMIN, OWNER et MANAGER actifs (non soft-deleted)
   const targetMembers = await prisma.userOrganization.findMany({
     where: {
       organizationId,
-      role:    { in: [UserRole.OWNER, UserRole.MANAGER] },
+      role:    { in: [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER] },
       user:    { deletedAt: null },
     },
     select: { userId: true },
