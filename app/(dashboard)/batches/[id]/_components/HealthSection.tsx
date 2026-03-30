@@ -27,6 +27,12 @@ import type {
 interface HealthSectionProps {
   vaccinations:   VaccinationSummary[]
   treatments:     TreatmentSummary[]
+  medicineStocks: Array<{
+    id: string
+    name: string
+    unit: string
+    quantityOnHand: number
+  }>
   batchId:        string
   organizationId: string
   userRole:       string
@@ -45,6 +51,7 @@ type Panel = "vaccination" | "treatment" | null
 export function HealthSection({
   vaccinations:   initialVaccinations,
   treatments:     initialTreatments,
+  medicineStocks,
   batchId,
   organizationId,
   userRole,
@@ -87,6 +94,10 @@ export function HealthSection({
         route:           (fd.get("route") as string) || undefined,
         dose:            (fd.get("dose") as string) || undefined,
         countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
+        medicineStockId: (fd.get("medicineStockId") as string) || undefined,
+        medicineQuantity: (fd.get("medicineQuantity") as string)
+          ? Number.parseFloat(fd.get("medicineQuantity") as string)
+          : undefined,
         notes:           (fd.get("notes") as string) || undefined,
       })
 
@@ -103,7 +114,7 @@ export function HealthSection({
         route:           (fd.get("route") as string) || null,
         dose:            (fd.get("dose") as string) || null,
         countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
-        medicineStockId: null,
+        medicineStockId: (fd.get("medicineStockId") as string) || null,
         notes:           (fd.get("notes") as string) || null,
         recordedById:    null,
         createdAt:       new Date(),
@@ -136,6 +147,10 @@ export function HealthSection({
         dose:         (fd.get("dose") as string) || undefined,
         durationDays: durationRaw ? parseInt(durationRaw, 10) : undefined,
         countTreated: countRaw    ? parseInt(countRaw, 10)    : undefined,
+        medicineStockId: (fd.get("medicineStockId") as string) || undefined,
+        medicineQuantity: (fd.get("medicineQuantity") as string)
+          ? Number.parseFloat(fd.get("medicineQuantity") as string)
+          : undefined,
         indication:   (fd.get("indication") as string) || undefined,
         notes:        (fd.get("notes") as string) || undefined,
       })
@@ -152,7 +167,7 @@ export function HealthSection({
         dose:            (fd.get("dose") as string) || null,
         durationDays:    durationRaw ? parseInt(durationRaw, 10) : null,
         countTreated:    countRaw    ? parseInt(countRaw, 10)    : null,
-        medicineStockId: null,
+        medicineStockId: (fd.get("medicineStockId") as string) || null,
         indication:      (fd.get("indication") as string) || null,
         notes:           (fd.get("notes") as string) || null,
         recordedById:    null,
@@ -343,6 +358,35 @@ export function HealthSection({
             />
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Stock médicament</label>
+              <select
+                name="medicineStockId"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                defaultValue=""
+              >
+                <option value="">—</option>
+                {medicineStocks.map((stock) => (
+                  <option key={stock.id} value={stock.id}>
+                    {stock.name} · {stock.quantityOnHand.toLocaleString("fr-SN")} {stock.unit}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Quantité consommée</label>
+              <input
+                name="medicineQuantity"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Ex: 1"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+
           <button
             type="submit"
             disabled={isPending}
@@ -438,6 +482,35 @@ export function HealthSection({
               placeholder="Observations..."
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Stock médicament</label>
+              <select
+                name="medicineStockId"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                defaultValue=""
+              >
+                <option value="">—</option>
+                {medicineStocks.map((stock) => (
+                  <option key={stock.id} value={stock.id}>
+                    {stock.name} · {stock.quantityOnHand.toLocaleString("fr-SN")} {stock.unit}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Quantité consommée</label>
+              <input
+                name="medicineQuantity"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Ex: 1"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
           </div>
 
           <button

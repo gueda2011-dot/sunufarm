@@ -67,6 +67,11 @@ function buildFormSchema(entryCount: number) {
       .coerce.number({ error: "Nombre requis" })
       .min(0, "Doit être ≥ 0"),
 
+    feedStockId: z.preprocess(
+      emptyToUndefined,
+      z.string().cuid("Stock invalide").optional(),
+    ),
+
     // Ajustement 3 : "" → undefined avant la coercition
     waterLiters: z.preprocess(
       emptyToUndefined,
@@ -94,6 +99,7 @@ function buildFormSchema(entryCount: number) {
 type ParsedValues = {
   mortality:     number
   feedKg:        number
+  feedStockId?:  string
   waterLiters?:  number
   avgWeightG?:   number
   observations?: string
@@ -113,10 +119,16 @@ interface DailyFormProps {
   defaultValues: {
     mortality:     number
     feedKg:        number
+    feedStockId?:  string | null
     waterLiters?:  number | null
     avgWeightG?:   number | null
     observations?: string | null
   }
+  feedStocks: Array<{
+    id: string
+    name: string
+    quantityKg: number
+  }>
   onSuccess: () => void
 }
 
@@ -132,6 +144,7 @@ export function DailyForm({
   isEditMode,
   editingRecordId,
   defaultValues,
+  feedStocks,
   onSuccess,
 }: DailyFormProps) {
   const draftStorageKey = `sunufarm:draft:daily:${organizationId}:${batchId}:${selectedDate}`
@@ -159,6 +172,7 @@ export function DailyForm({
     defaultValues: {
       mortality:    defaultValues.mortality,
       feedKg:       defaultValues.feedKg,
+      feedStockId:  defaultValues.feedStockId ?? undefined,
       waterLiters:  defaultValues.waterLiters  ?? undefined,
       avgWeightG:   defaultValues.avgWeightG   ?? undefined,
       observations: defaultValues.observations ?? "",
@@ -195,6 +209,7 @@ export function DailyForm({
         reset({
           mortality: parsedDraft.mortality ?? defaultValues.mortality,
           feedKg: parsedDraft.feedKg ?? defaultValues.feedKg,
+          feedStockId: parsedDraft.feedStockId ?? defaultValues.feedStockId ?? undefined,
           waterLiters: parsedDraft.waterLiters ?? defaultValues.waterLiters ?? undefined,
           avgWeightG: parsedDraft.avgWeightG ?? defaultValues.avgWeightG ?? undefined,
           observations: parsedDraft.observations ?? defaultValues.observations ?? "",
@@ -218,6 +233,7 @@ export function DailyForm({
   }, [
     defaultValues.avgWeightG,
     defaultValues.feedKg,
+    defaultValues.feedStockId,
     defaultValues.mortality,
     defaultValues.observations,
     defaultValues.waterLiters,
@@ -255,6 +271,7 @@ export function DailyForm({
         dailyRecordId: editingRecordId,
         mortality:     data.mortality,
         feedKg:        data.feedKg,
+        feedStockId:   data.feedStockId ?? null,
         waterLiters:   data.waterLiters,
         avgWeightG:    data.avgWeightG,
         observations:  data.observations,
@@ -283,6 +300,7 @@ export function DailyForm({
         date:         new Date(`${selectedDate}T00:00:00Z`),
         mortality:    data.mortality,
         feedKg:       data.feedKg,
+        feedStockId:  data.feedStockId,
         waterLiters:  data.waterLiters,
         avgWeightG:   data.avgWeightG,
         observations: data.observations,
@@ -329,6 +347,33 @@ export function DailyForm({
         error={errors.feedKg?.message}
         {...register("feedKg")}
       />
+
+      <div className="space-y-1.5">
+        <label htmlFor="feedStockId" className="block text-sm font-medium text-gray-700">
+          Stock aliment utilisé
+        </label>
+        <select
+          id="feedStockId"
+          className="w-full h-[52px] rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent"
+          {...register("feedStockId")}
+        >
+          <option value="">— Sélectionner un stock —</option>
+          {feedStocks.map((stock) => (
+            <option key={stock.id} value={stock.id}>
+              {stock.name} · {stock.quantityKg.toLocaleString("fr-SN")} kg
+            </option>
+          ))}
+        </select>
+        {feedStocks.length === 0 ? (
+          <p className="text-sm text-amber-700">
+            Aucun stock aliment disponible pour cette ferme. Créez d&apos;abord un article dans Stock.
+          </p>
+        ) : (
+          <p className="text-sm text-gray-500">
+            La quantité distribuée sera automatiquement sortie du stock choisi.
+          </p>
+        )}
+      </div>
 
       {/* ── Section repliable — détails optionnels ───────────────────────── */}
       <div>

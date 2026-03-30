@@ -73,6 +73,8 @@ import {
   BatchStatus,
   BatchType,
   UserRole,
+  Prisma,
+  MedicineMovementType,
 } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
@@ -154,6 +156,7 @@ const createVaccinationSchema = z.object({
    */
   countVaccinated: positiveIntSchema,
   medicineStockId: optionalIdSchema,
+  medicineQuantity: z.number().positive().optional(),
   notes:           z.string().max(1000).optional(),
 })
 
@@ -166,6 +169,7 @@ const updateVaccinationSchema = z.object({
   dose:            z.string().max(100).optional(),
   countVaccinated: positiveIntSchema.optional(),
   medicineStockId: z.string().cuid().nullable().optional(),
+  medicineQuantity: z.number().positive().nullable().optional(),
   notes:           z.string().max(1000).optional(),
 })
 
@@ -203,6 +207,7 @@ const createTreatmentSchema = z
      */
     countTreated:    positiveIntSchema.optional(),
     medicineStockId: optionalIdSchema,
+    medicineQuantity: z.number().positive().optional(),
     indication:      z.string().max(255).optional(),
     notes:           z.string().max(1000).optional(),
   })
@@ -227,6 +232,7 @@ const updateTreatmentSchema = z.object({
   durationDays:    positiveIntSchema.optional(),
   countTreated:    positiveIntSchema.optional(),
   medicineStockId: z.string().cuid().nullable().optional(),
+  medicineQuantity: z.number().positive().nullable().optional(),
   indication:      z.string().max(255).optional(),
   notes:           z.string().max(1000).optional(),
 })
@@ -427,6 +433,199 @@ function resolveHealthFarmReadScope(
   if (canPerformAction(role, "MANAGE_FARMS")) return "all"
   const perms = parseFarmPermissions(farmPermissions)
   return perms.filter((p) => p.canRead).map((p) => p.farmId)
+}
+
+class BusinessRuleError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "BusinessRuleError"
+  }
+}
+
+function buildVaccinationMedicineReference(vaccinationId: string): string {
+  return `vaccination:${vaccinationId}`
+}
+
+function buildTreatmentMedicineReference(treatmentId: string): string {
+  return `treatment:${treatmentId}`
+}
+
+async function syncMedicineMovement(
+  tx: Prisma.TransactionClient,
+  params: {
+    organizationId: string
+    actorId: string
+    batchId: string
+    farmId: string
+    movementRef: string
+    eventDate: Date
+    medicineStockId?: string | null
+    medicineQuantity?: number | null
+    notes: string
+  },
+): Promise<void> {
+  const {
+    organizationId,
+    actorId,
+    batchId,
+    farmId,
+    movementRef,
+    eventDate,
+    medicineStockId,
+    medicineQuantity,
+    notes,
+  } = params
+
+  const existingMovement = await tx.medicineMovement.findFirst({
+    where: { organizationId, reference: movementRef },
+    select: {
+      id: true,
+      medicineStockId: true,
+      quantity: true,
+      medicineStock: {
+        select: {
+          id: true,
+          farmId: true,
+          quantityOnHand: true,
+          unitPriceFcfa: true,
+          unit: true,
+        },
+      },
+    },
+  })
+
+  const desiredStockId =
+    medicineStockId === undefined
+      ? existingMovement?.medicineStockId ?? null
+      : medicineStockId
+  const desiredQuantity =
+    medicineQuantity === undefined
+      ? existingMovement?.quantity ?? 0
+      : medicineQuantity ?? 0
+
+  if ((desiredStockId && desiredQuantity <= 0) || (!desiredStockId && desiredQuantity > 0)) {
+    throw new BusinessRuleError(
+      "Renseignez a la fois le stock medicament et la quantite consommee",
+    )
+  }
+
+  if (!desiredStockId || desiredQuantity <= 0) {
+    if (!existingMovement) return
+
+    await tx.medicineStock.update({
+      where: { id: existingMovement.medicineStockId },
+      data: { quantityOnHand: existingMovement.medicineStock.quantityOnHand + existingMovement.quantity },
+    })
+    await tx.medicineMovement.delete({ where: { id: existingMovement.id } })
+    return
+  }
+
+  const targetStock = await tx.medicineStock.findFirst({
+    where: { id: desiredStockId, organizationId },
+    select: {
+      id: true,
+      farmId: true,
+      quantityOnHand: true,
+      unitPriceFcfa: true,
+      unit: true,
+    },
+  })
+
+  if (!targetStock) {
+    throw new BusinessRuleError("Stock de medicament introuvable")
+  }
+
+  if (targetStock.farmId !== farmId) {
+    throw new BusinessRuleError(
+      "Le stock medicament choisi doit appartenir a la meme ferme que le lot",
+    )
+  }
+
+  if (!existingMovement) {
+    const newQuantity = targetStock.quantityOnHand - desiredQuantity
+    if (newQuantity < 0) {
+      throw new BusinessRuleError(
+        `Stock insuffisant : ${targetStock.quantityOnHand} ${targetStock.unit} disponible(s), ${desiredQuantity} demandee(s)`,
+      )
+    }
+
+    await tx.medicineStock.update({
+      where: { id: targetStock.id },
+      data: { quantityOnHand: newQuantity },
+    })
+    await tx.medicineMovement.create({
+      data: {
+        organizationId,
+        medicineStockId: targetStock.id,
+        type: MedicineMovementType.SORTIE,
+        quantity: desiredQuantity,
+        unitPriceFcfa: targetStock.unitPriceFcfa,
+        totalFcfa: Math.round(desiredQuantity * targetStock.unitPriceFcfa),
+        batchId,
+        reference: movementRef,
+        notes,
+        recordedById: actorId,
+        date: eventDate,
+      },
+    })
+    return
+  }
+
+  if (existingMovement.medicineStockId === targetStock.id) {
+    const delta = desiredQuantity - existingMovement.quantity
+    const newQuantity = targetStock.quantityOnHand - delta
+    if (newQuantity < 0) {
+      throw new BusinessRuleError(
+        `Stock insuffisant : ${targetStock.quantityOnHand} ${targetStock.unit} disponible(s), ${delta} supplementaire(s) demandee(s)`,
+      )
+    }
+
+    await tx.medicineStock.update({
+      where: { id: targetStock.id },
+      data: { quantityOnHand: newQuantity },
+    })
+    await tx.medicineMovement.update({
+      where: { id: existingMovement.id },
+      data: {
+        quantity: desiredQuantity,
+        unitPriceFcfa: targetStock.unitPriceFcfa,
+        totalFcfa: Math.round(desiredQuantity * targetStock.unitPriceFcfa),
+        batchId,
+        date: eventDate,
+        notes,
+      },
+    })
+    return
+  }
+
+  const replenishedQuantity = existingMovement.medicineStock.quantityOnHand + existingMovement.quantity
+  const newTargetQuantity = targetStock.quantityOnHand - desiredQuantity
+  if (newTargetQuantity < 0) {
+    throw new BusinessRuleError(
+      `Stock insuffisant : ${targetStock.quantityOnHand} ${targetStock.unit} disponible(s), ${desiredQuantity} demandee(s)`,
+    )
+  }
+
+  await tx.medicineStock.update({
+    where: { id: existingMovement.medicineStockId },
+    data: { quantityOnHand: replenishedQuantity },
+  })
+  await tx.medicineStock.update({
+    where: { id: targetStock.id },
+    data: { quantityOnHand: newTargetQuantity },
+  })
+  await tx.medicineMovement.update({
+    where: { id: existingMovement.id },
+    data: {
+      medicineStockId: targetStock.id,
+      quantity: desiredQuantity,
+      unitPriceFcfa: targetStock.unitPriceFcfa,
+      totalFcfa: Math.round(desiredQuantity * targetStock.unitPriceFcfa),
+      batchId,
+      date: eventDate,
+      notes,
+    },
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -771,6 +970,7 @@ export async function createVaccination(
       dose,
       countVaccinated,
       medicineStockId,
+      medicineQuantity,
       notes,
     } = parsed.data
     const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
@@ -821,33 +1021,67 @@ export async function createVaccination(
       }
     }
 
+    if ((medicineStockId && !medicineQuantity) || (!medicineStockId && medicineQuantity)) {
+      return {
+        success: false,
+        error: "Renseignez a la fois le stock medicament et la quantite consommee",
+      }
+    }
+
     // Valider le stock médicament si fourni
     if (medicineStockId) {
       const medStock = await prisma.medicineStock.findFirst({
         where:  { id: medicineStockId, organizationId },
-        select: { id: true },
+        select: { id: true, farmId: true },
       })
       if (!medStock) {
         return { success: false, error: "Stock de médicament introuvable" }
       }
+      if (medStock.farmId !== batch.building.farmId) {
+        return { success: false, error: "Le stock de medicament doit appartenir a la meme ferme que le lot" }
+      }
     }
 
-    const vaccination = await prisma.vaccinationRecord.create({
-      data: {
-        organizationId,
-        batchId,
-        date,
-        batchAgeDay:     ageResult.ageDay,
-        vaccineName,
-        route:           route ?? null,
-        dose:            dose ?? null,
-        countVaccinated,
-        medicineStockId: medicineStockId ?? null,
-        notes:           notes ?? null,
-        recordedById:    actorId,
-      },
-      select: vaccinationSelect,
-    })
+    let vaccination: VaccinationSummary
+    try {
+      vaccination = await prisma.$transaction(async (tx) => {
+        const created = await tx.vaccinationRecord.create({
+          data: {
+            organizationId,
+            batchId,
+            date,
+            batchAgeDay:     ageResult.ageDay,
+            vaccineName,
+            route:           route ?? null,
+            dose:            dose ?? null,
+            countVaccinated,
+            medicineStockId: medicineStockId ?? null,
+            notes:           notes ?? null,
+            recordedById:    actorId,
+          },
+          select: vaccinationSelect,
+        })
+
+        await syncMedicineMovement(tx, {
+          organizationId,
+          actorId,
+          batchId,
+          farmId: batch.building.farmId,
+          movementRef: buildVaccinationMedicineReference(created.id),
+          eventDate: date,
+          medicineStockId,
+          medicineQuantity,
+          notes: "Consommation enregistree depuis une vaccination",
+        })
+
+        return created
+      })
+    } catch (error) {
+      if (error instanceof BusinessRuleError) {
+        return { success: false, error: error.message }
+      }
+      throw error
+    }
 
     await createAuditLog({
       userId:         actorId,
@@ -855,7 +1089,7 @@ export async function createVaccination(
       action:         AuditAction.CREATE,
       resourceType:   "VACCINATION_RECORD",
       resourceId:     vaccination.id,
-      after:          { batchId, date, vaccineName, countVaccinated, batchAgeDay: ageResult.ageDay },
+      after:          { batchId, date, vaccineName, countVaccinated, medicineStockId, medicineQuantity, batchAgeDay: ageResult.ageDay },
     })
 
     return { success: true, data: vaccination }
@@ -892,7 +1126,7 @@ export async function updateVaccination(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, vaccinationId, countVaccinated, ...updates } = parsed.data
+    const { organizationId, vaccinationId, countVaccinated, medicineQuantity, ...updates } = parsed.data
     const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
@@ -939,21 +1173,50 @@ export async function updateVaccination(
     if (updates.medicineStockId) {
       const medStock = await prisma.medicineStock.findFirst({
         where:  { id: updates.medicineStockId, organizationId },
-        select: { id: true },
+        select: { id: true, farmId: true },
       })
       if (!medStock) {
         return { success: false, error: "Stock de médicament introuvable" }
+      }
+      if (medStock.farmId !== existing.batch.building.farmId) {
+        return { success: false, error: "Le stock de medicament doit appartenir a la meme ferme que le lot" }
       }
     }
 
     const { batch, ...existingData } = existing
     void batch
 
-    const vaccination = await prisma.vaccinationRecord.update({
-      where:  { id: vaccinationId },
-      data:   { ...updates, ...(countVaccinated !== undefined ? { countVaccinated } : {}) },
-      select: vaccinationSelect,
-    })
+    let vaccination: VaccinationSummary
+    try {
+      vaccination = await prisma.$transaction(async (tx) => {
+        const updatedVaccination = await tx.vaccinationRecord.update({
+          where:  { id: vaccinationId },
+          data:   { ...updates, ...(countVaccinated !== undefined ? { countVaccinated } : {}) },
+          select: vaccinationSelect,
+        })
+
+        if (updates.medicineStockId !== undefined || medicineQuantity !== undefined) {
+          await syncMedicineMovement(tx, {
+            organizationId,
+            actorId,
+            batchId: existing.batchId,
+            farmId: existing.batch.building.farmId,
+            movementRef: buildVaccinationMedicineReference(vaccinationId),
+            eventDate: existing.date,
+            medicineStockId: updates.medicineStockId,
+            medicineQuantity,
+            notes: "Consommation enregistree depuis une vaccination",
+          })
+        }
+
+        return updatedVaccination
+      })
+    } catch (error) {
+      if (error instanceof BusinessRuleError) {
+        return { success: false, error: error.message }
+      }
+      throw error
+    }
 
     await createAuditLog({
       userId:         actorId,
@@ -962,7 +1225,7 @@ export async function updateVaccination(
       resourceType:   "VACCINATION_RECORD",
       resourceId:     vaccinationId,
       before:         existingData,
-      after:          { ...updates, ...(countVaccinated !== undefined ? { countVaccinated } : {}) },
+      after:          { ...updates, ...(countVaccinated !== undefined ? { countVaccinated } : {}), ...(medicineQuantity !== undefined ? { medicineQuantity } : {}) },
     })
 
     return { success: true, data: vaccination }
@@ -1135,6 +1398,7 @@ export async function createTreatment(
       durationDays,
       countTreated,
       medicineStockId,
+      medicineQuantity,
       indication,
       notes,
     } = parsed.data
@@ -1184,33 +1448,67 @@ export async function createTreatment(
       }
     }
 
+    if ((medicineStockId && !medicineQuantity) || (!medicineStockId && medicineQuantity)) {
+      return {
+        success: false,
+        error: "Renseignez a la fois le stock medicament et la quantite consommee",
+      }
+    }
+
     if (medicineStockId) {
       const medStock = await prisma.medicineStock.findFirst({
         where:  { id: medicineStockId, organizationId },
-        select: { id: true },
+        select: { id: true, farmId: true },
       })
       if (!medStock) {
         return { success: false, error: "Stock de médicament introuvable" }
       }
+      if (medStock.farmId !== batch.building.farmId) {
+        return { success: false, error: "Le stock de medicament doit appartenir a la meme ferme que le lot" }
+      }
     }
 
-    const treatment = await prisma.treatmentRecord.create({
-      data: {
-        organizationId,
-        batchId,
-        startDate,
-        endDate:         endDate ?? null,
-        medicineName,
-        dose:            dose ?? null,
-        durationDays:    durationDays ?? null,
-        countTreated:    countTreated ?? null,
-        medicineStockId: medicineStockId ?? null,
-        indication:      indication ?? null,
-        notes:           notes ?? null,
-        recordedById:    actorId,
-      },
-      select: treatmentSelect,
-    })
+    let treatment: TreatmentSummary
+    try {
+      treatment = await prisma.$transaction(async (tx) => {
+        const created = await tx.treatmentRecord.create({
+          data: {
+            organizationId,
+            batchId,
+            startDate,
+            endDate:         endDate ?? null,
+            medicineName,
+            dose:            dose ?? null,
+            durationDays:    durationDays ?? null,
+            countTreated:    countTreated ?? null,
+            medicineStockId: medicineStockId ?? null,
+            indication:      indication ?? null,
+            notes:           notes ?? null,
+            recordedById:    actorId,
+          },
+          select: treatmentSelect,
+        })
+
+        await syncMedicineMovement(tx, {
+          organizationId,
+          actorId,
+          batchId,
+          farmId: batch.building.farmId,
+          movementRef: buildTreatmentMedicineReference(created.id),
+          eventDate: startDate,
+          medicineStockId,
+          medicineQuantity,
+          notes: "Consommation enregistree depuis un traitement",
+        })
+
+        return created
+      })
+    } catch (error) {
+      if (error instanceof BusinessRuleError) {
+        return { success: false, error: error.message }
+      }
+      throw error
+    }
 
     await createAuditLog({
       userId:         actorId,
@@ -1218,7 +1516,7 @@ export async function createTreatment(
       action:         AuditAction.CREATE,
       resourceType:   "TREATMENT_RECORD",
       resourceId:     treatment.id,
-      after:          { batchId, startDate, medicineName, countTreated },
+      after:          { batchId, startDate, medicineName, countTreated, medicineStockId, medicineQuantity },
     })
 
     return { success: true, data: treatment }
@@ -1258,7 +1556,7 @@ export async function updateTreatment(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, treatmentId, countTreated, ...updates } = parsed.data
+    const { organizationId, treatmentId, countTreated, medicineQuantity, ...updates } = parsed.data
     const accessResult = await requireOrganizationModuleContext(organizationId, "HEALTH")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
@@ -1312,21 +1610,50 @@ export async function updateTreatment(
     if (updates.medicineStockId) {
       const medStock = await prisma.medicineStock.findFirst({
         where:  { id: updates.medicineStockId, organizationId },
-        select: { id: true },
+        select: { id: true, farmId: true },
       })
       if (!medStock) {
         return { success: false, error: "Stock de médicament introuvable" }
+      }
+      if (medStock.farmId !== existing.batch.building.farmId) {
+        return { success: false, error: "Le stock de medicament doit appartenir a la meme ferme que le lot" }
       }
     }
 
     const { batch, ...existingData } = existing
     void batch
 
-    const treatment = await prisma.treatmentRecord.update({
-      where:  { id: treatmentId },
-      data:   { ...updates, ...(countTreated !== undefined ? { countTreated } : {}) },
-      select: treatmentSelect,
-    })
+    let treatment: TreatmentSummary
+    try {
+      treatment = await prisma.$transaction(async (tx) => {
+        const updatedTreatment = await tx.treatmentRecord.update({
+          where:  { id: treatmentId },
+          data:   { ...updates, ...(countTreated !== undefined ? { countTreated } : {}) },
+          select: treatmentSelect,
+        })
+
+        if (updates.medicineStockId !== undefined || medicineQuantity !== undefined) {
+          await syncMedicineMovement(tx, {
+            organizationId,
+            actorId,
+            batchId: existing.batchId,
+            farmId: existing.batch.building.farmId,
+            movementRef: buildTreatmentMedicineReference(treatmentId),
+            eventDate: existing.startDate,
+            medicineStockId: updates.medicineStockId,
+            medicineQuantity,
+            notes: "Consommation enregistree depuis un traitement",
+          })
+        }
+
+        return updatedTreatment
+      })
+    } catch (error) {
+      if (error instanceof BusinessRuleError) {
+        return { success: false, error: error.message }
+      }
+      throw error
+    }
 
     await createAuditLog({
       userId:         actorId,
@@ -1335,7 +1662,7 @@ export async function updateTreatment(
       resourceType:   "TREATMENT_RECORD",
       resourceId:     treatmentId,
       before:         existingData,
-      after:          { ...updates, ...(countTreated !== undefined ? { countTreated } : {}) },
+      after:          { ...updates, ...(countTreated !== undefined ? { countTreated } : {}), ...(medicineQuantity !== undefined ? { medicineQuantity } : {}) },
     })
 
     return { success: true, data: treatment }

@@ -153,6 +153,11 @@ const updateFeedStockSchema = z.object({
   // quantityKg est intentionnellement absent — jamais modifiable directement
 })
 
+const deleteFeedStockSchema = z.object({
+  organizationId: requiredIdSchema,
+  feedStockId: requiredIdSchema,
+})
+
 const createFeedMovementSchema = z.object({
   organizationId: requiredIdSchema,
   feedStockId:    requiredIdSchema,
@@ -226,6 +231,11 @@ const updateMedicineStockSchema = z.object({
   expiryDate:      optionalDateSchema,
   notes:           z.string().max(1000).optional(),
   // quantityOnHand absent — jamais modifiable directement
+})
+
+const deleteMedicineStockSchema = z.object({
+  organizationId: requiredIdSchema,
+  medicineStockId: requiredIdSchema,
 })
 
 const createMedicineMovementSchema = z.object({
@@ -795,6 +805,72 @@ export async function updateFeedStock(
   }
 }
 
+export async function deleteFeedStock(
+  data: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const parsed = deleteFeedStockSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Données invalides" }
+    }
+
+    const { organizationId, feedStockId } = parsed.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "STOCK")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
+
+    const existing = await prisma.feedStock.findFirst({
+      where: { id: feedStockId, organizationId },
+      select: {
+        id: true,
+        farmId: true,
+        quantityKg: true,
+        _count: { select: { movements: true } },
+      },
+    })
+    if (!existing) {
+      return { success: false, error: "Stock d'aliment introuvable" }
+    }
+
+    if (!canAccessFarm(role, farmPermissions, existing.farmId, "canDelete")) {
+      return { success: false, error: "Accès en suppression refusé sur cette ferme" }
+    }
+
+    if (existing.quantityKg > 0) {
+      return { success: false, error: "Seul un stock vide peut être supprimé" }
+    }
+
+    if (existing._count.movements > 0) {
+      return {
+        success: false,
+        error: "Ce stock a déjà un historique de mouvements et ne peut plus être supprimé",
+      }
+    }
+
+    await prisma.feedStock.delete({ where: { id: feedStockId } })
+
+    await createAuditLog({
+      userId: actorId,
+      organizationId,
+      action: AuditAction.DELETE,
+      resourceType: "FEED_STOCK",
+      resourceId: feedStockId,
+      before: existing,
+    })
+
+    return { success: true, data: { id: feedStockId } }
+  } catch {
+    return { success: false, error: "Impossible de supprimer le stock d'aliment" }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 5. createFeedMovement
 // ---------------------------------------------------------------------------
@@ -1244,6 +1320,82 @@ export async function updateMedicineStock(
     }
   } catch {
     return { success: false, error: "Impossible de mettre à jour le stock de médicament" }
+  }
+}
+
+export async function deleteMedicineStock(
+  data: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const parsed = deleteMedicineStockSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Données invalides" }
+    }
+
+    const { organizationId, medicineStockId } = parsed.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "STOCK")
+    if (!accessResult.success) return accessResult
+    const actorId = accessResult.data.session.user.id
+    const { role, farmPermissions } = accessResult.data.membership
+    const roleResult = requireRole(
+      accessResult.data.membership,
+      [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER],
+      "Permission refusée",
+    )
+    if (!roleResult.success) return roleResult
+
+    const existing = await prisma.medicineStock.findFirst({
+      where: { id: medicineStockId, organizationId },
+      select: {
+        id: true,
+        farmId: true,
+        quantityOnHand: true,
+        _count: {
+          select: {
+            movements: true,
+            vaccinationRecords: true,
+            treatmentRecords: true,
+          },
+        },
+      },
+    })
+    if (!existing) {
+      return { success: false, error: "Stock de médicament introuvable" }
+    }
+
+    if (!canAccessFarm(role, farmPermissions, existing.farmId, "canDelete")) {
+      return { success: false, error: "Accès en suppression refusé sur cette ferme" }
+    }
+
+    if (existing.quantityOnHand > 0) {
+      return { success: false, error: "Seul un stock vide peut être supprimé" }
+    }
+
+    if (
+      existing._count.movements > 0 ||
+      existing._count.vaccinationRecords > 0 ||
+      existing._count.treatmentRecords > 0
+    ) {
+      return {
+        success: false,
+        error: "Ce stock a déjà été utilisé et ne peut plus être supprimé",
+      }
+    }
+
+    await prisma.medicineStock.delete({ where: { id: medicineStockId } })
+
+    await createAuditLog({
+      userId: actorId,
+      organizationId,
+      action: AuditAction.DELETE,
+      resourceType: "MEDICINE_STOCK",
+      resourceId: medicineStockId,
+      before: existing,
+    })
+
+    return { success: true, data: { id: medicineStockId } }
+  } catch {
+    return { success: false, error: "Impossible de supprimer le stock de médicament" }
   }
 }
 

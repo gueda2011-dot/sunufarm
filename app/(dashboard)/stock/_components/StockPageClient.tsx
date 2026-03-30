@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
+import { toast } from "sonner"
 import type {
   FeedMovementSummary,
   FeedStockSummary,
@@ -9,6 +10,8 @@ import type {
 import {
   createFeedStock,
   createMedicineStock,
+  deleteFeedStock,
+  deleteMedicineStock,
 } from "@/src/actions/stock"
 import {
   formatDate,
@@ -241,6 +244,40 @@ export function StockPageClient({
       setMedicineStocks((current) => [...current, result.data].sort((a, b) => a.name.localeCompare(b.name)))
       resetCreateForm()
       setShowCreateForm(false)
+    })
+  }
+
+  function handleDeleteFeedStock(stockId: string) {
+    if (typeof window !== "undefined" && !window.confirm("Supprimer ce stock vide ?")) {
+      return
+    }
+
+    startTransition(async () => {
+      const result = await deleteFeedStock({ organizationId, feedStockId: stockId })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+
+      setFeedStocks((current) => current.filter((stock) => stock.id !== stockId))
+      toast.success("Stock aliment supprimé")
+    })
+  }
+
+  function handleDeleteMedicineStock(stockId: string) {
+    if (typeof window !== "undefined" && !window.confirm("Supprimer ce stock vide ?")) {
+      return
+    }
+
+    startTransition(async () => {
+      const result = await deleteMedicineStock({ organizationId, medicineStockId: stockId })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+
+      setMedicineStocks((current) => current.filter((stock) => stock.id !== stockId))
+      toast.success("Stock médicament supprimé")
     })
   }
 
@@ -656,13 +693,25 @@ export function StockPageClient({
                               {formatMoneyFCFA(stock.unitPriceFcfa)}
                             </span>
                           </div>
-                          <div>
-                            <span className="text-gray-400">Valeur :</span>{" "}
-                            <span className="font-medium text-gray-900">
-                              {formatMoneyFCFA(estimatedValue)}
-                            </span>
-                          </div>
+                        <div>
+                          <span className="text-gray-400">Valeur :</span>{" "}
+                          <span className="font-medium text-gray-900">
+                            {formatMoneyFCFA(estimatedValue)}
+                          </span>
                         </div>
+                      </div>
+
+                      {canCreateStock && stock.quantityKg === 0 ? (
+                        <div className="mt-4">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteFeedStock(stock.id)}
+                            className="rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50"
+                          >
+                            Supprimer ce stock vide
+                          </button>
+                        </div>
+                      ) : null}
                       </div>
 
                     </div>
@@ -828,6 +877,18 @@ export function StockPageClient({
 
                       {stock.notes ? (
                         <p className="mt-3 text-sm text-gray-500">{stock.notes}</p>
+                      ) : null}
+
+                      {canCreateStock && stock.quantityOnHand === 0 ? (
+                        <div className="mt-4">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMedicineStock(stock.id)}
+                            className="rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50"
+                          >
+                            Supprimer ce stock vide
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                   </div>

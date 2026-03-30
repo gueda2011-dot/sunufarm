@@ -22,6 +22,7 @@ import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getDailyRecords }                from "@/src/actions/daily-records"
 import { getExpenses }                    from "@/src/actions/expenses"
 import { getVaccinations, getTreatments } from "@/src/actions/health"
+import { getMedicineStocks } from "@/src/actions/stock"
 import { getBatchProfitability, type BatchProfitability } from "@/src/actions/profitability"
 import { PlanGuardCard }                  from "@/src/components/subscription/PlanGuardCard"
 import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
@@ -64,20 +65,26 @@ export default async function BatchDetailPage({
   // ── Fetch parallèle ──────────────────────────────────────────────────────
   // getBatch doit réussir pour afficher la page.
   // Les autres fetches dégradent gracieusement si ils échouent (tableaux vides).
+  const batchResult = await getBatch({ organizationId, batchId: id })
+
+  if (!batchResult.success) notFound()
+
+  const batch = batchResult.data
+
   const [
-    batchResult,
     recordsResult,
     expensesResult,
     vaccinationsResult,
     treatmentsResult,
+    medicineStocksResult,
     profitabilityResult,
     previousAnalyses,
   ] = await Promise.all([
-    getBatch({ organizationId, batchId: id }),
     getDailyRecords({ organizationId, batchId: id, limit: 100 }),
     getExpenses({ organizationId, batchId: id, limit: 100 }),
     getVaccinations({ organizationId, batchId: id, limit: 10 }),
     getTreatments({ organizationId, batchId: id, limit: 10 }),
+    getMedicineStocks({ organizationId, farmId: batch.building.farmId, limit: 100 }),
     canSeeProfitability
       ? getBatchProfitability({ organizationId, batchId: id })
       : Promise.resolve<ActionResult<BatchProfitability>>(
@@ -89,13 +96,11 @@ export default async function BatchDetailPage({
     listStoredBatchAnalyses(organizationId, id, 5),
   ])
 
-  if (!batchResult.success) notFound()
-
-  const batch         = batchResult.data
   const records       = recordsResult.success       ? recordsResult.data       : []
   const expenses      = expensesResult.success      ? expensesResult.data      : []
   const vaccinations  = vaccinationsResult.success  ? vaccinationsResult.data  : []
   const treatments    = treatmentsResult.success    ? treatmentsResult.data    : []
+  const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
   const profitability = profitabilityResult.success ? profitabilityResult.data : null
 
   // ── Agrégations opérationnelles (calculées une fois, propagées en props) ─
@@ -185,6 +190,12 @@ export default async function BatchDetailPage({
       <HealthSection
         vaccinations={vaccinations}
         treatments={treatments}
+        medicineStocks={medicineStocks.map((stock) => ({
+          id: stock.id,
+          name: stock.name,
+          unit: stock.unit,
+          quantityOnHand: stock.quantityOnHand,
+        }))}
         batchId={batch.id}
         organizationId={organizationId}
         userRole={role}

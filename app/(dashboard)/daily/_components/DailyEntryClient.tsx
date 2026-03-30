@@ -66,6 +66,12 @@ interface DailyEntryClientProps {
   /** Valeur UserRole transmise comme string — évite d'importer le client Prisma ici */
   userRole:       string
   initialBatches: BatchSummary[]
+  initialFeedStocks: Array<{
+    id: string
+    farmId: string
+    name: string
+    quantityKg: number
+  }>
   /** Pré-sélection lot depuis ?batchId= (bouton "Saisir" de la liste des lots) */
   defaultBatchId?: string
 }
@@ -78,6 +84,7 @@ export function DailyEntryClient({
   organizationId,
   userRole,
   initialBatches,
+  initialFeedStocks,
   defaultBatchId,
 }: DailyEntryClientProps) {
   const queryClient   = useQueryClient()
@@ -152,10 +159,15 @@ export function DailyEntryClient({
   const formDefaults = {
     mortality:    editingRecord?.mortality    ?? 0,
     feedKg:       editingRecord?.feedKg       ?? 0,
+    feedStockId:  editingRecord?.feedStockId  ?? undefined,
     waterLiters:  editingRecord?.waterLiters  ?? undefined,
     avgWeightG:   editingRecord?.avgWeightG   ?? undefined,
     observations: editingRecord?.observations ?? "",
   }
+
+  const availableFeedStocks = selectedBatch
+    ? initialFeedStocks.filter((stock) => stock.farmId === selectedBatch.building.farmId)
+    : []
 
   // ── État vide — aucun lot actif ───────────────────────────────────────────
   if (initialBatches.length === 0) {
@@ -291,6 +303,7 @@ export function DailyEntryClient({
           isEditMode={isEditMode}
           editingRecordId={editingRecord?.id}
           defaultValues={formDefaults}
+          feedStocks={availableFeedStocks}
           onSuccess={handleSuccess}
         />
       )}

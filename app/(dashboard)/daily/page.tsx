@@ -14,6 +14,7 @@ import { redirect }          from "next/navigation"
 import type { Metadata }     from "next"
 import { auth }              from "@/src/auth"
 import { getBatches }        from "@/src/actions/batches"
+import { getFeedStocks } from "@/src/actions/stock"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { DailyEntryClient }  from "./_components/DailyEntryClient"
@@ -40,18 +41,33 @@ export default async function DailyPage({
   const { batchId: defaultBatchId } = await searchParams
 
   // Lots actifs chargés en SSR — disponibles immédiatement, sans flash côté client
-  const batchesResult = await getBatches({
-    organizationId,
-    status: "ACTIVE",
-    limit:  100,
-  })
+  const [batchesResult, feedStocksResult] = await Promise.all([
+    getBatches({
+      organizationId,
+      status: "ACTIVE",
+      limit:  100,
+    }),
+    getFeedStocks({
+      organizationId,
+      limit: 100,
+    }),
+  ])
   const initialBatches = batchesResult.success ? batchesResult.data : []
+  const initialFeedStocks = feedStocksResult.success
+    ? feedStocksResult.data.map((stock) => ({
+        id: stock.id,
+        farmId: stock.farmId,
+        name: stock.name,
+        quantityKg: stock.quantityKg,
+      }))
+    : []
 
   return (
     <DailyEntryClient
       organizationId={organizationId}
       userRole={role as string}
       initialBatches={initialBatches}
+      initialFeedStocks={initialFeedStocks}
       defaultBatchId={defaultBatchId}
     />
   )

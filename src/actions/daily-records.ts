@@ -50,7 +50,12 @@ import {
   nonNegativeNumberSchema,
   dateSchema,
 } from "@/src/lib/validators"
-import { UserRole, BatchStatus } from "@/src/generated/prisma/client"
+import {
+  Prisma,
+  UserRole,
+  BatchStatus,
+  FeedMovementType,
+} from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -90,6 +95,7 @@ const createDailyRecordSchema = z.object({
   // Champs principaux — écran terrain 30 secondes
   mortality:      nonNegativeIntSchema,
   feedKg:         nonNegativeNumberSchema,
+  feedStockId:    optionalIdSchema,
 
   // Champs secondaires — optionnels, section "Ajouter détails"
   waterLiters:    nonNegativeNumberSchema.optional(),
@@ -111,6 +117,7 @@ const updateDailyRecordSchema = z.object({
   // Tous les champs de saisie sont optionnels dans une mise à jour
   mortality:       nonNegativeIntSchema.optional(),
   feedKg:          nonNegativeNumberSchema.optional(),
+  feedStockId:     z.string().cuid().nullable().optional(),
   waterLiters:     nonNegativeNumberSchema.optional(),
   temperatureMin:  z.number().optional(),
   temperatureMax:  z.number().optional(),
@@ -143,6 +150,8 @@ export interface DailyRecordDetail {
   date:           Date
   mortality:      number
   feedKg:         number
+  feedStockId:    string | null
+  feedStockName:  string | null
   waterLiters:    number | null
   temperatureMin: number | null
   temperatureMax: number | null
@@ -204,6 +213,227 @@ const dailyRecordDetailSelect = {
     },
   },
 } as const
+
+class BusinessRuleError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "BusinessRuleError"
+  }
+}
+
+function buildDailyFeedReference(recordId: string): string {
+  return `daily-record:${recordId}`
+}
+
+async function enrichRecordsWithFeedStock(
+  organizationId: string,
+  records: Array<Prisma.DailyRecordGetPayload<{ select: typeof dailyRecordDetailSelect }>>,
+): Promise<DailyRecordDetail[]> {
+  if (records.length === 0) return []
+
+  const referenceByRecordId = new Map(
+    records.map((record) => [buildDailyFeedReference(record.id), record.id]),
+  )
+
+  const movements = await prisma.feedMovement.findMany({
+    where: {
+      organizationId,
+      reference: { in: Array.from(referenceByRecordId.keys()) },
+    },
+    select: {
+      reference: true,
+      feedStockId: true,
+      feedStock: { select: { name: true } },
+    },
+  })
+
+  const feedStockByRecordId = new Map(
+    movements.flatMap((movement) =>
+      movement.reference
+        ? [[referenceByRecordId.get(movement.reference) ?? "", movement]]
+        : [],
+    ),
+  )
+
+  return records.map((record) => {
+    const feedMovement = feedStockByRecordId.get(record.id)
+
+    return withIsLocked({
+      ...record,
+      feedStockId: feedMovement?.feedStockId ?? null,
+      feedStockName: feedMovement?.feedStock.name ?? null,
+    })
+  })
+}
+
+async function syncDailyFeedMovement(
+  tx: Prisma.TransactionClient,
+  params: {
+    organizationId: string
+    actorId: string
+    batchId: string
+    farmId: string
+    recordId: string
+    date: Date
+    feedKg: number
+    feedStockId?: string | null
+  },
+): Promise<void> {
+  const {
+    organizationId,
+    actorId,
+    batchId,
+    farmId,
+    recordId,
+    date,
+    feedKg,
+    feedStockId,
+  } = params
+
+  const reference = buildDailyFeedReference(recordId)
+  const existingMovement = await tx.feedMovement.findFirst({
+    where: { organizationId, reference },
+    select: {
+      id: true,
+      feedStockId: true,
+      quantityKg: true,
+      feedStock: {
+        select: {
+          id: true,
+          farmId: true,
+          feedTypeId: true,
+          quantityKg: true,
+        },
+      },
+    },
+  })
+
+  const desiredQuantity = feedKg
+  const desiredStockId =
+    feedStockId === undefined
+      ? existingMovement?.feedStockId ?? null
+      : feedStockId
+
+  if (desiredQuantity > 0 && !desiredStockId) {
+    throw new BusinessRuleError(
+      "Choisissez le stock aliment qui a servi a cette distribution",
+    )
+  }
+
+  if (desiredQuantity <= 0 || !desiredStockId) {
+    if (!existingMovement) return
+
+    await tx.feedStock.update({
+      where: { id: existingMovement.feedStockId },
+      data: { quantityKg: existingMovement.feedStock.quantityKg + existingMovement.quantityKg },
+    })
+    await tx.feedMovement.delete({ where: { id: existingMovement.id } })
+    return
+  }
+
+  const targetStock = await tx.feedStock.findFirst({
+    where: { id: desiredStockId, organizationId },
+    select: {
+      id: true,
+      farmId: true,
+      feedTypeId: true,
+      quantityKg: true,
+    },
+  })
+
+  if (!targetStock) {
+    throw new BusinessRuleError("Stock aliment introuvable")
+  }
+
+  if (targetStock.farmId !== farmId) {
+    throw new BusinessRuleError(
+      "Le stock aliment choisi doit appartenir a la meme ferme que le lot",
+    )
+  }
+
+  if (!existingMovement) {
+    const newQuantityKg = targetStock.quantityKg - desiredQuantity
+    if (newQuantityKg < 0) {
+      throw new BusinessRuleError(
+        `Stock insuffisant : ${targetStock.quantityKg.toFixed(2)} kg disponibles, ${desiredQuantity.toFixed(2)} kg demandes`,
+      )
+    }
+
+    await tx.feedStock.update({
+      where: { id: targetStock.id },
+      data: { quantityKg: newQuantityKg },
+    })
+    await tx.feedMovement.create({
+      data: {
+        organizationId,
+        feedStockId: targetStock.id,
+        feedTypeId: targetStock.feedTypeId,
+        type: FeedMovementType.SORTIE,
+        quantityKg: desiredQuantity,
+        batchId,
+        reference,
+        notes: "Consommation enregistree depuis la saisie journaliere",
+        recordedById: actorId,
+        date,
+      },
+    })
+    return
+  }
+
+  if (existingMovement.feedStockId === targetStock.id) {
+    const delta = desiredQuantity - existingMovement.quantityKg
+    const newQuantityKg = targetStock.quantityKg - delta
+    if (newQuantityKg < 0) {
+      throw new BusinessRuleError(
+        `Stock insuffisant : ${targetStock.quantityKg.toFixed(2)} kg disponibles, ${delta.toFixed(2)} kg supplementaires demandes`,
+      )
+    }
+
+    await tx.feedStock.update({
+      where: { id: targetStock.id },
+      data: { quantityKg: newQuantityKg },
+    })
+    await tx.feedMovement.update({
+      where: { id: existingMovement.id },
+      data: {
+        quantityKg: desiredQuantity,
+        date,
+        batchId,
+        notes: "Consommation enregistree depuis la saisie journaliere",
+      },
+    })
+    return
+  }
+
+  const replenishedQuantity = existingMovement.feedStock.quantityKg + existingMovement.quantityKg
+  const newTargetQuantity = targetStock.quantityKg - desiredQuantity
+
+  if (newTargetQuantity < 0) {
+    throw new BusinessRuleError(
+      `Stock insuffisant : ${targetStock.quantityKg.toFixed(2)} kg disponibles, ${desiredQuantity.toFixed(2)} kg demandes`,
+    )
+  }
+
+  await tx.feedStock.update({
+    where: { id: existingMovement.feedStockId },
+    data: { quantityKg: replenishedQuantity },
+  })
+  await tx.feedStock.update({
+    where: { id: targetStock.id },
+    data: { quantityKg: newTargetQuantity },
+  })
+  await tx.feedMovement.update({
+    where: { id: existingMovement.id },
+    data: {
+      feedStockId: targetStock.id,
+      feedTypeId: targetStock.feedTypeId,
+      quantityKg: desiredQuantity,
+      date,
+      batchId,
+      notes: "Consommation enregistree depuis la saisie journaliere",
+    },
+  })
+}
 
 /**
  * Détecte une violation de contrainte unique Prisma (P2002).
@@ -272,7 +502,7 @@ export async function getDailyRecords(
       take:    limit,
     })
 
-    return { success: true, data: records.map(withIsLocked) }
+    return { success: true, data: await enrichRecordsWithFeedStock(organizationId, records) }
   } catch {
     return { success: false, error: "Impossible de récupérer les saisies" }
   }
@@ -319,7 +549,8 @@ export async function getDailyRecord(
       return { success: false, error: "Saisie introuvable" }
     }
 
-    return { success: true, data: withIsLocked(record) }
+    const [enrichedRecord] = await enrichRecordsWithFeedStock(organizationId, [record])
+    return { success: true, data: enrichedRecord }
   } catch {
     return { success: false, error: "Impossible de récupérer la saisie" }
   }
@@ -355,6 +586,7 @@ export async function createDailyRecord(
       organizationId,
       batchId,
       date,
+      feedStockId,
       mortalityDetails,
       ...recordData
     } = parsed.data
@@ -397,7 +629,9 @@ export async function createDailyRecord(
     }
 
     // Créer la saisie + les détails de mortalité dans une transaction
-    const record = await prisma.$transaction(async (tx) => {
+    let record: Prisma.DailyRecordGetPayload<{ select: typeof dailyRecordDetailSelect }>
+    try {
+      record = await prisma.$transaction(async (tx) => {
       const created = await tx.dailyRecord.create({
         data: {
           organizationId,
@@ -409,24 +643,39 @@ export async function createDailyRecord(
         select: dailyRecordDetailSelect,
       })
 
-      if (mortalityDetails?.length) {
-        await tx.mortalityRecord.createMany({
-          data: mortalityDetails.map((d) => ({
-            dailyRecordId:     created.id,
-            mortalityReasonId: d.mortalityReasonId ?? null,
-            count:             d.count,
-            notes:             d.notes ?? null,
-          })),
+        if (mortalityDetails?.length) {
+          await tx.mortalityRecord.createMany({
+            data: mortalityDetails.map((d) => ({
+              dailyRecordId:     created.id,
+              mortalityReasonId: d.mortalityReasonId ?? null,
+              count:             d.count,
+              notes:             d.notes ?? null,
+            })),
+          })
+        }
+
+        await syncDailyFeedMovement(tx, {
+          organizationId,
+          actorId,
+          batchId,
+          farmId: batch.building.farmId,
+          recordId: created.id,
+          date: normalizedDate,
+          feedKg: recordData.feedKg,
+          feedStockId,
         })
-        // Recharger avec les mortalityRecords créés
+
         return tx.dailyRecord.findUniqueOrThrow({
           where:  { id: created.id },
           select: dailyRecordDetailSelect,
         })
+      })
+    } catch (error) {
+      if (error instanceof BusinessRuleError) {
+        return { success: false, error: error.message }
       }
-
-      return created
-    })
+      throw error
+    }
 
     await createAuditLog({
       userId:         actorId,
@@ -434,10 +683,11 @@ export async function createDailyRecord(
       action:         AuditAction.CREATE,
       resourceType:   "DAILY_RECORD",
       resourceId:     record.id,
-      after:          { batchId, date: normalizedDate, ...recordData },
+      after:          { batchId, date: normalizedDate, feedStockId, ...recordData },
     })
 
-    return { success: true, data: withIsLocked(record) }
+    const [enrichedRecord] = await enrichRecordsWithFeedStock(organizationId, [record])
+    return { success: true, data: enrichedRecord }
   } catch (error) {
     // Race condition résiduelle : deux saisies simultanées pour le même lot/date
     if (isUniqueConstraintError(error)) {
@@ -478,6 +728,7 @@ export async function updateDailyRecord(
       organizationId,
       batchId,
       dailyRecordId,
+      feedStockId,
       mortalityDetails,
       ...updates
     } = parsed.data
@@ -538,7 +789,9 @@ export async function updateDailyRecord(
     }
 
     // Mise à jour de la saisie + remplacement optionnel des mortalityDetails
-    const updated = await prisma.$transaction(async (tx) => {
+    let updated: Prisma.DailyRecordGetPayload<{ select: typeof dailyRecordDetailSelect }>
+    try {
+      updated = await prisma.$transaction(async (tx) => {
       const record = await tx.dailyRecord.update({
         where:  { id: dailyRecordId },
         data:   updates,
@@ -561,14 +814,42 @@ export async function updateDailyRecord(
         }
 
         // Recharger avec les nouveaux mortalityRecords
+        await syncDailyFeedMovement(tx, {
+          organizationId,
+          actorId,
+          batchId,
+          farmId: existing.batch.building.farmId,
+          recordId: dailyRecordId,
+          date: existing.date,
+          feedKg: updates.feedKg ?? existing.feedKg,
+          feedStockId,
+        })
+
         return tx.dailyRecord.findUniqueOrThrow({
           where:  { id: dailyRecordId },
           select: dailyRecordDetailSelect,
         })
       }
 
+      await syncDailyFeedMovement(tx, {
+        organizationId,
+        actorId,
+        batchId,
+        farmId: existing.batch.building.farmId,
+        recordId: dailyRecordId,
+        date: existing.date,
+        feedKg: updates.feedKg ?? existing.feedKg,
+        feedStockId: feedStockId ?? undefined,
+      })
+
       return record
-    })
+      })
+    } catch (error) {
+      if (error instanceof BusinessRuleError) {
+        return { success: false, error: error.message }
+      }
+      throw error
+    }
 
     await createAuditLog({
       userId:         actorId,
@@ -582,11 +863,13 @@ export async function updateDailyRecord(
       // leur absence signifie "non modifiés", ce qui est fidèle à l'intention.
       after: {
         ...updates,
+        ...(feedStockId !== undefined ? { feedStockId } : {}),
         ...(mortalityDetails !== undefined ? { mortalityDetails } : {}),
       },
     })
 
-    return { success: true, data: withIsLocked(updated) }
+    const [enrichedRecord] = await enrichRecordsWithFeedStock(organizationId, [updated])
+    return { success: true, data: enrichedRecord }
   } catch {
     return { success: false, error: "Impossible de mettre à jour la saisie" }
   }
