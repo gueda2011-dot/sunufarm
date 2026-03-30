@@ -62,6 +62,7 @@ import {
 import {
   requiredIdSchema,
 } from "@/src/lib/validators"
+import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -438,6 +439,73 @@ async function checkMissedDailyRecords(
  *   resourceType = "BATCH", resourceId = batchId.
  *   La déduplication anti-spam est donc par lot et par jour calendaire.
  */
+async function checkHighMortalityAlerts(
+  organizationId: string,
+  userIds: string[],
+): Promise<number> {
+  const now = new Date()
+  const yesterday = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - 1,
+  ))
+
+  const records = await prisma.dailyRecord.findMany({
+    where: {
+      organizationId,
+      date: yesterday,
+      mortality: { gt: 0 },
+      batch: {
+        status: BatchStatus.ACTIVE,
+        deletedAt: null,
+      },
+    },
+    select: {
+      id: true,
+      mortality: true,
+      batch: {
+        select: {
+          id: true,
+          number: true,
+          entryCount: true,
+        },
+      },
+    },
+  })
+
+  const candidates = records.flatMap((record) => {
+    if (record.batch.entryCount <= 0) return []
+
+    const mortalityRate = record.mortality / record.batch.entryCount
+    if (mortalityRate < KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE) {
+      return []
+    }
+
+    return [{
+      title: "Mortalite anormale detectee",
+      message:
+        `Le lot ${record.batch.number} a enregistre ${record.mortality} mort(s) hier ` +
+        `(${(mortalityRate * 100).toFixed(1)}% du lot).`,
+      resourceId: record.id,
+      metadata: {
+        batchId: record.batch.id,
+        batchNumber: record.batch.number,
+        mortality: record.mortality,
+        mortalityRate,
+        threshold: KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE,
+      },
+    }]
+  })
+
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.MORTALITE_ELEVEE,
+    resourceType: "DAILY_RECORD",
+    candidates,
+  })
+}
+
 async function checkMissingMortalityReasons(
   organizationId: string,
   userIds:        string[],
@@ -793,6 +861,12 @@ export async function generateNotificationsForOrganization(
   }
 
   // Signal 5 — Motif de mortalité manquant (3 jours consécutifs)
+  try {
+    totalCreated += await checkHighMortalityAlerts(organizationId, userIds)
+  } catch {
+    // Erreur silencieuse
+  }
+
   try {
     totalCreated += await checkMissingMortalityReasons(organizationId, userIds)
   } catch {

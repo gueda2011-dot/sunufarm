@@ -134,6 +134,43 @@ function inferSeverity(value: string): "low" | "medium" | "high" {
   return "low"
 }
 
+function inferActionPriority(value: string): "immediate" | "soon" | "monitor" {
+  const normalized = value.toLowerCase()
+
+  if (
+    normalized.includes("immediat")
+    || normalized.includes("urgence")
+    || normalized.includes("urgent")
+    || normalized.includes("aujourd")
+    || normalized.includes("maintenant")
+  ) {
+    return "immediate"
+  }
+
+  if (
+    normalized.includes("demain")
+    || normalized.includes("rapid")
+    || normalized.includes("bientot")
+    || normalized.includes("reprendre")
+    || normalized.includes("inspection")
+    || normalized.includes("verifier")
+    || normalized.includes("contacter")
+  ) {
+    return "soon"
+  }
+
+  return "monitor"
+}
+
+function cleanActionLabel(value: string): string {
+  return value
+    .replace(/^(immediat|immediate)\s*:\s*/i, "")
+    .replace(/^aujourd'hui\s*:\s*/i, "")
+    .replace(/^demain\s*:\s*/i, "")
+    .replace(/^suivi\s*:\s*/i, "")
+    .trim()
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -198,20 +235,22 @@ function normalizeHealthOverviewPayload(payload: unknown): unknown {
   const recommendedActions = Array.isArray(data.recommendedActions)
     ? data.recommendedActions.map((item) => {
         if (typeof item === "string") {
+          const actionLabel = cleanActionLabel(item)
           return {
-            action: item,
-            priority: inferSeverity(item) === "high" ? "immediate" : "soon",
+            action: actionLabel,
+            priority: inferActionPriority(item),
             why: "Action proposee par l'analyse IA sanitaire.",
           }
         }
 
         if (item && typeof item === "object") {
           const action = item as Record<string, unknown>
-          const actionLabel = typeof action.action === "string"
+          const rawActionLabel = typeof action.action === "string"
             ? action.action
             : typeof action.label === "string"
               ? action.label
               : "Action recommandee"
+          const actionLabel = cleanActionLabel(rawActionLabel)
           const why = typeof action.why === "string"
             ? action.why
             : typeof action.reason === "string"
@@ -220,9 +259,7 @@ function normalizeHealthOverviewPayload(payload: unknown): unknown {
           const priorityValue = typeof action.priority === "string" ? action.priority.toLowerCase() : ""
           const priority = priorityValue === "immediate" || priorityValue === "soon" || priorityValue === "monitor"
             ? priorityValue
-            : inferSeverity(`${actionLabel} ${why}`) === "high"
-              ? "immediate"
-              : "soon"
+            : inferActionPriority(`${rawActionLabel} ${why}`)
 
           return {
             action: actionLabel,

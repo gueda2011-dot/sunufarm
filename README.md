@@ -165,12 +165,30 @@ Variables d'environnement principales :
 - `AUTH_SECRET`
 - `AUTH_URL`
 - `RESEND_API_KEY` et `MAIL_FROM` pour les emails transactionnels
+- variables Firebase Cloud Messaging pour les push web/mobile si vous activez les alertes push
 
 Configuration email Resend :
 
 - verifier un domaine dans Resend avant d'envoyer a de vrais utilisateurs
 - utiliser `MAIL_FROM` avec une adresse de ce domaine verifie
 - ne pas utiliser `@resend.dev` en production, ce domaine est limite aux emails de test vers votre propre adresse
+
+Configuration Firebase Cloud Messaging :
+
+- garder Prisma et PostgreSQL comme source de verite, Firebase sert uniquement de canal push
+- renseigner cote serveur :
+  - `FIREBASE_PROJECT_ID`
+  - `FIREBASE_CLIENT_EMAIL`
+  - `FIREBASE_PRIVATE_KEY`
+- renseigner cote client web :
+  - `NEXT_PUBLIC_FIREBASE_API_KEY`
+  - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+  - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+  - `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+  - `NEXT_PUBLIC_FIREBASE_APP_ID`
+  - `NEXT_PUBLIC_FIREBASE_VAPID_KEY`
+- autoriser les notifications dans le navigateur pour enregistrer le device
+- l'envoi push se branche sur le cron `/api/cron/notifications` et sur les notifications metier deja generees
 
 Scripts utiles :
 

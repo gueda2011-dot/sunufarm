@@ -22,6 +22,7 @@ import { Header }      from "@/src/components/layout/Header"
 import { BottomNav }   from "@/src/components/layout/BottomNav"
 import { ConnectionBanner } from "@/src/components/pwa/ConnectionBanner"
 import { InstallPrompt } from "@/src/components/pwa/InstallPrompt"
+import { PushNotificationsPrompt } from "@/src/components/pwa/PushNotificationsPrompt"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { ImpersonationBanner } from "./_components/ImpersonationBanner"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
@@ -122,6 +123,10 @@ export default async function DashboardLayout({
           <div className="space-y-3">
             <ConnectionBanner />
             <InstallPrompt />
+            <PushNotificationsPrompt
+              organizationId={activeMembership.organizationId}
+              organizationName={orgName}
+            />
           </div>
         </div>
 

@@ -204,3 +204,75 @@ self.addEventListener("fetch", (event) => {
     }
   })())
 })
+
+function buildPushNotification(payload) {
+  const notification = payload?.notification ?? {}
+  const data = payload?.data ?? {}
+  const title = notification.title || data.title || "SunuFarm"
+  const body = notification.body || data.body || "Nouvelle alerte terrain."
+  const link = data.link || payload?.fcmOptions?.link || "/dashboard"
+
+  return {
+    title,
+    options: {
+      body,
+      icon: "/branding/icon-android-192.png",
+      badge: "/branding/icon-flat-square-192.png",
+      data: {
+        ...data,
+        link,
+      },
+      tag: data.notificationId || data.resourceId || "sunufarm-alert",
+      renotify: true,
+    },
+  }
+}
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return
+
+  let payload
+  try {
+    payload = event.data.json()
+  } catch {
+    return
+  }
+
+  const notification = buildPushNotification(payload)
+
+  event.waitUntil(
+    self.registration.showNotification(notification.title, notification.options),
+  )
+})
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close()
+
+  const link = event.notification.data?.link || "/dashboard"
+
+  event.waitUntil((async () => {
+    const allClients = await self.clients.matchAll({
+      type: "window",
+      includeUncontrolled: true,
+    })
+
+    for (const client of allClients) {
+      if ("focus" in client) {
+        const clientUrl = new URL(client.url)
+        const targetUrl = new URL(link, self.location.origin)
+
+        if (clientUrl.origin === targetUrl.origin) {
+          if ("navigate" in client) {
+            await client.navigate(targetUrl.toString())
+          }
+          await client.focus()
+          return
+        }
+      }
+    }
+
+    if (self.clients.openWindow) {
+      await self.clients.openWindow(link)
+    }
+  })())
+})

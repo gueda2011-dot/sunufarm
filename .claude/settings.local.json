@@ -19,7 +19,26 @@
       "Bash(grep -n href.*\"\"/\"\" src/components/layout/Sidebar.tsx src/components/layout/BottomNav.tsx src/components/layout/Header.tsx)",
       "Bash(ls \"app/\\(dashboard\\)/_components/\")",
       "Bash(npx tsx:*)",
-      "Bash(ls \"app/\\(dashboard\\)/batches/_components/\")"
+      "Bash(ls \"app/\\(dashboard\\)/batches/_components/\")",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(dashboard\\\\\\)/)",
+      "Bash(for dir:*)",
+      "Bash(do)",
+      "Bash(echo \"=== $dir ===\")",
+      "Read(//c/Users/pcpro/sunufarm/app/\\(dashboard\\)/**)",
+      "Bash(done)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k,'''':'''',v\\) for k,v in {**d.get\\(''''dependencies'''',{}\\), **d.get\\(''''devDependencies'''',{}\\)}.items\\(\\) if any\\(x in k for x in [''''next'''',''''prisma'''',''''auth'''',''''zod'''',''''tanstack'''',''''react-hook-form'''',''''next-intl'''',''''resend'''',''''recharts'''',''''tailwind'''',''''shadcn'''']\\)]\")",
+      "Bash(node -e \"const d=require\\(''./package.json''\\); const keys=[''next'',''prisma'',''@auth'',''zod'',''tanstack'',''react-hook-form'',''next-intl'',''resend'',''recharts'',''tailwind'']; const deps={...d.dependencies,...d.devDependencies}; Object.entries\\(deps\\).filter\\(\\([k]\\)=>keys.some\\(x=>k.includes\\(x\\)\\)\\).forEach\\(\\([k,v]\\)=>console.log\\(k+'': ''+v\\)\\)\")",
+      "Bash(echo \"=== $dir/_components ===\")",
+      "Read(//c/Users/pcpro/sunufarm/app/\\(dashboard\\)/$dir/**)",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(dashboard\\\\\\)/_components/)",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(dashboard\\\\\\)/batches/[id]/)",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(dashboard\\\\\\)/batches/new/)",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(dashboard\\\\\\)/batches/[id]/_components/)",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(dashboard\\\\\\)/batches/new/_components/)",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(auth\\\\\\)/)",
+      "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(auth\\\\\\)/login/)",
+      "Bash(npx next:*)",
+      "Bash(node -e \"const d=require\\(''./package.json''\\); [''recharts'',''@react-pdf/renderer'',''resend''].forEach\\(k=>console.log\\(k+'': ''+\\(d.dependencies[k]||''MANQUANT''\\)\\)\\)\")"
     ]
   }
 }

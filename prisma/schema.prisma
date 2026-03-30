@@ -125,6 +125,13 @@ enum NotificationStatus {
   ARCHIVE
 }
 
+enum PushDevicePlatform {
+  WEB
+  ANDROID
+  IOS
+  UNKNOWN
+}
+
 enum AuditAction {
   CREATE
   UPDATE
@@ -171,7 +178,7 @@ model Species {
 
 model Breed {
   id        String   @id @default(cuid())
-  name      String   // "Cobb 500", "Ross 308", "ISA Brown", "Label Rouge"
+  name      String // "Cobb 500", "Ross 308", "ISA Brown", "Label Rouge"
   code      String   @unique // "COBB500", "ROSS308", "ISA_BROWN"
   speciesId String
   createdAt DateTime @default(now())
@@ -197,9 +204,9 @@ model FeedType {
 // Motifs de mortalité : globaux (organizationId null) ou custom par organisation
 model MortalityReason {
   id             String   @id @default(cuid())
-  name           String   // "Maladie", "Accident", "Prédation", "Stress thermique", "Non précisé"
-  code           String   // "MALADIE", "ACCIDENT", "NON_PRECISE"
-  organizationId String?  // null = référentiel global partagé
+  name           String // "Maladie", "Accident", "Prédation", "Stress thermique", "Non précisé"
+  code           String // "MALADIE", "ACCIDENT", "NON_PRECISE"
+  organizationId String? // null = référentiel global partagé
   isDefault      Boolean  @default(false) // true pour "Non précisé" — motif par défaut terrain
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -270,16 +277,17 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts      Account[]
-  sessions      Session[]
-  organizations UserOrganization[]
-  auditLogs     AuditLog[]
-  notifications Notification[]
+  accounts                      Account[]
+  sessions                      Session[]
+  organizations                 UserOrganization[]
+  auditLogs                     AuditLog[]
+  notifications                 Notification[]
+  pushDevices                   UserPushDevice[]
   requestedSubscriptionPayments SubscriptionPayment[] @relation("RequestedBySubscriptionPayment")
   confirmedSubscriptionPayments SubscriptionPayment[] @relation("ConfirmedBySubscriptionPayment")
-  paymentTransactions PaymentTransaction[]
-  aiBatchAnalyses AIBatchAnalysis[]
-  formDrafts     FormDraft[]
+  paymentTransactions           PaymentTransaction[]
+  aiBatchAnalyses               AIBatchAnalysis[]
+  formDrafts                    FormDraft[]
 }
 
 // =============================================================================
@@ -300,25 +308,49 @@ model Organization {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  users             UserOrganization[]
-  farms             Farm[]
-  customers         Customer[]
-  suppliers         Supplier[]
-  sales             Sale[]
-  purchases         Purchase[]
-  expenses          Expense[]
-  invoices          Invoice[]
-  notifications     Notification[]
-  auditLogs         AuditLog[]
-  mortalityReasons  MortalityReason[]
-  expenseCategories ExpenseCategory[]
-  subscription      Subscription?
+  users                UserOrganization[]
+  farms                Farm[]
+  customers            Customer[]
+  suppliers            Supplier[]
+  sales                Sale[]
+  purchases            Purchase[]
+  expenses             Expense[]
+  invoices             Invoice[]
+  notifications        Notification[]
+  pushDevices          UserPushDevice[]
+  auditLogs            AuditLog[]
+  mortalityReasons     MortalityReason[]
+  expenseCategories    ExpenseCategory[]
+  subscription         Subscription?
   subscriptionPayments SubscriptionPayment[]
-  paymentTransactions PaymentTransaction[]
-  aiBatchAnalyses   AIBatchAnalysis[]
-  formDrafts        FormDraft[]
+  paymentTransactions  PaymentTransaction[]
+  aiBatchAnalyses      AIBatchAnalysis[]
+  formDrafts           FormDraft[]
 
   @@index([slug])
+}
+
+model UserPushDevice {
+  id             String             @id @default(cuid())
+  userId         String
+  organizationId String
+  token          String
+  platform       PushDevicePlatform @default(WEB)
+  deviceLabel    String?
+  userAgent      String?
+  isActive       Boolean            @default(true)
+  lastSeenAt     DateTime           @default(now())
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, token])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([userId, organizationId, isActive])
+  @@index([organizationId, isActive])
 }
 
 model FormDraft {
@@ -351,14 +383,14 @@ model Subscription {
   canceledAt         DateTime?
 
   // Essai gratuit 7 jours
-  trialEndsAt        DateTime?
+  trialEndsAt DateTime?
 
   // Crédits IA (essai = 3, plans payants = -1 = illimité)
-  aiCreditsTotal     Int                @default(3)
-  aiCreditsUsed      Int                @default(0)
+  aiCreditsTotal Int @default(3)
+  aiCreditsUsed  Int @default(0)
 
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -385,9 +417,9 @@ model SubscriptionPayment {
   createdAt        DateTime                  @default(now())
   updatedAt        DateTime                  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  requestedBy  User         @relation("RequestedBySubscriptionPayment", fields: [requestedById], references: [id], onDelete: Cascade)
-  confirmedBy  User?        @relation("ConfirmedBySubscriptionPayment", fields: [confirmedById], references: [id])
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedBy         User                 @relation("RequestedBySubscriptionPayment", fields: [requestedById], references: [id], onDelete: Cascade)
+  confirmedBy         User?                @relation("ConfirmedBySubscriptionPayment", fields: [confirmedById], references: [id])
   paymentTransactions PaymentTransaction[]
 
   @@index([organizationId, status])
@@ -401,7 +433,7 @@ model PaymentTransaction {
   userId                String
   subscriptionPaymentId String?
   requestedPlan         SubscriptionPlan
-  provider              PaymentProvider         @default(MANUAL)
+  provider              PaymentProvider          @default(MANUAL)
   status                PaymentTransactionStatus @default(CREATED)
   amountFcfa            Int
   currency              String                   @default("XOF")
@@ -419,10 +451,10 @@ model PaymentTransaction {
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
 
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscriptionPayment SubscriptionPayment? @relation(fields: [subscriptionPaymentId], references: [id], onDelete: SetNull)
-  webhookEvents      PaymentWebhookEvent[]
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionPayment SubscriptionPayment?  @relation(fields: [subscriptionPaymentId], references: [id], onDelete: SetNull)
+  webhookEvents       PaymentWebhookEvent[]
 
   @@index([organizationId, status])
   @@index([subscriptionPaymentId])
@@ -451,17 +483,17 @@ model PaymentWebhookEvent {
 
 // Lien User <-> Organization avec rôle et permissions fines par ferme
 model UserOrganization {
-  id              String   @id @default(cuid())
-  userId          String
-  organizationId  String
-  role            UserRole @default(VIEWER)
-  emailNotificationsEnabled Boolean @default(true)
+  id                        String   @id @default(cuid())
+  userId                    String
+  organizationId            String
+  role                      UserRole @default(VIEWER)
+  emailNotificationsEnabled Boolean  @default(true)
   // null = modules par defaut du role, tableau JSON = acces personnalises
-  modulePermissions Json?
+  modulePermissions         Json?
   // Tableau JSON : [{farmId: string, canRead: bool, canWrite: bool, canDelete: bool}]
-  farmPermissions Json     @default("[]")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  farmPermissions           Json     @default("[]")
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -479,11 +511,11 @@ model Farm {
   id             String    @id @default(cuid())
   organizationId String
   name           String
-  code           String?   // identifiant court ex: "DKR-01", "THIS-02"
+  code           String? // identifiant court ex: "DKR-01", "THIS-02"
   address        String?
   latitude       Float?
   longitude      Float?
-  totalCapacity  Int?      // capacité totale en nombre de sujets
+  totalCapacity  Int? // capacité totale en nombre de sujets
   deletedAt      DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -502,11 +534,11 @@ model Building {
   organizationId  String
   farmId          String
   name            String
-  code            String?      // "BAT-A", "P1"
+  code            String? // "BAT-A", "P1"
   type            BuildingType @default(POULAILLER_FERME)
-  capacity        Int          // nombre de sujets maximum
+  capacity        Int // nombre de sujets maximum
   surfaceM2       Float?
-  ventilationType String?      // "Naturelle", "Forcée", "Tunnel"
+  ventilationType String? // "Naturelle", "Forcée", "Tunnel"
   deletedAt       DateTime?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -526,7 +558,7 @@ model Batch {
   id             String      @id @default(cuid())
   organizationId String
   buildingId     String
-  number         String      // "SF-2024-001" — unique par organisation
+  number         String // "SF-2024-001" — unique par organisation
   type           BatchType
   status         BatchStatus @default(ACTIVE)
 
@@ -536,9 +568,9 @@ model Batch {
 
   // Données d'entrée du lot
   entryDate    DateTime // date d'arrivée des sujets
-  entryCount   Int      // effectif initial (jamais modifié après création)
+  entryCount   Int // effectif initial (jamais modifié après création)
   entryAgeDay  Int      @default(0) // âge en jours à l'entrée (0 = poussins du jour)
-  entryWeightG Int?     // poids moyen à l'entrée en grammes
+  entryWeightG Int? // poids moyen à l'entrée en grammes
 
   // Achat des poussins / sujets
   supplierId    String?
@@ -587,19 +619,19 @@ model DailyRecord {
   date           DateTime @db.Date
 
   // Champs principaux — obligatoires pour la saisie rapide terrain
-  mortality   Int   @default(0) // nombre de morts du jour
-  feedKg      Float            // aliment distribué en kg (Float : 12.5 kg possible)
-  waterLiters Float?           // eau consommée en litres
+  mortality   Int    @default(0) // nombre de morts du jour
+  feedKg      Float // aliment distribué en kg (Float : 12.5 kg possible)
+  waterLiters Float? // eau consommée en litres
 
   // Champs secondaires — optionnels, accessibles via "Ajouter détails"
-  temperatureMin Float?  // température min. °C
-  temperatureMax Float?  // température max. °C
-  humidity       Float?  // humidité relative %
-  avgWeightG     Int?    // poids moyen échantillon en grammes
+  temperatureMin Float? // température min. °C
+  temperatureMax Float? // température max. °C
+  humidity       Float? // humidité relative %
+  avgWeightG     Int? // poids moyen échantillon en grammes
 
   observations String?
 
-  recordedById String?   // userId de la personne qui a saisi
+  recordedById String? // userId de la personne qui a saisi
   lockedAt     DateTime? // verrouillé automatiquement après J+1 minuit
 
   createdAt DateTime @default(now())
@@ -621,7 +653,7 @@ model DailyRecord {
 model MortalityRecord {
   id                String   @id @default(cuid())
   dailyRecordId     String
-  mortalityReasonId String?  // null → motif "Non précisé" appliqué par défaut
+  mortalityReasonId String? // null → motif "Non précisé" appliqué par défaut
   count             Int
   notes             String?
   createdAt         DateTime @default(now())
@@ -673,11 +705,11 @@ model WeightRecord {
   organizationId String
   batchId        String
   date           DateTime @db.Date
-  batchAgeDay    Int      // âge du lot en jours au moment de la pesée
-  sampleCount    Int      // nombre de sujets pesés dans l'échantillon
-  avgWeightG     Int      // poids moyen en grammes
-  minWeightG     Int?     // poids minimum de l'échantillon
-  maxWeightG     Int?     // poids maximum de l'échantillon
+  batchAgeDay    Int // âge du lot en jours au moment de la pesée
+  sampleCount    Int // nombre de sujets pesés dans l'échantillon
+  avgWeightG     Int // poids moyen en grammes
+  minWeightG     Int? // poids minimum de l'échantillon
+  maxWeightG     Int? // poids maximum de l'échantillon
   notes          String?
   recordedById   String?
   createdAt      DateTime @default(now())
@@ -697,7 +729,7 @@ model WeightRecord {
 model VaccinationPlan {
   id             String    @id @default(cuid())
   organizationId String
-  name           String    // "Plan standard poulet de chair Cobb 500"
+  name           String // "Plan standard poulet de chair Cobb 500"
   batchType      BatchType
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
@@ -712,10 +744,10 @@ model VaccinationPlan {
 model VaccinationPlanItem {
   id                String   @id @default(cuid())
   vaccinationPlanId String
-  dayOfAge          Int      // jour d'âge cible (7 = J7)
-  vaccineName       String   // "Newcastle HB1", "Gumboro D78", "Marek CVI988"
-  route             String?  // "Orale", "Injection SC", "Spray", "Oculaire"
-  dose              String?  // "1 goutte/sujet", "0.2 ml/sujet"
+  dayOfAge          Int // jour d'âge cible (7 = J7)
+  vaccineName       String // "Newcastle HB1", "Gumboro D78", "Marek CVI988"
+  route             String? // "Orale", "Injection SC", "Spray", "Oculaire"
+  dose              String? // "1 goutte/sujet", "0.2 ml/sujet"
   notes             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -731,12 +763,12 @@ model VaccinationRecord {
   organizationId  String
   batchId         String
   date            DateTime @db.Date
-  batchAgeDay     Int      // âge du lot en jours à la date de vaccination
+  batchAgeDay     Int // âge du lot en jours à la date de vaccination
   vaccineName     String
   route           String?
   dose            String?
-  countVaccinated Int      // nombre de sujets vaccinés
-  medicineStockId String?  // stock médicament utilisé (pour décrémenter le stock)
+  countVaccinated Int // nombre de sujets vaccinés
+  medicineStockId String? // stock médicament utilisé (pour décrémenter le stock)
   notes           String?
   recordedById    String?
   createdAt       DateTime @default(now())
@@ -759,9 +791,9 @@ model TreatmentRecord {
   medicineName    String
   dose            String?
   durationDays    Int?
-  countTreated    Int?      // nombre de sujets traités (null = tout le lot)
+  countTreated    Int? // nombre de sujets traités (null = tout le lot)
   medicineStockId String?
-  indication      String?   // motif du traitement ex: "Suspicion bronchite infectieuse"
+  indication      String? // motif du traitement ex: "Suspicion bronchite infectieuse"
   notes           String?
   recordedById    String?
   createdAt       DateTime  @default(now())
@@ -783,7 +815,7 @@ model FeedStock {
   organizationId   String
   farmId           String
   feedTypeId       String
-  name             String   // nom commercial ex: "Aliment démarrage Avicoop 2024"
+  name             String // nom commercial ex: "Aliment démarrage Avicoop 2024"
   supplierName     String?
   quantityKg       Float    @default(0) // stock actuel en kg
   unitPriceFcfa    Int      @default(0) // prix d'achat unitaire FCFA/kg
@@ -806,10 +838,10 @@ model FeedMovement {
   feedTypeId     String
   type           FeedMovementType
   quantityKg     Float
-  unitPriceFcfa  Int?             // prix unitaire FCFA/kg (renseigné pour les entrées)
-  totalFcfa      Int?             // montant total du mouvement en FCFA
-  batchId        String?          // si sortie consommée par un lot spécifique
-  reference      String?          // numéro BL / facture fournisseur
+  unitPriceFcfa  Int? // prix unitaire FCFA/kg (renseigné pour les entrées)
+  totalFcfa      Int? // montant total du mouvement en FCFA
+  batchId        String? // si sortie consommée par un lot spécifique
+  reference      String? // numéro BL / facture fournisseur
   notes          String?
   recordedById   String?
   date           DateTime         @db.Date
@@ -832,9 +864,9 @@ model MedicineStock {
   id             String    @id @default(cuid())
   organizationId String
   farmId         String
-  name           String    // "Newcastle HB1 - Sanovet", "Doxycycline 50%"
-  category       String?   // "VACCIN", "ANTIBIOTIQUE", "ANTIPARASITAIRE", "VITAMINE"
-  unit           String    // "flacon", "kg", "litre", "dose", "sachet"
+  name           String // "Newcastle HB1 - Sanovet", "Doxycycline 50%"
+  category       String? // "VACCIN", "ANTIBIOTIQUE", "ANTIPARASITAIRE", "VITAMINE"
+  unit           String // "flacon", "kg", "litre", "dose", "sachet"
   quantityOnHand Float     @default(0) // stock actuel dans l'unité définie
   unitPriceFcfa  Int       @default(0) // prix unitaire FCFA
   expiryDate     DateTime? // date de péremption
@@ -885,7 +917,7 @@ model Customer {
   phone          String?
   email          String?
   address        String?
-  type           String?  // "PROFESSIONNEL", "REVENDEUR", "PARTICULIER"
+  type           String? // "PROFESSIONNEL", "REVENDEUR", "PARTICULIER"
   notes          String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -904,7 +936,7 @@ model Supplier {
   phone          String?
   email          String?
   address        String?
-  type           String?  // "POUSSIN", "ALIMENT", "MEDICAMENT", "AUTRE"
+  type           String? // "POUSSIN", "ALIMENT", "MEDICAMENT", "AUTRE"
   notes          String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -934,9 +966,9 @@ model Sale {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  organization Organization    @relation(fields: [organizationId], references: [id])
-  customer     Customer?       @relation(fields: [customerId], references: [id])
-  invoice      Invoice?        @relation(fields: [invoiceId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer?    @relation(fields: [customerId], references: [id])
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id])
   items        SaleItem[]
   payments     Payment[]
 
@@ -950,12 +982,12 @@ model Sale {
 model SaleItem {
   id            String   @id @default(cuid())
   saleId        String
-  batchId       String?  // lot source de la vente (poulets ou œufs)
+  batchId       String? // lot source de la vente (poulets ou œufs)
   description   String
-  quantity      Float    // quantité en kg, pièces ou plateaux
-  unit          String   // "KG", "PIECE", "PLATEAU", "CAISSE"
-  unitPriceFcfa Int      // prix unitaire en FCFA
-  totalFcfa     Int      // = ROUND(quantity * unitPriceFcfa) — toujours Int
+  quantity      Float // quantité en kg, pièces ou plateaux
+  unit          String // "KG", "PIECE", "PLATEAU", "CAISSE"
+  unitPriceFcfa Int // prix unitaire en FCFA
+  totalFcfa     Int // = ROUND(quantity * unitPriceFcfa) — toujours Int
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -976,7 +1008,7 @@ model Purchase {
   supplierId     String?
   invoiceId      String?  @unique
   purchaseDate   DateTime @db.Date
-  reference      String?  // numéro facture fournisseur
+  reference      String? // numéro facture fournisseur
   totalFcfa      Int      @default(0)
   paidFcfa       Int      @default(0)
   notes          String?
@@ -1020,9 +1052,9 @@ model PurchaseItem {
 // Catégories système (isSystem=true, organizationId=null) + custom par organisation
 model ExpenseCategory {
   id             String   @id @default(cuid())
-  organizationId String?  // null = catégorie système partagée par toutes les orgs
-  name           String   // "Aliment", "Médicaments", "Main d'œuvre", "Énergie"
-  code           String   // "ALIMENT", "MEDICAMENT", "MAIN_OEUVRE", "ENERGIE", "AUTRE"
+  organizationId String? // null = catégorie système partagée par toutes les orgs
+  name           String // "Aliment", "Médicaments", "Main d'œuvre", "Énergie"
+  code           String // "ALIMENT", "MEDICAMENT", "MAIN_OEUVRE", "ENERGIE", "AUTRE"
   isSystem       Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -1037,12 +1069,12 @@ model ExpenseCategory {
 model Expense {
   id             String   @id @default(cuid())
   organizationId String
-  batchId        String?  // charge directe liée à un lot (mortalité, aliment, médic...)
-  farmId         String?  // charge indirecte liée à une ferme (loyer, énergie...)
+  batchId        String? // charge directe liée à un lot (mortalité, aliment, médic...)
+  farmId         String? // charge indirecte liée à une ferme (loyer, énergie...)
   categoryId     String?
   date           DateTime @db.Date
   description    String
-  amountFcfa     Int      // montant en FCFA — toujours Int, jamais Float
+  amountFcfa     Int // montant en FCFA — toujours Int, jamais Float
   supplierId     String?
   purchaseId     String?
   reference      String?
@@ -1071,10 +1103,10 @@ model Expense {
 model Invoice {
   id             String        @id @default(cuid())
   organizationId String
-  type           InvoiceType   // VENTE ou ACHAT
-  number         String        // "INV-2024-001" — unique par organisation
-  customerId     String?       // pour les factures de vente (VENTE)
-  supplierId     String?       // pour les factures d'achat (ACHAT)
+  type           InvoiceType // VENTE ou ACHAT
+  number         String // "INV-2024-001" — unique par organisation
+  customerId     String? // pour les factures de vente (VENTE)
+  supplierId     String? // pour les factures d'achat (ACHAT)
   issueDate      DateTime      @db.Date
   dueDate        DateTime?     @db.Date
   totalFcfa      Int
@@ -1102,10 +1134,10 @@ model Payment {
   invoiceId      String?
   saleId         String?
   purchaseId     String?
-  amountFcfa     Int           // montant payé en FCFA — toujours Int
+  amountFcfa     Int // montant payé en FCFA — toujours Int
   paymentDate    DateTime      @db.Date
   method         PaymentMethod @default(ESPECES)
-  reference      String?       // numéro transaction mobile money, chèque, virement
+  reference      String? // numéro transaction mobile money, chèque, virement
   notes          String?
   createdById    String?
   createdAt      DateTime      @default(now())
@@ -1130,9 +1162,9 @@ model Employee {
   firstName         String
   lastName          String
   phone             String?
-  role              String?   // "Technicien d'élevage", "Agent de saisie", "Gardien"
+  role              String? // "Technicien d'élevage", "Agent de saisie", "Gardien"
   hireDate          DateTime? @db.Date
-  monthlySalaryFcfa Int?      // salaire mensuel en FCFA
+  monthlySalaryFcfa Int? // salaire mensuel en FCFA
   isActive          Boolean   @default(true)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -1155,9 +1187,9 @@ model Notification {
   status         NotificationStatus @default(NON_LU)
   title          String
   message        String
-  resourceType   String?            // "BATCH", "FEED_STOCK", "VACCINATION_RECORD"
-  resourceId     String?            // id de la ressource concernée
-  metadata       Json?              // données contextuelles additionnelles
+  resourceType   String? // "BATCH", "FEED_STOCK", "VACCINATION_RECORD"
+  resourceId     String? // id de la ressource concernée
+  metadata       Json? // données contextuelles additionnelles
   readAt         DateTime?
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
@@ -1180,10 +1212,10 @@ model AuditLog {
   organizationId String
   userId         String
   action         AuditAction
-  resourceType   String      // "BATCH", "DAILY_RECORD", "SALE", "EXPENSE"
+  resourceType   String // "BATCH", "DAILY_RECORD", "SALE", "EXPENSE"
   resourceId     String
-  before         Json?       // snapshot de l'état avant modification
-  after          Json?       // snapshot de l'état après modification
+  before         Json? // snapshot de l'état avant modification
+  after          Json? // snapshot de l'état après modification
   ipAddress      String?
   userAgent      String?
   createdAt      DateTime    @default(now())

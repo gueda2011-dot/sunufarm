@@ -4,6 +4,7 @@ import { logger } from "@/src/lib/logger"
 import { getRequestId } from "@/src/lib/request-security"
 import { generateNotificationsForOrganization } from "@/src/actions/notifications"
 import { sendOrganizationNotificationDigestEmails } from "@/src/lib/notification-emails"
+import { sendOrganizationNotificationPushes } from "@/src/lib/push-notifications"
 
 export const dynamic = "force-dynamic"
 
@@ -37,6 +38,8 @@ export async function GET(request: Request) {
   let organizationsProcessed = 0
   let notificationsCreated = 0
   let emailsSent = 0
+  let pushSent = 0
+  let pushInvalidated = 0
 
   for (const organization of organizations) {
     const runStartedAt = new Date()
@@ -52,6 +55,13 @@ export async function GET(request: Request) {
           createdAfter: runStartedAt,
         })
         emailsSent += emailResult.sent
+
+        const pushResult = await sendOrganizationNotificationPushes({
+          organizationId: organization.id,
+          createdAfter: runStartedAt,
+        })
+        pushSent += pushResult.sent
+        pushInvalidated += pushResult.invalidated
       }
     } catch (error) {
       logger.error("notifications.cron_failed_for_organization", {
@@ -68,6 +78,8 @@ export async function GET(request: Request) {
     organizationsProcessed,
     notificationsCreated,
     emailsSent,
+    pushSent,
+    pushInvalidated,
   })
 
   return Response.json({
@@ -76,6 +88,8 @@ export async function GET(request: Request) {
       organizationsProcessed,
       notificationsCreated,
       emailsSent,
+      pushSent,
+      pushInvalidated,
     },
   })
 }
