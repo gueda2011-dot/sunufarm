@@ -152,6 +152,13 @@ Variables d'environnement principales :
 - `SUNUFARM_DATABASE_URL`
 - `AUTH_SECRET`
 - `AUTH_URL`
+- `RESEND_API_KEY` et `MAIL_FROM` pour les emails transactionnels
+
+Configuration email Resend :
+
+- verifier un domaine dans Resend avant d'envoyer a de vrais utilisateurs
+- utiliser `MAIL_FROM` avec une adresse de ce domaine verifie
+- ne pas utiliser `@resend.dev` en production, ce domaine est limite aux emails de test vers votre propre adresse
 
 Scripts utiles :
 

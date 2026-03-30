@@ -1,22 +1,19 @@
 /**
- * SunuFarm — Finances : dépenses (Server Component)
- *
- * Affiche les KPI financiers + la liste des dépenses de l'organisation.
- * Le formulaire de création est côté client (ExpenseForm).
+ * SunuFarm - Depenses : depenses hors achats fournisseur (Server Component)
  */
 
-import { redirect }           from "next/navigation"
-import type { Metadata }      from "next"
-import { auth }               from "@/src/auth"
-import { getExpenses }        from "@/src/actions/expenses"
-import { getSales }           from "@/src/actions/sales"
+import { redirect } from "next/navigation"
+import type { Metadata } from "next"
+import { auth } from "@/src/auth"
+import { getExpenses } from "@/src/actions/expenses"
+import { getSales } from "@/src/actions/sales"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
-import { ExpenseForm }        from "./_components/ExpenseForm"
-import { ExpenseList }        from "./_components/ExpenseList"
+import { ExpenseForm } from "./_components/ExpenseForm"
+import { ExpenseList } from "./_components/ExpenseList"
 import { ExpenseSummaryCards } from "./_components/ExpenseSummaryCards"
 
-export const metadata: Metadata = { title: "Finances" }
+export const metadata: Metadata = { title: "Depenses" }
 
 export default async function FinancesPage() {
   const session = await auth()
@@ -34,31 +31,32 @@ export default async function FinancesPage() {
   ])
 
   const expenses = expensesResult.success ? expensesResult.data : []
-  const sales    = salesResult.success    ? salesResult.data    : []
+  const sales = salesResult.success ? salesResult.data : []
 
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amountFcfa, 0)
-  const totalSales    = sales.reduce((sum, s) => sum + s.totalFcfa, 0)
-  const netResult     = totalSales - totalExpenses
+  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amountFcfa, 0)
+  const totalSales = sales.reduce((sum, sale) => sum + sale.totalFcfa, 0)
+  const netResult = totalSales - totalExpenses
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-
-      {/* ── Titre ─────────────────────────────────────────────────────────── */}
       <div>
-        <h1 className="text-xl font-bold text-gray-900">Finances</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Suivi des dépenses de l&apos;organisation.
+        <h1 className="text-xl font-bold text-gray-900">Depenses</h1>
+        <p className="mt-0.5 text-sm text-gray-500">
+          Enregistrez ici les sorties d&apos;argent hors achats fournisseur.
         </p>
       </div>
 
-      {/* ── KPI cards ────────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Les achats fournisseur se gerent dans <strong>Achats fournisseur</strong>. Cette page
+        sert aux autres depenses: transport, salaires, energie, maintenance ou charges diverses.
+      </div>
+
       <ExpenseSummaryCards
         totalExpenses={totalExpenses}
         totalSales={totalSales}
         netResult={netResult}
       />
 
-      {/* ── Formulaire + liste ───────────────────────────────────────────── */}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1">
           <ExpenseForm organizationId={organizationId} />

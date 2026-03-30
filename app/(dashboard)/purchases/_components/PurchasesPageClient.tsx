@@ -224,9 +224,9 @@ export function PurchasesPageClient({
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Achats</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Achats fournisseur</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            Suis les commandes fournisseurs et structure mieux les couts de production.
+            Gere ici les commandes fournisseur, les montants payes et les restes a regler.
           </p>
         </div>
 
@@ -259,6 +259,11 @@ export function PurchasesPageClient({
           sub="A regler"
           accent={balanceFcfa > 0 ? "red" : undefined}
         />
+      </div>
+
+      <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        Utilisez ce module pour les achats structures avec fournisseur et lignes d&apos;achat.
+        Pour les autres sorties d&apos;argent sans bon d&apos;achat, utilisez <strong>Depenses</strong>.
       </div>
 
       {showForm ? (

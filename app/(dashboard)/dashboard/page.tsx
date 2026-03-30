@@ -8,6 +8,7 @@ import { auth } from "@/src/auth"
 import prisma from "@/src/lib/prisma"
 import { getBatches } from "@/src/actions/batches"
 import { getExpenses } from "@/src/actions/expenses"
+import { getPurchases } from "@/src/actions/purchases"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { buildDashboardViewModel } from "@/src/lib/dashboard-view"
@@ -34,12 +35,14 @@ export default async function DashboardPage() {
   const [
     batchesResult,
     expensesResult,
+    purchasesResult,
     mortalityAgg,
     recentRecordBatchIds,
     mortalityChart,
   ] = await Promise.all([
     getBatches({ organizationId, status: "ACTIVE", limit: 100 }),
     getExpenses({ organizationId, limit: 100 }),
+    getPurchases({ organizationId, limit: 100 }),
     prisma.dailyRecord.aggregate({
       where: {
         batch: { organizationId, status: "ACTIVE", deletedAt: null },
@@ -68,6 +71,7 @@ export default async function DashboardPage() {
   const dashboardView = buildDashboardViewModel({
     activeBatches: batchesResult.success ? batchesResult.data : [],
     expenses: expensesResult.success ? expensesResult.data : [],
+    purchases: purchasesResult.success ? purchasesResult.data : [],
     totalMortality: mortalityAgg._sum.mortality ?? 0,
     recentRecordBatchIds: recentRecordBatchIds.map((row) => row.batchId),
     mortalityChartRows: mortalityChart,
@@ -91,6 +95,10 @@ export default async function DashboardPage() {
         activeBatchCount={dashboardView.activeBatchCount}
         totalEntryCount={dashboardView.totalEntryCount}
         totalChargesFcfa={dashboardView.totalChargesFcfa}
+        totalCashOutFcfa={dashboardView.totalCashOutFcfa}
+        totalPurchasesFcfa={dashboardView.totalPurchasesFcfa}
+        totalOtherExpensesFcfa={dashboardView.totalOtherExpensesFcfa}
+        totalSupplierBalanceFcfa={dashboardView.totalSupplierBalanceFcfa}
         totalMortality={dashboardView.totalMortality}
         mortalityRate={dashboardView.mortalityRate}
         alertCount={dashboardView.alertCount}

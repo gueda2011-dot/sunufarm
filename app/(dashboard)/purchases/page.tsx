@@ -11,7 +11,7 @@ import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { PurchasesPageClient }        from "./_components/PurchasesPageClient"
 
-export const metadata: Metadata = { title: "Achats" }
+export const metadata: Metadata = { title: "Achats fournisseur" }
 
 export default async function PurchasesPage() {
   const session = await auth()

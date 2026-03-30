@@ -1,5 +1,6 @@
 import type { BatchSummary } from "@/src/actions/batches"
 import type { ExpenseSummary } from "@/src/actions/expenses"
+import type { PurchaseSummary } from "@/src/actions/purchases"
 import {
   getBatchOperationalSnapshot,
   hasMissingBatchSaisie,
@@ -33,6 +34,10 @@ export interface DashboardViewModel {
   totalActiveBatches: number
   totalEntryCount: number
   totalChargesFcfa: number
+  totalCashOutFcfa: number
+  totalPurchasesFcfa: number
+  totalOtherExpensesFcfa: number
+  totalSupplierBalanceFcfa: number
   totalMortality: number
   mortalityRate: number
   alertCount: number
@@ -44,6 +49,7 @@ export interface DashboardViewModel {
 interface BuildDashboardViewModelInput {
   activeBatches: BatchSummary[]
   expenses: ExpenseSummary[]
+  purchases: PurchaseSummary[]
   totalMortality: number
   recentRecordBatchIds: string[]
   mortalityChartRows: DashboardMortalityChartRow[]
@@ -94,7 +100,12 @@ export function buildDashboardViewModel(
 
   const totalEntryCount = input.activeBatches.reduce((sum, batch) => sum + batch.entryCount, 0)
   const totalBatchCostFcfa = input.activeBatches.reduce((sum, batch) => sum + batch.totalCostFcfa, 0)
-  const totalExpenses = input.expenses.reduce((sum, expense) => sum + expense.amountFcfa, 0)
+  const totalOtherExpensesFcfa = input.expenses.reduce((sum, expense) => sum + expense.amountFcfa, 0)
+  const totalPurchasesFcfa = input.purchases.reduce((sum, purchase) => sum + purchase.totalFcfa, 0)
+  const totalPurchasesPaidFcfa = input.purchases.reduce((sum, purchase) => sum + purchase.paidFcfa, 0)
+  const totalSupplierBalanceFcfa = input.purchases.reduce((sum, purchase) => sum + purchase.balanceFcfa, 0)
+  const totalChargesFcfa = totalBatchCostFcfa + totalPurchasesFcfa + totalOtherExpensesFcfa
+  const totalCashOutFcfa = totalBatchCostFcfa + totalPurchasesPaidFcfa + totalOtherExpensesFcfa
 
   const mortMap = new Map(
     input.mortalityChartRows.map((row) => [
@@ -125,7 +136,11 @@ export function buildDashboardViewModel(
     activeBatchCount: input.activeBatches.length,
     totalActiveBatches: input.activeBatches.length,
     totalEntryCount,
-    totalChargesFcfa: totalBatchCostFcfa + totalExpenses,
+    totalChargesFcfa,
+    totalCashOutFcfa,
+    totalPurchasesFcfa,
+    totalOtherExpensesFcfa,
+    totalSupplierBalanceFcfa,
     totalMortality: input.totalMortality,
     mortalityRate,
     alertCount: batchesNeedingSaisie.length,

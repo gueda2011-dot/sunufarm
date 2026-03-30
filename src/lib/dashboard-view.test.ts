@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { BatchSummary } from "@/src/actions/batches"
 import type { ExpenseSummary } from "@/src/actions/expenses"
+import type { PurchaseSummary } from "@/src/actions/purchases"
 import { buildDashboardViewModel } from "@/src/lib/dashboard-view"
 
 function createBatch(overrides: Partial<BatchSummary>): BatchSummary {
@@ -48,6 +49,26 @@ function createExpense(overrides: Partial<ExpenseSummary>): ExpenseSummary {
   }
 }
 
+function createPurchase(overrides: Partial<PurchaseSummary>): PurchaseSummary {
+  return {
+    id: "purchase-1",
+    purchaseDate: new Date("2026-03-09T00:00:00.000Z"),
+    reference: "FAC-001",
+    totalFcfa: 12000,
+    paidFcfa: 7000,
+    balanceFcfa: 5000,
+    notes: null,
+    createdAt: new Date("2026-03-09T00:00:00.000Z"),
+    supplier: {
+      id: "supplier-1",
+      name: "AviSup",
+      type: "ALIMENT",
+    },
+    items: [],
+    ...overrides,
+  }
+}
+
 describe("dashboard-view", () => {
   it("assemble les KPI et cartes de lots depuis les donnees brutes", () => {
     const view = buildDashboardViewModel({
@@ -64,6 +85,7 @@ describe("dashboard-view", () => {
         }),
       ],
       expenses: [createExpense({ amountFcfa: 7000 })],
+      purchases: [createPurchase({ totalFcfa: 12000, paidFcfa: 7000, balanceFcfa: 5000 })],
       totalMortality: 9,
       recentRecordBatchIds: ["batch-2"],
       mortalityChartRows: [
@@ -74,7 +96,11 @@ describe("dashboard-view", () => {
 
     expect(view.activeBatchCount).toBe(2)
     expect(view.totalEntryCount).toBe(180)
-    expect(view.totalChargesFcfa).toBe(87000)
+    expect(view.totalChargesFcfa).toBe(99000)
+    expect(view.totalCashOutFcfa).toBe(94000)
+    expect(view.totalPurchasesFcfa).toBe(12000)
+    expect(view.totalOtherExpensesFcfa).toBe(7000)
+    expect(view.totalSupplierBalanceFcfa).toBe(5000)
     expect(view.totalMortality).toBe(9)
     expect(view.alertCount).toBe(1)
     expect(view.batchesNeedingSaisie).toEqual([{ id: "batch-1", number: "SF-001" }])

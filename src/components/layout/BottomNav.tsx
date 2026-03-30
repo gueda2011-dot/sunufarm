@@ -42,9 +42,9 @@ const moreLinks = [
   { href: "/sales", label: "Ventes", icon: ShoppingCart, module: "SALES" as const },
   { href: "/customers", label: "Clients", icon: Users, module: "CUSTOMERS" as const },
   { href: "/suppliers", label: "Fournisseurs", icon: Users, module: "SUPPLIERS" as const },
-  { href: "/purchases", label: "Achats", icon: ShoppingBag, module: "PURCHASES" as const },
+  { href: "/purchases", label: "Achats fournisseur", icon: ShoppingBag, module: "PURCHASES" as const },
   { href: "/health", label: "Sante animale", icon: Syringe, module: "HEALTH" as const },
-  { href: "/finances", label: "Finances", icon: DollarSign, module: "FINANCES" as const },
+  { href: "/finances", label: "Depenses", icon: DollarSign, module: "FINANCES" as const },
   { href: "/team", label: "Equipe", icon: Users, module: "TEAM" as const },
   { href: "/settings", label: "Abonnement", icon: Settings, module: "SETTINGS" as const },
 ] as const
