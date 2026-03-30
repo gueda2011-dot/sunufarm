@@ -4,11 +4,11 @@ import { useEffect, useState } from "react"
 import { CloudOff, Wifi } from "lucide-react"
 
 export function ConnectionBanner() {
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  )
+  const [isOnline, setIsOnline] = useState<boolean | null>(null)
 
   useEffect(() => {
+    setIsOnline(navigator.onLine)
+
     const handleOnline = () => setIsOnline(true)
     const handleOffline = () => setIsOnline(false)
 
@@ -20,6 +20,8 @@ export function ConnectionBanner() {
       window.removeEventListener("offline", handleOffline)
     }
   }, [])
+
+  if (isOnline === null) return null
 
   return (
     <div className={`rounded-2xl border px-4 py-3 text-sm ${

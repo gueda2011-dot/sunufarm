@@ -41,13 +41,7 @@ export function PushNotificationsPrompt({
   organizationId,
   organizationName,
 }: PushNotificationsPromptProps) {
-  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(() => {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      return "unsupported"
-    }
-
-    return window.Notification.permission
-  })
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported" | null>(null)
   const [isSupported, setIsSupported] = useState(false)
   const [isRegistered, setIsRegistered] = useState(false)
   const [isPending, setIsPending] = useState(false)
@@ -197,7 +191,7 @@ export function PushNotificationsPrompt({
     })()
   }
 
-  if (!isFirebaseWebPushConfigured() || permission === "unsupported") {
+  if (permission === null || !isFirebaseWebPushConfigured() || permission === "unsupported") {
     return null
   }
 
