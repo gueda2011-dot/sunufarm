@@ -1,15 +1,13 @@
-/**
- * SunuFarm — Page Achats (Server Component)
- */
-
-import { redirect }      from "next/navigation"
+import { redirect } from "next/navigation"
 import type { Metadata } from "next"
-import { auth }          from "@/src/auth"
+import { auth } from "@/src/auth"
 import { getPurchases } from "@/src/actions/purchases"
 import { getSuppliers } from "@/src/actions/suppliers"
+import { getFeedStocks, getMedicineStocks } from "@/src/actions/stock"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
-import { PurchasesPageClient }        from "./_components/PurchasesPageClient"
+import { hasModuleAccess } from "@/src/lib/permissions"
+import { PurchasesPageClient } from "./_components/PurchasesPageClient"
 
 export const metadata: Metadata = { title: "Achats fournisseur" }
 
@@ -21,30 +19,31 @@ export default async function PurchasesPage() {
   if (!activeMembership) redirect("/start")
   ensureModuleAccess(activeMembership, "PURCHASES")
 
-  const { organizationId, role } = activeMembership
+  const { organizationId, role, modulePermissions } = activeMembership
+  const canManageStock = hasModuleAccess(role, modulePermissions, "STOCK")
 
-  const [purchasesResult, suppliersResult] = await Promise.all([
-    getPurchases({ organizationId, limit: 50 }),
-    getSuppliers({ organizationId }),
-  ])
+  const [purchasesResult, suppliersResult, feedStocksResult, medicineStocksResult] =
+    await Promise.all([
+      getPurchases({ organizationId, limit: 50 }),
+      getSuppliers({ organizationId }),
+      canManageStock ? getFeedStocks({ organizationId, limit: 100 }) : Promise.resolve({ success: true as const, data: [] }),
+      canManageStock ? getMedicineStocks({ organizationId, limit: 100 }) : Promise.resolve({ success: true as const, data: [] }),
+    ])
 
-  const purchases  = purchasesResult.success  ? purchasesResult.data  : []
-  const suppliers  = suppliersResult.success  ? suppliersResult.data  : []
-
-  // KPIs
-  const totalFcfa   = purchases.reduce((s, p) => s + p.totalFcfa,   0)
-  const paidFcfa    = purchases.reduce((s, p) => s + p.paidFcfa,    0)
-  const balanceFcfa = purchases.reduce((s, p) => s + p.balanceFcfa, 0)
+  const purchases = purchasesResult.success ? purchasesResult.data : []
+  const suppliers = suppliersResult.success ? suppliersResult.data : []
+  const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
+  const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
 
   return (
     <PurchasesPageClient
       organizationId={organizationId}
       userRole={role as string}
+      canManageStock={canManageStock}
       purchases={purchases}
       suppliers={suppliers}
-      totalFcfa={totalFcfa}
-      paidFcfa={paidFcfa}
-      balanceFcfa={balanceFcfa}
+      feedStocks={feedStocks}
+      medicineStocks={medicineStocks}
     />
   )
 }
