@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-03-30 (Session 55)
+> Derniere mise a jour : 2026-03-30 (Session 56)
 
 ---
 
@@ -1373,6 +1373,37 @@
 - Etendre l'outil admin d'integrite stock V2
 - Corriger `NEXT_PUBLIC_VERCEL_ENV` (toujours undefined) dans `ServiceWorkerRegistration.tsx` si on veut fiabiliser la detection preview deployment
 - Corriger le re-enregistrement du token FCM a chaque mount (bruit dans les audit logs)
+
+---
+
+## Session 56 - 2026-03-30
+
+### Travail effectue
+
+- Ajout du dropdown de notifications dans le header (`src/components/layout/NotificationDropdown.tsx`) :
+  - La cloche ouvre un panel avec la liste des notifications de l'utilisateur
+  - Marquer une notification comme lue (individuelle ou toutes)
+  - Archiver une notification
+  - Badge de compteur mis a jour localement + `router.refresh()` pour sync serveur
+- Correction du flux push FCM de bout en bout :
+  - Inclusion de `SUPER_ADMIN` dans les cibles de notifications (`generateNotificationsForOrganization`)
+  - Suppression du filtre `organizationId` sur le lookup de devices dans `sendOrganizationNotificationPushes` (un token FCM n'est pas lie a une org specifique)
+  - Normalisation robuste de `FIREBASE_PRIVATE_KEY` dans `firebase-admin.ts` : gestion de `\r\n`, `\r`, `\\n` double-escape et toutes variantes Vercel/Windows
+  - Diagnostic et correction de la cle Firebase dans Vercel : headers PEM `-----BEGIN PRIVATE KEY-----` manquants
+
+### Resultat
+
+- La cloche de notifications dans le header est desormais interactive avec lecture et archivage
+- Les push FCM fonctionnent de bout en bout en production : `fcm=ok · devices=4 · push=2`
+- Confirmation reception notification sur telephone physique
+- Flux complet valide : generation alertes → email → push FCM → reception mobile
+
+### Prochaine session recommandee
+
+- Bloquer explicitement la suppression d'un achat s'il a deja alimente un stock
+- Etendre l'outil admin d'integrite stock V2
+- Corriger le re-enregistrement du token FCM a chaque mount (bruit dans les audit logs)
+- Corriger `NEXT_PUBLIC_VERCEL_ENV` dans `ServiceWorkerRegistration.tsx` pour fiabiliser la detection preview deployment
 
 ---
 
