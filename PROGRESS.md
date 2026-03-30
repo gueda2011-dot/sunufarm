@@ -1,27 +1,45 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-03-28
+> Derniere mise a jour : 2026-03-30
 
 ---
 
 ## Etat global
 
-| Etape | Description | Statut |
+| Bloc | Description | Etat reel |
 |---|---|---|
-| Etape 1 | Analyse fonctionnelle structuree | Validee |
-| Etape 2 | Architecture globale validee | Validee |
-| Etape 3 | Modelisation donnees validee | Validee |
-| Etape 4 | Roadmap MVP/V2/V3 | Validee |
-| Etape 5 | Arborescence complete du projet | Validee |
-| Etape 6 | Schema Prisma complet | Genere |
-| Etape 7 | Seeds realistes (donnees senegalaises) | A faire |
-| Etape 8 | formatters.ts, kpi.ts, permissions.ts, audit.ts, validators/ | A faire |
-| Etape 9 | Modules backend (Server Actions) | A faire |
-| Etape 10 | Pages et vues frontend | A faire |
-| Etape 11 | Dashboards et KPI | A faire |
-| Etape 12 | Rapports PDF et exports | A faire |
-| Etape 13 | Refactoring, securite, optimisation | A faire |
+| Fondations produit | Analyse fonctionnelle, architecture, modelisation et schema Prisma | Termine |
+| Socle technique | Env, auth, permissions, validators, audit, formatters, helpers communs | En place |
+| Backend metier | Server Actions coeur de produit (`batches`, `daily`, `stock`, `health`, `sales`, `purchases`, `expenses`, `subscriptions`) | Largement en place |
+| Frontend metier | Pages dashboard et modules terrain/admin principaux | Largement en place |
+| Dashboard / KPI | Dashboard principal, KPI lot, rapports mensuels, exports PDF | En place |
+| Parcours email | Confirmation d'email et notifications via Resend | En place, depend de la config env |
+| Achats / finance / stock | Paiement fournisseur, envoi au stock, sorties terrain, integrite admin V1 | En place, encore a durcir |
+| Donnees demo | Seed / demo stable pour onboarding et validations manuelles | En place |
+| Observabilite / securite | Health admin, logs critiques, backup / restore, incident response, rate limiting | En place |
+| Chantiers ouverts | Durcissement anti-orphelins, outillage admin V2, simplification UX restante | En cours |
+
+### Lecture rapide
+
+- Le projet n'est plus au stade "schema + maquettes" : le coeur applicatif fonctionne deja sur les domaines principaux
+- Les modules terrain critiques sont presents : `lots`, `saisie journaliere`, `stock`, `sante`, `achats`, `depenses`, `ventes`, `dashboard`
+- Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin et de simplification UX, pas des blocs coeur absents
+
+### Modules produit - etat actuel
+
+| Module | Etat |
+|---|---|
+| Lots | Fonctionnel |
+| Saisie journaliere | Fonctionnelle, avec impact stock aliment |
+| Sante | Fonctionnelle, avec impact stock medicament |
+| Stock | Fonctionnel, avec creation d'articles, mouvements et correction admin V1 |
+| Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
+| Depenses / finances | Fonctionnel |
+| Dashboard | Fonctionnel, achats + depenses integres dans les KPI |
+| Rapports | Fonctionnels au MVP |
+| Admin plateforme | Fonctionnel, avec supervision de base et integrite stock V1 |
+| Emails transactionnels | Fonctionnels si Resend est correctement configure |
 
 ---
 
@@ -30,12 +48,19 @@
 - Roadmap de reference enregistree dans `docs/SCALABILITY_ROADMAP.md`
 - Priorite active : execution du trimestre courant a partir de `docs/QUARTERLY_ROADMAP.md`
 - Phase 0 terminee le 2026-03-28
-- Phase 1 en cours : socle env + erreurs API + permissions serveur critiques
+- Phase 1 terminee : socle env + erreurs API + permissions serveur critiques
 - Phase 2 terminee : audit Prisma + bornes sur les listes metier + index composes appliques
 - Phase 3 terminee : logique metier partagee + pattern commun des Server Actions
 - Phase 4 terminee : CI + tests critiques + matrice de non-regression
 - Phase 5 terminee : observabilite critique + sante applicative + backup / restore + incident response
 - Phase 6 terminee : workflow equipe + onboarding + ownership + priorisation + trajectoire async/cache
+
+### Priorites produit / tech actives
+
+- Fiabiliser encore les flux croises `achats -> stock -> lot -> dashboard`
+- Eviter a la source les orphelins de stock lors des suppressions d'achat
+- Etendre l'outillage admin de correction au-dela des cas simples deja couverts
+- Continuer a reduire la charge cognitive utilisateur entre `Achats`, `Depenses`, `Stock` et `Saisie`
 
 ---
 
@@ -1264,6 +1289,59 @@
 
 - Continuer sur les derniers flux atypiques d'auth/support
 - Ou bien revenir sur une amelioration produit visible dans `reports` ou `subscriptions / payments`
+
+---
+
+## Session 54 - 2026-03-30
+
+### Travail effectue
+
+- Diagnostic et correction du flux email de confirmation via Resend : verification du domaine expéditeur, clarification de `MAIL_FROM` et documentation de la contrainte `@resend.dev`
+- Clarification produit entre `Achats fournisseur` et `Depenses`, avec alignement des libelles UI
+- Extension du dashboard pour integrer toutes les sorties d'argent :
+  - `Charges globales = achats + autres depenses`
+  - `Argent sorti`
+  - `Reste a payer`
+- Ajout du flux achats fournisseur :
+  - enregistrement des paiements fournisseur
+  - calcul du solde restant
+  - envoi des lignes d'achat vers le stock
+- Ajout de la creation d'articles de stock aliment et medicament depuis le module `Stock`
+- Correctif sur la conversion `SAC -> kg` pour les achats d'aliment envoyes au stock
+- Branchement automatique du stock sur les operations terrain :
+  - la saisie journaliere diminue maintenant le stock aliment selectionne
+  - vaccinations et traitements peuvent maintenant diminuer un stock medicament avec quantite explicite
+  - les corrections de saisie resynchronisent aussi les mouvements de stock
+- Ajout de la suppression securisee d'un stock vide et jamais utilise
+- Nettoyage manuel d'une entree de stock orpheline en base suite a un achat supprime
+- Ajout d'un outil admin V1 d'integrite du stock dans `/admin` :
+  - detection des mouvements d'entree orphelins issus d'achats supprimes
+  - correction automatique des cas surs
+  - audit log des reparations admin
+- Mise a jour du `README.md` pour couvrir les points de configuration email et les nouveaux parcours stock / achats
+
+### Resultat
+
+- Les inscriptions peuvent maintenant envoyer des emails de confirmation a de vrais destinataires quand le domaine Resend est correctement verifie
+- Le dashboard financier raconte une histoire plus juste en integrant achats et depenses dans les KPI globaux
+- Les achats fournisseur sont mieux relies au terrain :
+  - paiement
+  - entree en stock
+  - dette fournisseur
+- Le stock commence a vivre avec les operations reelles du lot au lieu de rester separe :
+  - entree via achat
+  - sortie via consommation d'aliment
+  - sortie via vaccination / traitement
+- Le projet dispose maintenant d'un premier filet de securite admin pour corriger les orphelins de stock sans passer par la base a la main
+- Validation technique relancee a plusieurs reprises : `eslint` cible et `npm run build` passent sur les lots de changements livres
+
+### Prochaine session recommandee
+
+- Bloquer explicitement la suppression d'un achat s'il a deja alimente un stock, pour eviter de nouveaux orphelins a la source
+- Etendre l'outil admin d'integrite stock avec une V2 :
+  - recalcul de stock a partir des mouvements
+  - correction manuelle assistee des cas non surs
+- Revenir sur les flux produits restants encore ambigus entre terrain, stock et finance pour reduire la charge cognitive utilisateur
 
 ---
 
