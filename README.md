@@ -1,125 +1,137 @@
 # SunuFarm
 
-## 🐔 Pilotez votre ferme avicole comme une entreprise
+## Pilotez votre ferme avicole comme une entreprise
 
 SunuFarm est un logiciel SaaS qui aide les elevages avicoles a mieux suivre leurs lots, leurs couts, leurs ventes et leur rentabilite, avec une approche simple, moderne et adaptee au terrain.
 
-## 🌍 Vision produit
+## Vision produit
 
 SunuFarm existe pour aider les eleveurs a sortir d'une gestion manuelle, dispersee et difficile a piloter.
 
 Dans beaucoup d'exploitations, les informations sont encore notees sur papier, dans WhatsApp, dans Excel ou simplement gardees en tete. Le resultat est souvent le meme :
 
-- peu de visibilité sur les pertes
-- difficulté à savoir si un lot est rentable
-- décisions prises trop tard
-- pilotage financier imprécis
+- peu de visibilite sur les pertes
+- difficulte a savoir si un lot est rentable
+- decisions prises trop tard
+- pilotage financier imprecis
 
-Notre ambition est simple : donner aux éleveurs un outil clair pour gérer leur activité avec plus de rigueur, plus de visibilité et plus de sérénité.
+Notre ambition est simple : donner aux eleveurs un outil clair pour gerer leur activite avec plus de rigueur, plus de visibilite et plus de serenite.
 
-## 📈 Valeur pour l'éleveur
+## Valeur pour l'eleveur
 
-Avec SunuFarm, l'éleveur peut :
+Avec SunuFarm, l'eleveur peut :
 
-- suivre la rentabilité réelle de ses lots
-- voir rapidement où se trouvent les pertes
+- suivre la rentabilite reelle de ses lots
+- voir rapidement ou se trouvent les pertes
 - mieux anticiper ses besoins en stock
-- centraliser ses données de production, ventes et dépenses
-- prendre de meilleures décisions au bon moment
+- centraliser ses donnees de production, ventes et depenses
+- prendre de meilleures decisions au bon moment
 
-Concrètement, SunuFarm aide à transformer une exploitation avicole en activité mieux pilotée, plus lisible et plus rentable.
+Concretement, SunuFarm aide a transformer une exploitation avicole en activite mieux pilotee, plus lisible et plus rentable.
 
-## ✨ Fonctionnalités principales
+## Fonctionnalites principales
 
 ### Lots
 
-- création et suivi des lots d'élevage
-- suivi de l'effectif, de l'âge et de l'évolution du cycle
+- creation et suivi des lots d'elevage
+- suivi de l'effectif, de l'age et de l'evolution du cycle
 - vision claire par lot pour mieux comparer les performances
 
-### Saisie journalière
+### Saisie journaliere
 
-- enregistrement quotidien des données terrain
-- mortalité, alimentation, eau, température, humidité et observations
-- historique structuré pour mieux comprendre ce qui se passe dans l'élevage
+- enregistrement quotidien des donnees terrain
+- mortalite, alimentation, eau, temperature, humidite et observations
+- historique structure pour mieux comprendre ce qui se passe dans l'elevage
 
 ### Production
 
 - suivi de la production d'oeufs
-- consolidation des données de performance
+- consolidation des donnees de performance
 - indicateurs utiles pour mieux lire le rendement
 
 ### Stock et ventes
 
-- suivi du stock d'aliments et de médicaments
+- suivi du stock d'aliments et de medicaments
+- creation d'articles de stock aliment et medicament directement dans le module stock
+- alimentation du stock depuis les achats fournisseur quand la marchandise est recue
 - enregistrement des ventes
-- meilleure visibilité sur les mouvements et les sorties
+- meilleure visibilite sur les mouvements et les sorties
 
 ### Finances
 
-- suivi des achats, dépenses et revenus
-- lecture plus simple des coûts par lot
-- analyse de la rentabilité pour savoir ce qui marche vraiment
+- suivi des achats fournisseur, depenses et revenus
+- enregistrement des paiements fournisseur et du reste a payer
+- separation claire entre `Achats fournisseur` et `Depenses` pour eviter les doublons
+- lecture plus simple des couts par lot
+- analyse de la rentabilite pour savoir ce qui marche vraiment
 
-### Santé animale
+### Parcours achats et stock
+
+- `Achats fournisseur` sert a enregistrer une commande fournisseur structuree
+- un achat peut etre paye partiellement ou totalement, avec mise a jour du solde restant
+- `Depenses` sert aux autres sorties d'argent qui ne passent pas par un achat fournisseur
+- `Stock` sert a creer les articles de stock qui recevront ensuite les achats
+- l'envoi au stock se fait ligne par ligne depuis un achat fournisseur pour garder une trace propre des mouvements
+
+### Sante animale
 
 - suivi des traitements et vaccinations
-- meilleure traçabilité sanitaire
-- alertes et historique plus faciles à exploiter
+- meilleure tracabilite sanitaire
+- alertes et historique plus faciles a exploiter
 
-## 🧭 Cas d'usage concret
+## Cas d'usage concret
 
-Un éleveur démarre un nouveau lot de poulets de chair.
+Un eleveur demarre un nouveau lot de poulets de chair.
 
-1. Il crée le lot dans SunuFarm avec la date d'entrée, l'effectif et le coût d'achat.
-2. Chaque jour, son équipe saisit la mortalité, l'aliment consommé, l'eau et les observations.
-3. Il suit l'évolution du lot et repère rapidement une hausse anormale des pertes ou un besoin en stock.
-4. Il enregistre ses dépenses, ses achats et ses ventes au fur et à mesure.
-5. À la fin du cycle, il consulte ses rapports et voit clairement :
-   - combien le lot a coûté
-   - combien il a rapporté
-   - s'il a été rentable ou non
-   - où se situent les principaux écarts
+1. Il cree le lot dans SunuFarm avec la date d'entree, l'effectif et le cout d'achat.
+2. Chaque jour, son equipe saisit la mortalite, l'aliment consomme, l'eau et les observations.
+3. Il suit l'evolution du lot et repere rapidement une hausse anormale des pertes ou un besoin en stock.
+4. Il enregistre ses depenses, ses achats et ses ventes au fur et a mesure.
+5. A la fin du cycle, il consulte ses rapports et voit clairement :
+   - combien le lot a coute
+   - combien il a rapporte
+   - s'il a ete rentable ou non
+   - ou se situent les principaux ecarts
 
-Au lieu d'attendre la fin pour “sentir” si le lot a bien marché, il peut piloter pendant le cycle.
+Au lieu d'attendre la fin pour "sentir" si le lot a bien marche, il peut piloter pendant le cycle.
 
-## 🎯 Cible
+## Cible
 
-SunuFarm s'adresse en priorité :
+SunuFarm s'adresse en priorite :
 
-- aux petits élevages avicoles
-- aux moyens élevages avicoles
+- aux petits elevages avicoles
+- aux moyens elevages avicoles
 - aux exploitations en croissance
-- au marché de l'Afrique francophone
+- au marche de l'Afrique francophone
 
-Le produit est pensé pour des usages concrets, avec une interface simple et une logique adaptée aux réalités du terrain.
+Le produit est pense pour des usages concrets, avec une interface simple et une logique adaptee aux realites du terrain.
 
-## 💳 Pricing
+## Pricing
 
-### Basic — 5 000 FCFA / mois
+### Basic - 5 000 FCFA / mois
 
-Pour les petits élevages qui veulent digitaliser leur suivi de base.
+Pour les petits elevages qui veulent digitaliser leur suivi de base.
 
-### Pro — 10 000 FCFA / mois
+### Pro - 10 000 FCFA / mois
 
-Notre offre principale, conçue pour les élevages qui veulent mieux piloter leur rentabilité et leur croissance.
+Notre offre principale, concue pour les elevages qui veulent mieux piloter leur rentabilite et leur croissance.
 
-### Business — 25 000 FCFA / mois
+### Business - 25 000 FCFA / mois
 
-Pour les structures plus avancées qui ont besoin d'un pilotage plus complet et d'un meilleur niveau d'organisation.
+Pour les structures plus avancees qui ont besoin d'un pilotage plus complet et d'un meilleur niveau d'organisation.
 
-## 🚀 Pourquoi SunuFarm est différent
+## Pourquoi SunuFarm est different
 
-- adapté à l'Afrique francophone
-- pensé pour les réalités de l'élevage, pas pour un modèle générique
-- simple à prendre en main
-- moderne dans l'expérience utilisateur
-- conçu comme un vrai produit SaaS, avec vision long terme
+- adapte a l'Afrique francophone
+- pense pour les realites de l'elevage, pas pour un modele generique
+- simple a prendre en main
+- moderne dans l'experience utilisateur
+- concu comme un vrai produit SaaS, avec vision long terme
 
-SunuFarm ne cherche pas à être un logiciel complexe de plus.
-Il cherche à devenir l'outil de pilotage quotidien de l'éleveur.
+SunuFarm ne cherche pas a etre un logiciel complexe de plus.
+Il cherche a devenir l'outil de pilotage quotidien de l'eleveur.
 
-## 🛠️ Stack technique
+## Stack technique
 
 Le produit repose sur un socle moderne et robuste :
 
@@ -131,14 +143,14 @@ Le produit repose sur un socle moderne et robuste :
 - Tailwind CSS
 - Vitest
 
-## 💻 Installation et développement
+## Installation et developpement
 
-### Prérequis
+### Prerequis
 
 - Node.js
 - PostgreSQL
 
-### Démarrage rapide
+### Demarrage rapide
 
 ```bash
 npm install
@@ -169,16 +181,16 @@ npm test
 npm run build
 ```
 
-## 🤝 Call to action
+## Call to action
 
-### Demander une démo
+### Demander une demo
 
-Si vous souhaitez voir comment SunuFarm peut aider votre élevage à mieux piloter sa production et sa rentabilité, contactez-nous pour une démonstration.
+Si vous souhaitez voir comment SunuFarm peut aider votre elevage a mieux piloter sa production et sa rentabilite, contactez-nous pour une demonstration.
 
 ### Tester le produit
 
-SunuFarm est en construction active avec une vraie ambition produit : devenir l'outil de référence pour la gestion avicole en Afrique francophone.
+SunuFarm est en construction active avec une vraie ambition produit : devenir l'outil de reference pour la gestion avicole en Afrique francophone.
 
 ---
 
-SunuFarm aide les éleveurs à mieux voir, mieux décider et mieux gérer.
+SunuFarm aide les eleveurs a mieux voir, mieux decider et mieux gerer.

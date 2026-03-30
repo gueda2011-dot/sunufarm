@@ -27,9 +27,9 @@ export default async function StockPage() {
   }
   ensureModuleAccess(activeMembership, "STOCK")
 
-  const { organizationId, role, farmPermissions } = activeMembership
+  const { organizationId, role } = activeMembership
 
-  const [feedStocksResult, feedMovementsResult, medicineStocksResult, farms, feedTypes] =
+  const [feedStocksResult, feedMovementsResult, medicineStocksResult, farms, feedTypes, membership] =
     await Promise.all([
       getFeedStocks({ organizationId }),
       getFeedMovements({ organizationId, limit: 20 }),
@@ -43,11 +43,16 @@ export default async function StockPage() {
         select: { id: true, name: true, code: true },
         orderBy: { name: "asc" },
       }),
+      prisma.userOrganization.findFirst({
+        where: { userId: session.user.id, organizationId },
+        select: { farmPermissions: true },
+      }),
     ])
 
   const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
   const feedMovements = feedMovementsResult.success ? feedMovementsResult.data : []
   const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
+  const farmPermissions = membership?.farmPermissions ?? []
   const writableFarms = farms.filter((farm) =>
     canAccessFarm(role, farmPermissions, farm.id, "canWrite"),
   )
