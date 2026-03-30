@@ -47,6 +47,7 @@ export function AdminTriggerNotificationsButton() {
             <>
               <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
               {result.organizationsProcessed} orgs · {result.notificationsCreated} notifs · {result.pushSent} push · {result.emailsSent} emails
+              {" "}· fcm={result.firebaseConfigured ? "ok" : "non configure"} · devices={result.devicesInDb}
             </>
           ) : (
             result.error ?? "Erreur inconnue"

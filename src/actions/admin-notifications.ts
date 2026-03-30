@@ -7,6 +7,7 @@ import { logger } from "@/src/lib/logger"
 import { generateNotificationsForOrganization } from "@/src/actions/notifications"
 import { sendOrganizationNotificationDigestEmails } from "@/src/lib/notification-emails"
 import { sendOrganizationNotificationPushes } from "@/src/lib/push-notifications"
+import { isFirebaseAdminConfigured } from "@/src/lib/firebase-admin"
 
 export interface TriggerNotificationsResult {
   success: boolean
@@ -15,6 +16,8 @@ export interface TriggerNotificationsResult {
   emailsSent: number
   pushSent: number
   pushInvalidated: number
+  firebaseConfigured: boolean
+  devicesInDb: number
   error?: string
 }
 
@@ -28,7 +31,7 @@ export async function adminTriggerNotifications(): Promise<TriggerNotificationsR
   })
 
   if (!isSuperAdmin) {
-    return { success: false, organizationsProcessed: 0, notificationsCreated: 0, emailsSent: 0, pushSent: 0, pushInvalidated: 0, error: "Permission refusee" }
+    return { success: false, organizationsProcessed: 0, notificationsCreated: 0, emailsSent: 0, pushSent: 0, pushInvalidated: 0, firebaseConfigured: false, devicesInDb: 0, error: "Permission refusee" }
   }
 
   const organizations = await prisma.organization.findMany({
@@ -36,6 +39,9 @@ export async function adminTriggerNotifications(): Promise<TriggerNotificationsR
     select: { id: true, name: true },
     orderBy: { createdAt: "asc" },
   })
+
+  const firebaseConfigured = isFirebaseAdminConfigured()
+  const devicesInDb = await prisma.userPushDevice.count({ where: { isActive: true } })
 
   let organizationsProcessed = 0
   let notificationsCreated = 0
@@ -81,5 +87,7 @@ export async function adminTriggerNotifications(): Promise<TriggerNotificationsR
     emailsSent,
     pushSent,
     pushInvalidated,
+    firebaseConfigured,
+    devicesInDb,
   }
 }
