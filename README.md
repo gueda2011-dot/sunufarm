@@ -175,20 +175,22 @@ Configuration email Resend :
 
 Configuration Firebase Cloud Messaging :
 
-- garder Prisma et PostgreSQL comme source de verite, Firebase sert uniquement de canal push
-- renseigner cote serveur :
+- Firebase sert uniquement de canal push — Prisma/PostgreSQL restent la source de verite
+- la table `UserPushDevice` stocke les tokens FCM par organisation (migration `20260330173000`)
+- renseigner cote serveur (requis pour l'envoi FCM depuis le cron) :
   - `FIREBASE_PROJECT_ID`
   - `FIREBASE_CLIENT_EMAIL`
-  - `FIREBASE_PRIVATE_KEY`
-- renseigner cote client web :
+  - `FIREBASE_PRIVATE_KEY` — coller sur une seule ligne avec des `\n` litteraux sur Vercel
+- renseigner cote client web (requis pour generer le token FCM dans le navigateur) :
   - `NEXT_PUBLIC_FIREBASE_API_KEY`
   - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
   - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
   - `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
   - `NEXT_PUBLIC_FIREBASE_APP_ID`
   - `NEXT_PUBLIC_FIREBASE_VAPID_KEY`
-- autoriser les notifications dans le navigateur pour enregistrer le device
-- l'envoi push se branche sur le cron `/api/cron/notifications` et sur les notifications metier deja generees
+- si les 3 variables serveur sont absentes, l'envoi push est silencieusement desactive (pas d'erreur)
+- le cron `/api/cron/notifications` requiert `CRON_SECRET` en production, sinon toutes les requetes retournent 401
+- autoriser les notifications dans le navigateur pour enregistrer le device — le bouton disparait une fois le device enregistre avec succes
 
 Scripts utiles :
 

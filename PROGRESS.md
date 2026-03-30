@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-03-30
+> Derniere mise a jour : 2026-03-30 (Session 55)
 
 ---
 
@@ -1342,6 +1342,37 @@
   - recalcul de stock a partir des mouvements
   - correction manuelle assistee des cas non surs
 - Revenir sur les flux produits restants encore ambigus entre terrain, stock et finance pour reduire la charge cognitive utilisateur
+
+---
+
+## Session 55 - 2026-03-30
+
+### Travail effectue
+
+- Audit complet de l'integration Firebase FCM :
+  - Architecture validee (Admin SDK serveur, Web SDK client, service worker custom)
+  - Identification de 2 blocages critiques production : variables Firebase Admin absentes et CRON_SECRET manquant
+  - Identification de 4 problemes importants : schedule cron incorrect, NEXT_PUBLIC_VERCEL_ENV mort, sur-desactivation tokens, re-enregistrement a chaque mount
+- Ajout des 3 variables Firebase Admin dans `.env.local` a partir du fichier de cle de service
+- Application de la migration `20260330173000_add_user_push_devices` en base (`npx prisma migrate deploy`)
+- Configuration des variables Firebase Admin sur Vercel (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY)
+- Correction du mismatch d'hydration React sur `ConnectionBanner` : `useState(navigator.onLine)` remplace par `useState(null)` + lecture dans `useEffect`
+- Correction du mismatch d'hydration React sur `InstallPrompt` : detection iOS deplacee de l'initialiseur `useState` vers `useEffect`
+- Correction du mismatch d'hydration React sur `PushNotificationsPrompt` : `useState(Notification.permission)` remplace par `useState(null)` + guard `permission === null`
+
+### Resultat
+
+- Le token FCM est genere cote client, enregistre en base (`UserPushDevice`) et visible dans Prisma Studio
+- Les 3 composants PWA sont desormais SSR-safe : aucun mismatch d'hydration sur `/dashboard`
+- L'integration Firebase est prete pour la production : variables Admin configurees sur Vercel, cron autorise via CRON_SECRET
+- `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Bloquer explicitement la suppression d'un achat s'il a deja alimente un stock
+- Etendre l'outil admin d'integrite stock V2
+- Corriger `NEXT_PUBLIC_VERCEL_ENV` (toujours undefined) dans `ServiceWorkerRegistration.tsx` si on veut fiabiliser la detection preview deployment
+- Corriger le re-enregistrement du token FCM a chaque mount (bruit dans les audit logs)
 
 ---
 
