@@ -310,7 +310,6 @@ export async function sendOrganizationNotificationPushes(args: {
 
   const devices = await prisma.userPushDevice.findMany({
     where: {
-      organizationId: args.organizationId,
       isActive: true,
       userId: { in: [...new Set(notifications.map((notification) => notification.userId))] },
     },
