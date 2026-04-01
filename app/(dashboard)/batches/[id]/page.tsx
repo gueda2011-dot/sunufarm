@@ -28,11 +28,13 @@ import { PlanGuardCard }                  from "@/src/components/subscription/Pl
 import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { getAIPolicy, listStoredBatchAnalyses } from "@/src/lib/ai"
+import { getBatchMortalityInsight } from "@/src/actions/predictive"
 import {
   getBatchOperationalSnapshot,
   hasMissingBatchSaisie,
 } from "@/src/lib/batch-metrics"
 import { BatchHeader }                    from "./_components/BatchHeader"
+import { BatchMortalityPredictionCard } from "./_components/BatchMortalityPredictionCard"
 import { BatchAIAnalysisCard }            from "./_components/BatchAIAnalysisCard"
 import { BatchKpis }                      from "./_components/BatchKpis"
 import { ProfitabilityCard }              from "./_components/ProfitabilityCard"
@@ -56,21 +58,21 @@ export default async function BatchDetailPage({
   if (!activeMembership) redirect("/start")
   ensureModuleAccess(activeMembership, "BATCHES")
 
+  const batchResult = await getBatch({ organizationId: activeMembership.organizationId, batchId: id })
+  if (!batchResult.success) notFound()
+  const batch = batchResult.data
+
   const { organizationId, role } = activeMembership
   const subscription = await getOrganizationSubscription(organizationId)
   const canSeeProfitability = hasPlanFeature(subscription.plan, "PROFITABILITY")
+  const canSeePredictiveHealth = hasPlanFeature(subscription.plan, "PREDICTIVE_HEALTH_ALERTS")
+  const canShowMortalityPrediction = batch.status === "ACTIVE"
   const aiPolicy = getAIPolicy(subscription)
   const canUseBatchAI = aiPolicy.enabled
 
   // ── Fetch parallèle ──────────────────────────────────────────────────────
   // getBatch doit réussir pour afficher la page.
   // Les autres fetches dégradent gracieusement si ils échouent (tableaux vides).
-  const batchResult = await getBatch({ organizationId, batchId: id })
-
-  if (!batchResult.success) notFound()
-
-  const batch = batchResult.data
-
   const [
     recordsResult,
     expensesResult,
@@ -78,6 +80,7 @@ export default async function BatchDetailPage({
     treatmentsResult,
     medicineStocksResult,
     profitabilityResult,
+    mortalityInsightResult,
     previousAnalyses,
   ] = await Promise.all([
     getDailyRecords({ organizationId, batchId: id, limit: 100 }),
@@ -93,6 +96,14 @@ export default async function BatchDetailPage({
             status: 403,
           }),
         ),
+    canSeePredictiveHealth && canShowMortalityPrediction
+      ? getBatchMortalityInsight(organizationId, id)
+      : Promise.resolve<ActionResult<Awaited<ReturnType<typeof getBatchMortalityInsight>> extends { success: true; data: infer T } ? T : never>>(
+          actionFailure(getFeatureUpgradeMessage("PREDICTIVE_HEALTH_ALERTS"), {
+            code: "PLAN_UPGRADE_REQUIRED",
+            status: 403,
+          }),
+        ),
     listStoredBatchAnalyses(organizationId, id, 5),
   ])
 
@@ -102,6 +113,7 @@ export default async function BatchDetailPage({
   const treatments    = treatmentsResult.success    ? treatmentsResult.data    : []
   const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
   const profitability = profitabilityResult.success ? profitabilityResult.data : null
+  const mortalityInsight = mortalityInsightResult.success ? mortalityInsightResult.data : null
 
   // ── Agrégations opérationnelles (calculées une fois, propagées en props) ─
   const totalMortality = records.reduce((s, r) => s + r.mortality, 0)
@@ -139,6 +151,22 @@ export default async function BatchDetailPage({
         lastRecordDate={lastRecordDate}
         isActive={batch.status === "ACTIVE"}
       />
+
+      {mortalityInsight && (
+        <BatchMortalityPredictionCard
+          prediction={mortalityInsight.prediction}
+          trend={mortalityInsight.trend}
+        />
+      )}
+
+      {!mortalityInsight && canShowMortalityPrediction && (
+        <PlanGuardCard
+          title="Debloquez la prediction mortalite"
+          message={getFeatureUpgradeMessage("PREDICTIVE_HEALTH_ALERTS")}
+          requiredPlan="Pro"
+          currentPlan={subscription.plan}
+        />
+      )}
 
       {profitability && (
         <ProfitabilityCard profitability={profitability} />

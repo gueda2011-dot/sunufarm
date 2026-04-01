@@ -55,6 +55,8 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - suivi du stock d'aliments et de medicaments
 - creation d'articles de stock aliment et medicament directement dans le module stock
 - alimentation du stock depuis les achats fournisseur quand la marchandise est recue
+- prediction de rupture stock sur 14 jours pour les plans `Pro` et `Business`
+- tendance predictive `S'ameliore / Stable / Se degrade` sur les stocks les plus sensibles
 - enregistrement des ventes
 - meilleure visibilite sur les mouvements et les sorties
 - creation de ventes disponible hors ligne en V1 avec synchro differee
@@ -81,6 +83,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - suivi des traitements et vaccinations
 - meilleure tracabilite sanitaire
 - alertes et historique plus faciles a exploiter
+- prediction du risque mortalite sur 7 jours pour les plans `Pro` et `Business`
 - vaccinations et traitements disponibles hors ligne en V1 avec synchro differée
 
 ## Cas d'usage concret
@@ -120,9 +123,26 @@ Pour les petits elevages qui veulent digitaliser leur suivi de base.
 
 Notre offre principale, concue pour les elevages qui veulent mieux piloter leur rentabilite et leur croissance.
 
+Inclut maintenant :
+
+- rapports
+- rentabilite par lot
+- alertes intelligentes
+- analyse AI des lots
+- prediction de rupture stock
+- prediction risque mortalite
+
 ### Business - 25 000 FCFA / mois
 
 Pour les structures plus avancees qui ont besoin d'un pilotage plus complet et d'un meilleur niveau d'organisation.
+
+Inclut aussi :
+
+- prediction de rupture stock
+- prediction risque mortalite
+- multi-fermes
+- gestion d'equipe
+- exports avances
 
 ## Pourquoi SunuFarm est different
 
@@ -214,6 +234,23 @@ Mode hors ligne V1 :
 - un panneau de synchronisation affiche les elements en attente, les erreurs, permet une resynchronisation globale et des actions `Retenter` / `Supprimer` par element
 - les flux offline critiques utilisent maintenant une `clientMutationId` persistée cote serveur pour limiter les doublons lors d'un rejeu apres reconnexion
 - le perimetre V1 couvre uniquement la creation hors ligne, pas encore l'edition hors ligne ni la resolution avancee de conflits
+
+Prediction de rupture stock V1 :
+
+- disponible sur le module `Stock` pour les plans `Pro` et `Business`
+- calcule une estimation de rupture sur une fenetre glissante de 14 jours a partir des mouvements de sortie
+- affiche un badge de risque par article avec date estimee de rupture
+- persiste des snapshots quotidiens (`PredictiveSnapshot`) pour suivre l'evolution
+- expose une tendance simple `S'ameliore / Stable / Se degrade`
+- remonte les cas critiques dans l'admin et dans les notifications serveur
+
+Prediction mortalite V1 :
+
+- disponible sur la page detail d'un lot actif pour les plans `Pro` et `Business`
+- calcule un score de risque sur 7 jours a partir de la mortalite recente, de son acceleration, des traitements actifs, des retards vaccinaux et des saisies manquantes
+- affiche une carte predictive avec score, resume des signaux et tendance `S'ameliore / Stable / Se degrade`
+- persiste aussi ses snapshots quotidiens dans `PredictiveSnapshot` pour suivre l'evolution du risque
+- remonte uniquement les cas critiques dans les notifications serveur pour limiter le bruit
 
 Scripts utiles :
 

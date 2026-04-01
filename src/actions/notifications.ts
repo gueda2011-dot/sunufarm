@@ -63,8 +63,16 @@ import {
   requiredIdSchema,
 } from "@/src/lib/validators"
 import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
-import { getStockPredictionsInternal } from "@/src/actions/predictive"
-import { upsertOrganizationSnapshots } from "@/src/lib/predictive-snapshots"
+import {
+  getBatchMortalityPredictionsInternal,
+  getStockPredictionsInternal,
+} from "@/src/actions/predictive"
+import {
+  upsertOrganizationBatchMortalitySnapshots,
+  upsertOrganizationSnapshots,
+} from "@/src/lib/predictive-snapshots"
+import { hasPlanFeature } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -833,6 +841,9 @@ export async function generateNotificationsForOrganization(
 
   const userIds = targetMembers.map((m) => m.userId)
   let totalCreated = 0
+  const subscription = await getOrganizationSubscription(organizationId)
+  const canSeePredictiveStock = hasPlanFeature(subscription.plan, "PREDICTIVE_STOCK_ALERTS")
+  const canSeePredictiveHealth = hasPlanFeature(subscription.plan, "PREDICTIVE_HEALTH_ALERTS")
 
   // Signal 1 — Stock aliment sous seuil (Ajustement 2 : try/catch indépendant)
   try {
@@ -876,23 +887,47 @@ export async function generateNotificationsForOrganization(
   }
 
   // Signal 7 — Rupture stock prédictive (aliment + médicament en critical uniquement)
-  try {
-    totalCreated += await checkStockRuptureAlerts(organizationId, userIds)
-  } catch {
-    // Erreur silencieuse
+  if (canSeePredictiveStock) {
+    try {
+      totalCreated += await checkStockRuptureAlerts(organizationId, userIds)
+    } catch {
+      // Erreur silencieuse
+    }
   }
 
-  // Snapshot prédictif — persister les prédictions du jour pour le suivi de tendance
-  try {
-    const predictions = await getStockPredictionsInternal(organizationId)
-    await upsertOrganizationSnapshots(
-      prisma,
-      organizationId,
-      predictions.feed,
-      predictions.medicine,
-    )
-  } catch {
-    // Erreur silencieuse — ne bloque pas le cron
+  if (canSeePredictiveHealth) {
+    try {
+      totalCreated += await checkBatchMortalityRiskAlerts(organizationId, userIds)
+    } catch {
+      // Erreur silencieuse
+    }
+  }
+
+  if (canSeePredictiveStock) {
+    try {
+      const predictions = await getStockPredictionsInternal(organizationId)
+      await upsertOrganizationSnapshots(
+        prisma,
+        organizationId,
+        predictions.feed,
+        predictions.medicine,
+      )
+    } catch {
+      // Erreur silencieuse — ne bloque pas le cron
+    }
+  }
+
+  if (canSeePredictiveHealth) {
+    try {
+      const mortalityPredictions = await getBatchMortalityPredictionsInternal(organizationId)
+      await upsertOrganizationBatchMortalitySnapshots(
+        prisma,
+        organizationId,
+        mortalityPredictions,
+      )
+    } catch {
+      // Erreur silencieuse — ne bloque pas le cron
+    }
   }
 
   return { created: totalCreated, targetUserIds: userIds }
@@ -984,4 +1019,47 @@ async function checkStockRuptureAlerts(
   }
 
   return created
+}
+
+async function checkBatchMortalityRiskAlerts(
+  organizationId: string,
+  userIds: string[],
+): Promise<number> {
+  const predictions = await getBatchMortalityPredictionsInternal(organizationId)
+  const criticalBatchIds = Object.keys(predictions).filter((id) => predictions[id].alertLevel === "critical")
+
+  if (criticalBatchIds.length === 0) return 0
+
+  const batches = await prisma.batch.findMany({
+    where: {
+      organizationId,
+      id: { in: criticalBatchIds },
+    },
+    select: {
+      id: true,
+      number: true,
+    },
+  })
+
+  const batchNameMap = Object.fromEntries(batches.map((batch) => [batch.id, batch.number]))
+
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.MORTALITE_ELEVEE,
+    resourceType: "BATCH_MORTALITY_PREDICTIVE",
+    candidates: criticalBatchIds.map((batchId) => {
+      const prediction = predictions[batchId]
+      return {
+        title: "Risque mortalite eleve",
+        message: `Le lot ${batchNameMap[batchId] ?? batchId} presente un risque eleve sur 7 jours (${prediction.riskScore}/100).`,
+        resourceId: batchId,
+        metadata: {
+          riskScore: prediction.riskScore,
+          reasons: prediction.reasons,
+          summary: prediction.summary,
+        },
+      }
+    }),
+  })
 }

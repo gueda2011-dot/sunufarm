@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { computeStockTrend } from "./predictive-snapshots"
+import { computeRiskScoreTrend, computeStockTrend } from "./predictive-snapshots"
 import type { SnapshotRecord } from "./predictive-snapshots"
 
 function snap(daysAgo: number, daysToStockout: number | null, alertLevel = "ok"): SnapshotRecord {
@@ -66,5 +66,25 @@ describe("computeStockTrend", () => {
     const result = computeStockTrend([snap(0, 12), snap(6, 5)])
     expect(result.trend).toBe("improving")
     expect(result.deltaDays).toBeCloseTo(7)
+  })
+})
+
+describe("computeRiskScoreTrend", () => {
+  it("returns degrading when risk score increases materially", () => {
+    const result = computeRiskScoreTrend([
+      { snapshotDate: snap(6, 5).snapshotDate, riskScore: 20 },
+      { snapshotDate: snap(0, 5).snapshotDate, riskScore: 40 },
+    ])
+    expect(result.trend).toBe("degrading")
+    expect(result.deltaScore).toBeCloseTo(20)
+  })
+
+  it("returns improving when risk score decreases materially", () => {
+    const result = computeRiskScoreTrend([
+      { snapshotDate: snap(6, 5).snapshotDate, riskScore: 60 },
+      { snapshotDate: snap(0, 5).snapshotDate, riskScore: 35 },
+    ])
+    expect(result.trend).toBe("improving")
+    expect(result.deltaScore).toBeCloseTo(-25)
   })
 })

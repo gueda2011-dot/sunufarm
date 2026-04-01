@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-01 (Session 59)
+> Derniere mise a jour : 2026-04-01 (Session 62)
 
 ---
 
@@ -27,6 +27,8 @@
 - Les modules terrain critiques sont presents : `lots`, `saisie journaliere`, `stock`, `sante`, `achats`, `depenses`, `ventes`, `dashboard`
 - Une V1 hors ligne existe maintenant pour `saisie journaliere`, `vaccinations`, `traitements`, `depenses`, `ventes` et les mouvements `stock`
 - Les flux offline prioritaires commencent a etre durcis cote serveur avec idempotence sur rejeu
+- Une V1 predictive `rupture stock` existe maintenant sur `stock`, avec gating abonnement `PRO / BUSINESS`, snapshots et tendances
+- Une V1 predictive `risque mortalite 7 jours` existe maintenant sur les lots actifs, avec snapshots, tendance et notifications critiques
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
@@ -37,6 +39,8 @@
 | Saisie journaliere | Fonctionnelle, avec impact stock aliment et creation offline V1 |
 | Sante | Fonctionnelle, avec impact stock medicament et creation offline V1 |
 | Stock | Fonctionnel, avec creation d'articles, mouvements et correction admin V1 |
+| Prediction stock | V1 fonctionnelle, avec seuils, tendances, snapshots et vue admin |
+| Prediction mortalite | V1 fonctionnelle, avec score 7 jours, snapshots, tendance et alertes critiques |
 | Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
 | Depenses / finances | Fonctionnel, avec creation offline V1 |
 | Ventes | Fonctionnel, avec creation offline V1 |
@@ -184,6 +188,80 @@
 - Factoriser les hooks repetes de synchro offline entre modules
 - Ajouter plus de validations UX sur les formulaires de mouvements stock
 - Renforcer les tests de l'outbox sur les nouveaux flux `stock`
+
+---
+
+## Session 61 - 2026-04-01
+
+### Travail effectue
+
+- Ajout d'une V1 predictive `rupture stock` avec extraction de features dans `src/lib/predictive-features.ts`
+- Ajout des regles predictives dans `src/lib/predictive-rules.ts` avec estimation `daysToStockout`, `alertLevel`, `label` et `estimatedRuptureDate`
+- Ajout de l'action serveur `src/actions/predictive.ts` pour exposer les predictions stock et les tendances
+- Integration du gating abonnement via `PREDICTIVE_STOCK_ALERTS` dans `src/lib/subscriptions.ts`
+- Branchement du module `Stock` pour afficher :
+  - badges de rupture par article
+  - date estimee de rupture
+  - tendance `S'ameliore / Stable / Se degrade`
+  - resume des articles qui se degradent
+- Ajout de `PredictiveSnapshot` dans Prisma avec migrations :
+  - `20260401182436_add_predictive_snapshot`
+  - `20260401183226_add_estimated_rupture_date`
+- Ajout de `src/lib/predictive-snapshots.ts` pour persister les snapshots et calculer les tendances
+- Branchement des snapshots dans le moteur de notifications pour remonter les cas `critical`
+- Ajout d'une vue admin transverse des predictions critiques dans `/admin`
+- Ajout des tests dedies :
+  - `src/lib/predictive-features.test.ts`
+  - `src/lib/predictive-rules.test.ts`
+  - `src/lib/predictive-snapshots.test.ts`
+
+### Resultat
+
+- Le module `stock` n'est plus seulement descriptif : il aide maintenant a anticiper les ruptures a partir des consommations recentes
+- Les plans `PRO` et `BUSINESS` gagnent une vraie differenciation produit visible et actionnable
+- Les super admins peuvent voir les cas critiques cross-organisation sans entrer dans chaque exploitation
+- Le projet dispose maintenant d'une premiere brique predictive historisee, ce qui prepare les futures predictions `mortalite` et `marge`
+- Validation complete connue : `26` fichiers de test, `108` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Construire la V1 predictive `risque mortalite 7 jours`
+- Reutiliser la meme architecture : `features` -> `rules` -> `snapshots` -> `notifications` -> `UI`
+- Ajouter ensuite une projection de `marge finale lot` sur le meme socle
+
+---
+
+## Session 62 - 2026-04-01
+
+### Travail effectue
+
+- Ajout des features predictives mortalite dans `src/lib/predictive-mortality-features.ts`
+- Ajout des regles de scoring dans `src/lib/predictive-mortality-rules.ts`
+- Extension de `src/actions/predictive.ts` avec `getBatchMortalityInsight(...)` et une version interne pour le cron
+- Extension de `src/lib/predictive-snapshots.ts` pour historiser aussi `BATCH_MORTALITY`
+- Ajout d'une carte predictive lot dans `app/(dashboard)/batches/[id]/_components/BatchMortalityPredictionCard.tsx`
+- Branchement de la page lot `app/(dashboard)/batches/[id]/page.tsx` avec gating abonnement `PREDICTIVE_HEALTH_ALERTS`
+- Ajout de notifications critiques dediees dans `src/actions/notifications.ts`
+- Ajout de la feature d'abonnement `PREDICTIVE_HEALTH_ALERTS` dans `src/lib/subscriptions.ts` et affichage dans `app/(dashboard)/settings/page.tsx`
+- Ajout des tests :
+  - `src/lib/predictive-mortality-features.test.ts`
+  - `src/lib/predictive-mortality-rules.test.ts`
+  - extension de `src/lib/predictive-snapshots.test.ts`
+
+### Resultat
+
+- Les lots actifs disposent maintenant d'une lecture predictive simple et explicable du risque mortalite a 7 jours
+- Le socle predictif de SunuFarm couvre desormais deux axes concrets :
+  - rupture stock
+  - risque mortalite
+- Les plans `PRO` et `BUSINESS` gagnent une nouvelle differenciation visible sur les pages lot
+- Validation complete connue : `28` fichiers de test, `116` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Construire la V1 predictive `projection marge finale lot`
+- Reutiliser le meme socle `features` -> `rules` -> `snapshots` -> `UI`
+- Ensuite seulement envisager un dashboard predictif transverse
 
 ---
 
