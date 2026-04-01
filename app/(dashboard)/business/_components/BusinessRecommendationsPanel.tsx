@@ -7,6 +7,12 @@ function toneClasses(tone: BusinessRecommendation["tone"]) {
   return "border-green-200 bg-green-50"
 }
 
+function priorityLabel(priority: number) {
+  if (priority <= 1) return "Maintenant"
+  if (priority === 2) return "Cette semaine"
+  return "Suivi"
+}
+
 export function BusinessRecommendationsPanel({
   recommendations,
 }: {
@@ -19,9 +25,9 @@ export function BusinessRecommendationsPanel({
           <Lightbulb className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Decisions a prendre</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Plan d&apos;action recommande</h2>
           <p className="text-sm text-gray-500">
-            Une synthese simple et actionnable construite a partir des signaux deja disponibles.
+            Une lecture plus actionnable des decisions a prendre, triees par urgence.
           </p>
         </div>
       </div>
@@ -32,12 +38,37 @@ export function BusinessRecommendationsPanel({
             key={recommendation.id}
             className={`rounded-2xl border p-4 ${toneClasses(recommendation.tone)}`}
           >
-            <p className="text-sm font-semibold text-gray-900">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                {priorityLabel(recommendation.priority)}
+              </p>
+              <span className="rounded-full border border-white/70 bg-white/70 px-2 py-0.5 text-xs font-medium text-gray-700">
+                Priorite {recommendation.priority}
+              </span>
+            </div>
+
+            <p className="mt-3 text-base font-semibold text-gray-900">
               {recommendation.title}
             </p>
-            <p className="mt-2 text-sm text-gray-700">
+
+            <div className="mt-3 rounded-xl border border-white/70 bg-white/70 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Action immediate
+              </p>
+              <p className="mt-1 text-sm font-medium text-gray-900">
+                {recommendation.action}
+              </p>
+            </div>
+
+            <p className="mt-3 text-sm text-gray-700">
               {recommendation.description}
             </p>
+
+            {recommendation.affectedItems.length > 0 && (
+              <p className="mt-3 text-xs text-gray-600">
+                Concerne : {recommendation.affectedItems.join(", ")}
+              </p>
+            )}
           </div>
         ))}
       </div>

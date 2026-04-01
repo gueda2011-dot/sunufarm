@@ -97,12 +97,26 @@ describe("buildBusinessDashboardViewModel", () => {
     expect(view.kpis.totalMarginFcfa).toBe(-50000)
     expect(view.kpis.atRiskBatchCount).toBe(1)
     expect(view.kpis.criticalStockCount).toBe(1)
+    expect(view.kpis.marginVerdict).toBe("Exploitation non rentable")
+    expect(view.kpis.stockVerdict).toBe("1 rupture critique a traiter")
+    expect(view.globalStatus.level).toBe("critical")
+    expect(view.globalStatus.headline).toBe("L'exploitation est sous pression")
     expect(view.priority.negativeMarginLots).toHaveLength(1)
     expect(view.priority.mortalityRiskLots).toHaveLength(1)
     expect(view.priority.criticalStockItems).toHaveLength(1)
     expect(view.batchComparison[0]?.status).toBe("critical")
-    expect(view.recommendations.some((item) => item.id === "margin-single")).toBe(true)
-    expect(view.recommendations.some((item) => item.id === "stock-single")).toBe(true)
-    expect(view.recommendations.some((item) => item.id === "health-single")).toBe(true)
+    expect(view.recommendations.some((item) => (
+      item.id === "margin-single"
+      && item.action === "Traiter en priorite le lot en marge negative"
+      && item.priority === 2
+    ))).toBe(true)
+    expect(view.recommendations.some((item) => (
+      item.id === "stock-single"
+      && item.affectedItems.includes("Aliment croissance")
+    ))).toBe(true)
+    expect(view.recommendations.some((item) => (
+      item.id === "health-single"
+      && item.action === "Surveiller de pres le lot en degradation sanitaire"
+    ))).toBe(true)
   })
 })

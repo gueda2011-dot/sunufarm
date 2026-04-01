@@ -107,15 +107,15 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
   BUSINESS: {
     label: "Business",
     monthlyPriceFcfa: 25_000,
-    promise: "Piloter plusieurs operations avec plus de controle.",
+    promise: "Piloter toute l'exploitation avec une vraie vue dirigeant.",
     audience: "Grosses fermes, entreprises et structures multi-sites",
-    valueHeadline: "Coordonner equipes, fermes et analyses avancees",
+    valueHeadline: "Voir les risques, la marge et les urgences dans une seule lecture",
     maxActiveBatches: 100,
     maxFarms: 20,
     highlights: [
-      "Piloter plusieurs fermes sans confusion",
-      "Structurer le travail des equipes et responsables de site",
-      "Comparer les performances et prendre des decisions plus profondes",
+      "Piloter plusieurs fermes depuis une vue globale exploitation",
+      "Faire remonter les signaux prioritaires avant qu'ils ne coutent cher",
+      "Coordonner equipes, exports consolides et arbitrages dirigeants",
     ],
     features: {
       REPORTS: true,
@@ -188,17 +188,17 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
     case "ADVANCED_HEALTH":
       return "La surveillance sanitaire avancee est disponible a partir du plan Pro."
     case "GLOBAL_ANALYTICS":
-      return "La vue Business transverse est reservee au plan Business."
+      return "Passez a Business pour piloter l'exploitation depuis une vue consolidee des risques, marges et stocks critiques."
     case "PREDICTIVE_HEALTH_ALERTS":
       return "Les alertes predictives de mortalite sont disponibles a partir du plan Pro."
     case "PREDICTIVE_MARGIN_ALERTS":
       return "Les projections predictives de marge sont disponibles a partir du plan Pro."
     case "MULTI_FARM":
-      return "La gestion de plusieurs fermes est reservee au plan Business."
+      return "Le plan Business permet de piloter plusieurs fermes sans perdre la lecture globale de l'exploitation."
     case "TEAM_MANAGEMENT":
-      return "La gestion d'equipe est reservee au plan Business."
+      return "Passez a Business pour coordonner les responsables de site et structurer le travail d'equipe."
     case "ADVANCED_EXPORTS":
-      return "Les exports avances sont disponibles dans le plan Business."
+      return "Le plan Business debloque les exports consolides utiles pour le pilotage et le partage dirigeant."
     case "AI_BATCH_ANALYSIS":
       return "L'analyse intelligente des lots est disponible a partir du plan Pro."
     case "PREDICTIVE_STOCK_ALERTS":

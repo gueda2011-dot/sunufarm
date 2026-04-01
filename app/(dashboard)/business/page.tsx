@@ -13,6 +13,7 @@ import { BusinessBatchComparisonTable } from "./_components/BusinessBatchCompari
 import { BusinessKpiGrid } from "./_components/BusinessKpiGrid"
 import { BusinessPriorityPanel } from "./_components/BusinessPriorityPanel"
 import { BusinessRecommendationsPanel } from "./_components/BusinessRecommendationsPanel"
+import { BusinessSituationCard } from "./_components/BusinessSituationCard"
 
 export const metadata: Metadata = { title: "Business" }
 
@@ -44,10 +45,16 @@ export default async function BusinessPage() {
         </section>
 
         <PlanGuardCard
-          title="Debloquez le pilotage global Business"
+          title="Passez a Business pour piloter toute l'exploitation"
           message={getFeatureUpgradeMessage("GLOBAL_ANALYTICS")}
           requiredPlan="Business"
           currentPlan={subscription.plan}
+          highlights={[
+            "Vue globale des marges, risques sanitaires et stocks critiques",
+            "Synthese dirigeant pour savoir quoi traiter en premier",
+            "Export Business consolide pour partager une lecture claire de l'exploitation",
+          ]}
+          footerHint="Business est pense pour le pilotage global : plusieurs fermes, plusieurs responsables et une vraie lecture de decision."
         />
       </div>
     )
@@ -109,7 +116,7 @@ export default async function BusinessPage() {
                 <span className="text-xs uppercase tracking-wide">Signaux prioritaires</span>
               </div>
               <p className="mt-2 text-sm text-white">
-                Les risques critiques et modérés sont regroupes au meme endroit.
+                Les risques critiques et moderes sont regroupes au meme endroit.
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
@@ -145,6 +152,15 @@ export default async function BusinessPage() {
         </div>
       </section>
 
+      <BusinessSituationCard
+        level={overview.globalStatus.level}
+        label={overview.globalStatus.label}
+        headline={overview.globalStatus.headline}
+        summary={overview.globalStatus.summary}
+        primaryAction={overview.globalStatus.primaryAction}
+        score={overview.globalStatus.score}
+      />
+
       <BusinessKpiGrid
         totalRevenueFcfa={overview.kpis.totalRevenueFcfa}
         totalCostsFcfa={overview.kpis.totalCostsFcfa}
@@ -153,6 +169,10 @@ export default async function BusinessPage() {
         activeBatchCount={overview.kpis.activeBatchCount}
         atRiskBatchCount={overview.kpis.atRiskBatchCount}
         criticalStockCount={overview.kpis.criticalStockCount}
+        marginVerdict={overview.kpis.marginVerdict}
+        riskVerdict={overview.kpis.riskVerdict}
+        stockVerdict={overview.kpis.stockVerdict}
+        mortalityVerdict={overview.kpis.mortalityVerdict}
       />
 
       <BusinessPriorityPanel

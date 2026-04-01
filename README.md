@@ -53,10 +53,12 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 ### Vue Business
 
 - vue transverse de pilotage global reservee au plan `Business`
+- synthese de situation en haut de page avec niveau de gravite, score exploitation et priorite d'action
 - KPI consolides exploitation : chiffre d'affaires, couts, marge, mortalite globale, lots a risque, stocks critiques
 - priorisation des signaux existants pour aider a decider plus vite
-- comparaison des lots actifs avec statut global de pilotage
-- recommandations deterministes construites a partir des risques deja calcules
+- comparaison des lots actifs avec statut global de pilotage et lecture plus dirigeant
+- recommandations deterministes construites a partir des risques deja calcules, hierarchisees comme un plan d'action
+- export Business consolide `Excel / CSV`
 
 ### Stock et ventes
 
@@ -148,7 +150,9 @@ Pour les structures plus avancees qui ont besoin d'un pilotage plus complet et d
 
 Inclut aussi :
 
-- vue Business transverse de pilotage exploitation
+- vue globale exploitation avec synthese dirigeant
+- signaux prioritaires et recommandations de pilotage
+- export Business consolide
 - prediction de rupture stock
 - prediction risque mortalite
 - projection marge finale
@@ -278,6 +282,17 @@ Vue Business V1 :
 - consolide les signaux existants de stock, mortalite et marge au niveau de l'organisation active
 - affiche une lecture dirigeant avec KPI exploitation, risques prioritaires, comparaison des lots actifs et recommandations metier deterministes
 - reutilise les predictions et tendances deja calculees sans dupliquer la logique metier des modules existants
+
+Business - polissage produit :
+
+- la page `Business` met maintenant en avant une synthese globale de situation avec gravite, score exploitation et action prioritaire
+- les KPI et sections critiques sont ecrits dans une logique de verdict et de decision, pas seulement de description
+- les messages d'upgrade et la page `Abonnement` presentent plus clairement la valeur Business :
+  - vue globale exploitation
+  - signaux prioritaires
+  - recommandations dirigeant
+  - export Business consolide
+  - multi-fermes, equipe et exports avances
 
 Scripts utiles :
 

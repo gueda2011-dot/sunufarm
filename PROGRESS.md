@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-01 (Session 64)
+> Derniere mise a jour : 2026-04-01 (Session 65)
 
 ---
 
@@ -31,6 +31,7 @@
 - Une V1 predictive `risque mortalite 7 jours` existe maintenant sur les lots actifs, avec snapshots, tendance et notifications critiques
 - Une V1 predictive `projection marge finale lot` existe maintenant sur les lots actifs, avec benchmark interne, snapshots, tendance et alertes critiques
 - Une V1 `Business` existe maintenant pour le pilotage global exploitation, reservee au plan `BUSINESS`
+- La couche `Business` a deja une phase de polissage produit et de differenciation conversion, sans changer son architecture
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
@@ -44,7 +45,7 @@
 | Prediction stock | V1 fonctionnelle, avec seuils, tendances, snapshots et vue admin |
 | Prediction mortalite | V1 fonctionnelle, avec score 7 jours, snapshots, tendance et alertes critiques |
 | Prediction marge | V1 fonctionnelle, avec projection finale, tendance, benchmark interne et alertes critiques |
-| Business dashboard | V1 fonctionnelle, avec KPI exploitation, priorisation des risques et recommandations |
+| Business dashboard | V1 fonctionnelle, avec KPI exploitation, priorisation des risques, recommandations et mise en scene produit |
 | Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
 | Depenses / finances | Fonctionnel, avec creation offline V1 |
 | Ventes | Fonctionnel, avec creation offline V1 |
@@ -333,6 +334,45 @@
 - Etendre cette vue Business avec des comparaisons temporelles mensuelles et hebdomadaires
 - Ajouter une vue admin transverse des organisations Business les plus a risque
 - Brancher ensuite des recommandations plus prescriptives sur les regroupements de signaux deja disponibles
+
+---
+
+## Session 65 - 2026-04-01
+
+### Travail effectue
+
+- Polissage produit de la page `Business` pour renforcer la lecture dirigeant et l'aide a la decision
+- Ajout d'un bloc de synthese globale avec :
+  - niveau de gravite
+  - headline de situation
+  - score exploitation
+  - action prioritaire
+- Renforcement des KPI pour afficher des verdicts metier, pas seulement des chiffres bruts
+- Renforcement du wording des sections critiques et de la hiérarchie visuelle entre `critical`, `warning` et `ok`
+- Enrichissement de la section recommandations pour la rapprocher d'un plan d'action hierarchise
+- Mise a jour de l'export Business consolide pour refleter cette lecture dirigeant
+- Renforcement de la differenciation produit du plan `Business` :
+  - messages d'upgrade plus orientes valeur
+  - guard `/business` plus convaincant
+  - page `Abonnement` enrichie pour mieux mettre en avant la valeur Business
+  - ajout d'un bloc `Pourquoi passer a Business ?`
+
+### Resultat
+
+- La page `/business` donne maintenant une lecture plus immediate de la situation globale de l'exploitation
+- La difference entre `PRO` et `BUSINESS` est plus visible dans l'application elle-meme, pas seulement dans la matrice des features
+- La valeur Business devient plus vendable :
+  - vue globale exploitation
+  - signaux prioritaires
+  - recommandations dirigeant
+  - export Business consolide
+  - multi-fermes, equipe et exports avances
+- Validation complete connue : `32` fichiers de test, `124` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Ajouter une preuve supplementaire de valeur Business avec des comparaisons temporelles hebdo / mensuelles
+- Ou etendre la couche Business a une vue admin transverse des organisations les plus sous pression
 
 ---
 

@@ -4,6 +4,14 @@ import type { BusinessDashboardViewModel } from "@/src/lib/business-dashboard"
 
 function buildOverview(): BusinessDashboardViewModel {
   return {
+    globalStatus: {
+      level: "warning",
+      label: "Exploitation sous vigilance",
+      headline: "Des arbitrages rapides sont necessaires",
+      summary: "La situation reste pilotable, mais plusieurs sujets peuvent vite se transformer en perte.",
+      primaryAction: "Prioriser les lots fragiles et securiser les approvisionnements sensibles.",
+      score: 71,
+    },
     kpis: {
       totalRevenueFcfa: 500000,
       totalCostsFcfa: 380000,
@@ -12,6 +20,10 @@ function buildOverview(): BusinessDashboardViewModel {
       activeBatchCount: 3,
       atRiskBatchCount: 2,
       criticalStockCount: 1,
+      marginVerdict: "Marge sous pression",
+      riskVerdict: "2 lots demandent une action rapide",
+      stockVerdict: "1 rupture critique a traiter",
+      mortalityVerdict: "Sante a surveiller",
     },
     priority: {
       negativeMarginLots: [
@@ -30,7 +42,7 @@ function buildOverview(): BusinessDashboardViewModel {
           number: "SF-002",
           farmName: "Ferme Sud",
           label: "Risque mortalite eleve",
-          detail: "68/100 · mortalite en hausse",
+          detail: "68/100 - mortalite en hausse",
           level: "critical",
         },
       ],
@@ -63,9 +75,12 @@ function buildOverview(): BusinessDashboardViewModel {
     recommendations: [
       {
         id: "margin-single",
+        priority: 2,
         title: "Traiter le lot en marge negative",
+        action: "Verifier les charges recentes du lot",
         description: "Verifier les charges recentes.",
         tone: "warning",
+        affectedItems: ["SF-001"],
       },
     ],
   }
@@ -80,9 +95,11 @@ describe("business-reports", () => {
     })
 
     expect(csv).toContain('"Organisation","Ferme Premium","Vue Business transverse"')
-    expect(csv).toContain('"Chiffre d\'affaires total FCFA","500000","Lots actifs"')
+    expect(csv).toContain('"Statut global","Exploitation sous vigilance","Des arbitrages rapides sont necessaires"')
+    expect(csv).toContain('"Score exploitation","71","Prioriser les lots fragiles et securiser les approvisionnements sensibles."')
+    expect(csv).toContain('"Chiffre d\'affaires total FCFA","500000","Marge sous pression"')
     expect(csv).toContain('"SF-001","Ferme Centre","Charges projetees superieures au revenu"')
     expect(csv).toContain('"Aliment ""croissance""","Aliment","Rupture dans 2 jours"')
-    expect(csv).toContain('"Traiter le lot en marge negative","Verifier les charges recentes."')
+    expect(csv).toContain('"2","Traiter le lot en marge negative","Verifier les charges recentes du lot","Verifier les charges recentes.","SF-001"')
   })
 })

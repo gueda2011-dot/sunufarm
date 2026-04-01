@@ -1,10 +1,11 @@
-import type { MarginTrendResult, RiskTrendResult } from "@/src/lib/predictive-snapshots"
+import type { AlertLevel } from "@/src/lib/kpi"
 import type { BatchMarginProjection } from "@/src/lib/predictive-margin-rules"
 import type { BatchMortalityPrediction } from "@/src/lib/predictive-mortality-rules"
 import type { StockRupturePrediction } from "@/src/lib/predictive-rules"
-import type { AlertLevel } from "@/src/lib/kpi"
+import type { MarginTrendResult, RiskTrendResult } from "@/src/lib/predictive-snapshots"
 
 type BusinessSignalTone = "critical" | "warning" | "ok"
+type BusinessStatusLevel = AlertLevel
 
 export interface BusinessBatchSource {
   id: string
@@ -63,12 +64,23 @@ export interface BusinessCriticalStockItem {
 
 export interface BusinessRecommendation {
   id: string
+  priority: number
   title: string
+  action: string
   description: string
   tone: BusinessSignalTone
+  affectedItems: string[]
 }
 
 export interface BusinessDashboardViewModel {
+  globalStatus: {
+    level: BusinessStatusLevel
+    label: string
+    headline: string
+    summary: string
+    primaryAction: string
+    score: number
+  }
   kpis: {
     totalRevenueFcfa: number
     totalCostsFcfa: number
@@ -77,6 +89,10 @@ export interface BusinessDashboardViewModel {
     activeBatchCount: number
     atRiskBatchCount: number
     criticalStockCount: number
+    marginVerdict: string
+    riskVerdict: string
+    stockVerdict: string
+    mortalityVerdict: string
   }
   priority: {
     negativeMarginLots: BusinessPriorityLot[]
@@ -111,7 +127,7 @@ function getBatchStatus(
     return { level: "critical", label: "Priorite immediate" }
   }
   if (marginAlertLevel === "warning" || mortalityAlertLevel === "warning") {
-    return { level: "warning", label: "A surveiller" }
+    return { level: "warning", label: "Sous tension" }
   }
   return { level: "ok", label: "Sous controle" }
 }
@@ -135,6 +151,79 @@ function compareBatches(a: BusinessBatchSource, b: BusinessBatchSource): number 
   return a.marginPrediction.projectedProfitFcfa - b.marginPrediction.projectedProfitFcfa
 }
 
+function buildMarginVerdict(totalMarginFcfa: number, atRiskBatchCount: number): string {
+  if (totalMarginFcfa < 0) return "Exploitation non rentable"
+  if (atRiskBatchCount >= 3) return "Marge sous pression"
+  if (totalMarginFcfa < 100_000) return "Marge a consolider"
+  return "Situation favorable"
+}
+
+function buildRiskVerdict(atRiskBatchCount: number): string {
+  if (atRiskBatchCount >= 4) return `${atRiskBatchCount} lots menacent la performance`
+  if (atRiskBatchCount >= 2) return `${atRiskBatchCount} lots demandent une action rapide`
+  if (atRiskBatchCount === 1) return "1 lot prioritaire a traiter"
+  return "Aucun lot en alerte forte"
+}
+
+function buildStockVerdict(criticalStockCount: number): string {
+  if (criticalStockCount >= 2) return "Reapprovisionnement urgent"
+  if (criticalStockCount === 1) return "1 rupture critique a traiter"
+  return "Aucune rupture critique"
+}
+
+function buildMortalityVerdict(globalMortalityRate: number | null): string {
+  if (globalMortalityRate == null) return "Lecture sanitaire incomplete"
+  if (globalMortalityRate >= 3) return "Pression sanitaire elevee"
+  if (globalMortalityRate >= 1.5) return "Sante a surveiller"
+  return "Situation sanitaire plutot saine"
+}
+
+function buildGlobalStatus(input: {
+  totalMarginFcfa: number
+  atRiskBatchCount: number
+  criticalStockCount: number
+  mortalityRiskCount: number
+}): BusinessDashboardViewModel["globalStatus"] {
+  let score = 100
+  score -= input.atRiskBatchCount * 10
+  score -= input.criticalStockCount * 15
+  score -= input.mortalityRiskCount * 8
+  if (input.totalMarginFcfa < 0) score -= 25
+  else if (input.totalMarginFcfa < 100_000) score -= 10
+  score = Math.max(0, Math.min(100, score))
+
+  if (input.totalMarginFcfa < 0 || input.criticalStockCount >= 2 || input.atRiskBatchCount >= 4) {
+    return {
+      level: "critical",
+      label: "Situation critique",
+      headline: "L'exploitation est sous pression",
+      summary: "Plusieurs signaux menacent directement la marge, la continuite terrain ou la sante des lots.",
+      primaryAction: "Traiter aujourd'hui les lots non rentables et les ruptures critiques.",
+      score,
+    }
+  }
+
+  if (input.atRiskBatchCount >= 2 || input.criticalStockCount === 1 || input.mortalityRiskCount >= 2) {
+    return {
+      level: "warning",
+      label: "Exploitation sous vigilance",
+      headline: "Des arbitrages rapides sont necessaires",
+      summary: "La situation reste pilotable, mais plusieurs sujets peuvent vite se transformer en perte.",
+      primaryAction: "Prioriser les lots fragiles et securiser les approvisionnements sensibles.",
+      score,
+    }
+  }
+
+  return {
+    level: "ok",
+    label: "Situation globalement saine",
+    headline: "L'exploitation reste sous controle",
+    summary: "Les signaux critiques sont limites et les decisions prioritaires restent maitrisables.",
+    primaryAction: "Maintenir la discipline de saisie et suivre les quelques points de vigilance.",
+    score,
+  }
+}
+
 function buildRecommendations(
   batches: BusinessBatchSource[],
   criticalStocks: BusinessCriticalStockItem[],
@@ -153,61 +242,82 @@ function buildRecommendations(
   if (negativeMarginLots.length >= 2) {
     recommendations.push({
       id: "margin-cluster",
-      title: "Revoir vite la rentabilite des lots les plus fragiles",
+      priority: 1,
+      title: "La marge est menacee sur plusieurs lots",
+      action: "Revoir aujourd'hui les lots les moins rentables",
       description: `${negativeMarginLots.length} lots projettent une marge negative. Priorisez une revue des couts variables, du rythme de depense et du prix de sortie attendu.`,
       tone: "critical",
+      affectedItems: negativeMarginLots.slice(0, 3).map((batch) => batch.number),
     })
   } else if (negativeMarginLots.length === 1) {
     recommendations.push({
       id: "margin-single",
-      title: "Traiter le lot qui part en marge negative",
+      priority: 2,
+      title: "Un lot fait basculer la rentabilite",
+      action: "Traiter en priorite le lot en marge negative",
       description: `Le lot ${negativeMarginLots[0]?.number} projette une marge negative. Verifiez rapidement ses charges recentes et la strategie de vente restante.`,
       tone: "warning",
+      affectedItems: negativeMarginLots.map((batch) => batch.number),
     })
   }
 
   if (criticalStocks.length >= 2) {
     recommendations.push({
       id: "stock-multi",
-      title: "Declencher un reapprovisionnement prioritaire",
+      priority: 1,
+      title: "Le reapprovisionnement devient urgent",
+      action: "Declencher un reapprovisionnement prioritaire",
       description: `${criticalStocks.length} articles de stock sont en rupture critique. Replanifiez les entrees stock avant que plusieurs lots soient bloques en meme temps.`,
       tone: "critical",
+      affectedItems: criticalStocks.slice(0, 3).map((item) => item.name),
     })
   } else if (criticalStocks.length === 1) {
     recommendations.push({
       id: "stock-single",
-      title: "Securiser le stock critique du moment",
+      priority: 2,
+      title: "Un stock critique menace la continuite",
+      action: "Securiser le stock critique du moment",
       description: `${criticalStocks[0]?.name} approche d'une rupture critique. Anticipez l'achat ou le transfert avant l'impact terrain.`,
       tone: "warning",
+      affectedItems: criticalStocks.map((item) => item.name),
     })
   }
 
   if (degradingMortalityLots.length >= 2) {
     recommendations.push({
       id: "health-degrading",
-      title: "Organiser une revue sanitaire transverse",
+      priority: 1,
+      title: "La pression sanitaire monte sur plusieurs lots",
+      action: "Organiser une revue sanitaire transverse",
       description: `${degradingMortalityLots.length} lots montrent un risque mortalite qui se degrade. Programmez une verification terrain concentree sur ces sites aujourd'hui.`,
       tone: "critical",
+      affectedItems: degradingMortalityLots.slice(0, 3).map((batch) => batch.number),
     })
   } else if (degradingMortalityLots.length === 1) {
     recommendations.push({
       id: "health-single",
-      title: "Surveiller de pres le lot en degradation sanitaire",
+      priority: 2,
+      title: "Un lot demande une action sanitaire rapide",
+      action: "Surveiller de pres le lot en degradation sanitaire",
       description: `Le lot ${degradingMortalityLots[0]?.number} montre une degradation recente du risque mortalite. Verifiez saisie, traitements et calendrier vaccinal.`,
       tone: "warning",
+      affectedItems: degradingMortalityLots.map((batch) => batch.number),
     })
   }
 
   if (recommendations.length === 0) {
     recommendations.push({
       id: "steady-state",
-      title: "Maintenir le pilotage actuel",
+      priority: 3,
+      title: "L'exploitation reste globalement sous controle",
+      action: "Maintenir le rythme de pilotage actuel",
       description: `Aucun regroupement critique majeur n'apparait pour l'instant. Continuez la discipline de saisie et gardez l'attention sur les ${fragileLots.length} lots a surveiller.`,
       tone: "ok",
+      affectedItems: fragileLots.slice(0, 3).map((batch) => batch.number),
     })
   }
 
-  return recommendations
+  return recommendations.sort((a, b) => a.priority - b.priority)
 }
 
 export function buildBusinessDashboardViewModel(input: {
@@ -223,6 +333,10 @@ export function buildBusinessDashboardViewModel(input: {
   const atRiskBatchCount = input.batches.filter((batch) => (
     batch.marginPrediction.alertLevel !== "ok" || batch.mortalityPrediction.alertLevel !== "ok"
   )).length
+  const mortalityRiskCount = input.batches.filter((batch) => (
+    batch.mortalityPrediction.alertLevel !== "ok"
+  )).length
+  const globalMortalityRate = totalEntryCount > 0 ? round((totalMortality / totalEntryCount) * 100) : null
 
   const criticalStockItems = input.stockItems
     .filter((item) => item.prediction.alertLevel === "critical")
@@ -258,7 +372,7 @@ export function buildBusinessDashboardViewModel(input: {
       number: batch.number,
       farmName: batch.farmName,
       label: batch.mortalityPrediction.label,
-      detail: `${batch.mortalityPrediction.riskScore}/100 · ${batch.mortalityPrediction.summary}`,
+      detail: `${batch.mortalityPrediction.riskScore}/100 - ${batch.mortalityPrediction.summary}`,
       level: batch.mortalityPrediction.alertLevel,
     }))
 
@@ -284,14 +398,24 @@ export function buildBusinessDashboardViewModel(input: {
   })
 
   return {
+    globalStatus: buildGlobalStatus({
+      totalMarginFcfa,
+      atRiskBatchCount,
+      criticalStockCount: criticalStockItems.length,
+      mortalityRiskCount,
+    }),
     kpis: {
       totalRevenueFcfa,
       totalCostsFcfa,
       totalMarginFcfa,
-      globalMortalityRate: totalEntryCount > 0 ? round((totalMortality / totalEntryCount) * 100) : null,
+      globalMortalityRate,
       activeBatchCount: input.batches.length,
       atRiskBatchCount,
       criticalStockCount: criticalStockItems.length,
+      marginVerdict: buildMarginVerdict(totalMarginFcfa, atRiskBatchCount),
+      riskVerdict: buildRiskVerdict(atRiskBatchCount),
+      stockVerdict: buildStockVerdict(criticalStockItems.length),
+      mortalityVerdict: buildMortalityVerdict(globalMortalityRate),
     },
     priority: {
       negativeMarginLots,

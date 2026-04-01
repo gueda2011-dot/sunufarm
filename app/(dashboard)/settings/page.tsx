@@ -44,14 +44,22 @@ const FEATURE_LABELS = [
   { key: "REPORTS", label: "Rapports mensuels" },
   { key: "PROFITABILITY", label: "Rentabilite par lot" },
   { key: "AI_BATCH_ANALYSIS", label: "Analyse AI des lots" },
-  { key: "GLOBAL_ANALYTICS", label: "Vue Business transverse" },
+  { key: "GLOBAL_ANALYTICS", label: "Vue globale exploitation" },
   { key: "PREDICTIVE_STOCK_ALERTS", label: "Prediction de rupture stock" },
   { key: "PREDICTIVE_HEALTH_ALERTS", label: "Prediction risque mortalite" },
   { key: "PREDICTIVE_MARGIN_ALERTS", label: "Projection marge finale" },
   { key: "ALERTS", label: "Alertes intelligentes" },
   { key: "MULTI_FARM", label: "Plusieurs fermes" },
-  { key: "TEAM_MANAGEMENT", label: "Gestion d'equipe" },
-  { key: "ADVANCED_EXPORTS", label: "Exports avances" },
+  { key: "TEAM_MANAGEMENT", label: "Gestion d'equipe et responsables" },
+  { key: "ADVANCED_EXPORTS", label: "Exports consolides et avances" },
+] as const
+
+const BUSINESS_VALUE_POINTS = [
+  "Vue globale exploitation avec signaux prioritaires",
+  "Lecture dirigeant des marges, risques et urgences terrain",
+  "Recommandations de pilotage pour savoir quoi traiter d'abord",
+  "Export Business consolide pour partager une synthese claire",
+  "Multi-fermes, equipe et arbitrage transverse dans une seule lecture",
 ] as const
 
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
@@ -359,6 +367,29 @@ export default async function SettingsPage() {
                   </ul>
                 </div>
 
+                {planKey === "BUSINESS" && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">Pourquoi Business se distingue</p>
+                    <p className="mt-1 text-amber-800">
+                      Vous ne pilotez plus lot par lot. Vous voyez l&apos;exploitation dans son ensemble,
+                      les urgences a traiter et les decisions a prendre pour proteger la marge.
+                    </p>
+                    <ul className="mt-3 space-y-2">
+                      {[
+                        "Vue globale exploitation",
+                        "Signaux prioritaires",
+                        "Recommandations dirigeant",
+                        "Export Business consolide",
+                      ].map((item) => (
+                        <li key={item} className="flex items-start gap-2">
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2">
                     <span className="text-gray-500">Fermes</span>
@@ -438,12 +469,51 @@ export default async function SettingsPage() {
             <div className="rounded-2xl bg-amber-50 p-4">
               <p className="font-semibold text-amber-900">Business</p>
               <p className="mt-1 text-amber-800">
-                Pour piloter une structure multi-sites avec equipe, exports avances et analyses plus profondes.
+                Pour piloter l&apos;exploitation dans son ensemble avec une vue dirigeant, des signaux prioritaires et des exports consolides.
               </p>
             </div>
             <div className="rounded-2xl border border-dashed border-gray-200 p-4 text-gray-600">
               Organisation actuelle : {formatCountWithUnit(memberCount, "membre")}, {formatCountWithUnit(farmCount, "ferme")}, {formatCountWithUnit(activeBatchCount, "lot actif")}.
             </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <Card className="border-amber-200 bg-amber-50/60">
+          <CardHeader>
+            <CardTitle>Pourquoi passer a Business ?</CardTitle>
+            <CardDescription>
+              Business devient utile quand il faut arbitrer vite, partager une lecture claire et piloter plusieurs sujets en meme temps.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {BUSINESS_VALUE_POINTS.map((point) => (
+              <div key={point} className="rounded-2xl border border-amber-100 bg-white/80 px-4 py-3 text-sm text-gray-700">
+                {point}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Quand Business fait la difference</CardTitle>
+            <CardDescription>
+              Les structures qui gagnent le plus avec Business ont souvent deja depasse la simple lecture lot par lot.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-gray-700">
+            {[
+              "Vous devez comparer plusieurs lots pour savoir quoi corriger en premier.",
+              "Vous suivez plusieurs fermes ou plusieurs responsables de site.",
+              "Vous avez besoin d'une synthese dirigeant partageable avec associes ou responsables.",
+              "Vous voulez remonter vite les marges fragiles, les stocks critiques et les urgences sanitaires.",
+            ].map((item) => (
+              <div key={item} className="rounded-2xl bg-gray-50 px-4 py-3">
+                {item}
+              </div>
+            ))}
           </CardContent>
         </Card>
       </section>

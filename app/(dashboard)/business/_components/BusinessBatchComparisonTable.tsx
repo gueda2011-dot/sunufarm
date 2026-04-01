@@ -8,6 +8,12 @@ function badgeClasses(status: BusinessBatchComparisonRow["status"]) {
   return "bg-green-50 text-green-700 border-green-200"
 }
 
+function rowClasses(status: BusinessBatchComparisonRow["status"]) {
+  if (status === "critical") return "bg-red-50/40"
+  if (status === "warning") return "bg-orange-50/30"
+  return "bg-white"
+}
+
 export function BusinessBatchComparisonTable({
   rows,
 }: {
@@ -17,9 +23,9 @@ export function BusinessBatchComparisonTable({
     <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Vue comparative des lots</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Lots a arbitrer en priorite</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Une lecture de decision pour voir quels lots tirent l&apos;exploitation vers le haut ou vers le risque.
+            Un classement simple pour voir quels lots protegent la marge et lesquels demandent un arbitrage rapide.
           </p>
         </div>
       </div>
@@ -42,7 +48,7 @@ export function BusinessBatchComparisonTable({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {rows.map((row) => (
-                <tr key={row.id} className="align-top">
+                <tr key={row.id} className={`align-top ${rowClasses(row.status)}`}>
                   <td className="px-3 py-4">
                     <Link href={`/batches/${row.id}`} className="font-semibold text-gray-900 hover:text-green-700">
                       {row.number}
@@ -51,7 +57,7 @@ export function BusinessBatchComparisonTable({
                   </td>
                   <td className="px-3 py-4 text-gray-700">{row.farmName}</td>
                   <td className="px-3 py-4">
-                    <p className="font-semibold text-gray-900">
+                    <p className={`font-semibold ${row.projectedMarginFcfa < 0 ? "text-red-700" : "text-gray-900"}`}>
                       {formatMoneyFCFACompact(row.projectedMarginFcfa)}
                     </p>
                     <p className="mt-1 text-xs text-gray-500">
@@ -61,7 +67,9 @@ export function BusinessBatchComparisonTable({
                     </p>
                   </td>
                   <td className="px-3 py-4">
-                    <p className="font-semibold text-gray-900">{row.mortalityRiskScore}/100</p>
+                    <p className={`font-semibold ${row.mortalityRiskScore >= 60 ? "text-red-700" : row.mortalityRiskScore >= 30 ? "text-orange-700" : "text-gray-900"}`}>
+                      {row.mortalityRiskScore}/100
+                    </p>
                     <p className="mt-1 text-xs text-gray-500">{row.mortalityLabel}</p>
                   </td>
                   <td className="px-3 py-4">

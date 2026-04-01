@@ -61,25 +61,27 @@ export function buildBusinessReportCsv(input: {
     toCsvRow(["Section", "Valeur", "Detail"]),
     toCsvRow(["Organisation", organizationName, "Vue Business transverse"]),
     toCsvRow(["Genere le", generatedAt.toISOString(), "Timestamp UTC"]),
-    toCsvRow(["Chiffre d'affaires total FCFA", overview.kpis.totalRevenueFcfa, "Lots actifs"]),
+    toCsvRow(["Statut global", overview.globalStatus.label, overview.globalStatus.headline]),
+    toCsvRow(["Score exploitation", overview.globalStatus.score, overview.globalStatus.primaryAction]),
+    toCsvRow(["Chiffre d'affaires total FCFA", overview.kpis.totalRevenueFcfa, overview.kpis.marginVerdict]),
     toCsvRow(["Couts totaux FCFA", overview.kpis.totalCostsFcfa, "Achats + depenses observees"]),
     toCsvRow(["Marge totale FCFA", overview.kpis.totalMarginFcfa, "Recettes - couts"]),
-    toCsvRow(["Taux mortalite global", overview.kpis.globalMortalityRate ?? "", "Pourcentage"]),
+    toCsvRow(["Taux mortalite global", overview.kpis.globalMortalityRate ?? "", overview.kpis.mortalityVerdict]),
     toCsvRow(["Lots actifs", overview.kpis.activeBatchCount, "Exploitation en cours"]),
-    toCsvRow(["Lots a risque", overview.kpis.atRiskBatchCount, "Marge ou sante"]),
-    toCsvRow(["Stocks critiques", overview.kpis.criticalStockCount, "Rupture critique"]),
+    toCsvRow(["Lots a risque", overview.kpis.atRiskBatchCount, overview.kpis.riskVerdict]),
+    toCsvRow(["Stocks critiques", overview.kpis.criticalStockCount, overview.kpis.stockVerdict]),
     "",
-    toCsvRow(["Lots a surveiller", "Ferme", "Signal"]),
+    toCsvRow(["Lots qui menacent la marge", "Ferme", "Signal"]),
     ...overview.priority.negativeMarginLots.map((lot) => (
       toCsvRow([lot.number, lot.farmName, lot.detail])
     )),
     "",
-    toCsvRow(["Lots risque mortalite", "Ferme", "Signal"]),
+    toCsvRow(["Pressions sanitaires", "Ferme", "Signal"]),
     ...overview.priority.mortalityRiskLots.map((lot) => (
       toCsvRow([lot.number, lot.farmName, lot.detail])
     )),
     "",
-    toCsvRow(["Stocks critiques", "Type", "Signal"]),
+    toCsvRow(["Approvisionnements sous tension", "Type", "Signal"]),
     ...overview.priority.criticalStockItems.map((item) => (
       toCsvRow([item.name, item.type === "feed" ? "Aliment" : "Medicament", item.label])
     )),
@@ -95,8 +97,16 @@ export function buildBusinessReportCsv(input: {
       ])
     )),
     "",
-    toCsvRow(["Decisions a prendre", "Description"]),
-    ...overview.recommendations.map((item) => toCsvRow([item.title, item.description])),
+    toCsvRow(["Priorite", "Decision", "Action", "Description", "Concerne"]),
+    ...overview.recommendations.map((item) => (
+      toCsvRow([
+        item.priority,
+        item.title,
+        item.action,
+        item.description,
+        item.affectedItems.join(" | "),
+      ])
+    )),
   ]
 
   return lines.join("\n")
@@ -126,13 +136,14 @@ export async function buildBusinessReportWorkbook(input: {
   summarySheet.getCell("A3").value = `Genere le ${generatedAt.toISOString()}`
   summarySheet.addRow([])
   styleHeader(summarySheet.addRow(["Indicateur", "Valeur", "Lecture"]))
-  addSummaryRow(summarySheet, "Chiffre d'affaires", formatMoneyFCFA(overview.kpis.totalRevenueFcfa), "Recettes observees sur les lots actifs")
+  addSummaryRow(summarySheet, "Statut global", overview.globalStatus.label, overview.globalStatus.headline)
+  addSummaryRow(summarySheet, "Score exploitation", overview.globalStatus.score, overview.globalStatus.primaryAction)
+  addSummaryRow(summarySheet, "Chiffre d'affaires", formatMoneyFCFA(overview.kpis.totalRevenueFcfa), overview.kpis.marginVerdict)
   addSummaryRow(summarySheet, "Couts totaux", formatMoneyFCFA(overview.kpis.totalCostsFcfa), "Achats + depenses observees")
   addSummaryRow(summarySheet, "Marge totale", formatMoneyFCFA(overview.kpis.totalMarginFcfa), "Recettes - couts")
-  addSummaryRow(summarySheet, "Taux mortalite global", overview.kpis.globalMortalityRate == null ? "—" : formatPercent(overview.kpis.globalMortalityRate), "Lecture exploitation")
-  addSummaryRow(summarySheet, "Lots actifs", formatNumber(overview.kpis.activeBatchCount), "Cycles actuellement suivis")
-  addSummaryRow(summarySheet, "Lots a risque", formatNumber(overview.kpis.atRiskBatchCount), "Signaux marge ou sante")
-  addSummaryRow(summarySheet, "Stocks critiques", formatNumber(overview.kpis.criticalStockCount), "Ruptures critiques")
+  addSummaryRow(summarySheet, "Taux mortalite global", overview.kpis.globalMortalityRate == null ? "-" : formatPercent(overview.kpis.globalMortalityRate), overview.kpis.mortalityVerdict)
+  addSummaryRow(summarySheet, "Lots a risque", formatNumber(overview.kpis.atRiskBatchCount), overview.kpis.riskVerdict)
+  addSummaryRow(summarySheet, "Stocks critiques", formatNumber(overview.kpis.criticalStockCount), overview.kpis.stockVerdict)
   autosizeColumns(summarySheet)
 
   const prioritySheet = workbook.addWorksheet("Signaux prioritaires", {
@@ -146,13 +157,7 @@ export async function buildBusinessReportWorkbook(input: {
     prioritySheet.addRow(["Risque mortalite", lot.number, lot.farmName, lot.detail, lot.level])
   })
   overview.priority.criticalStockItems.forEach((item) => {
-    prioritySheet.addRow([
-      "Stock critique",
-      item.name,
-      item.farmName,
-      item.label,
-      "critical",
-    ])
+    prioritySheet.addRow(["Stock critique", item.name, item.farmName, item.label, "critical"])
   })
   autosizeColumns(prioritySheet)
 
@@ -166,7 +171,7 @@ export async function buildBusinessReportWorkbook(input: {
       row.farmName,
       row.buildingName,
       row.projectedMarginFcfa,
-      row.projectedMarginRate == null ? "—" : `${row.projectedMarginRate}%`,
+      row.projectedMarginRate == null ? "-" : `${row.projectedMarginRate}%`,
       `${row.mortalityRiskScore}/100`,
       row.statusLabel,
     ])
@@ -176,9 +181,15 @@ export async function buildBusinessReportWorkbook(input: {
   const recommendationsSheet = workbook.addWorksheet("Decisions", {
     views: [{ state: "frozen", ySplit: 1 }],
   })
-  styleHeader(recommendationsSheet.addRow(["Priorite", "Decision a prendre", "Explication"]))
+  styleHeader(recommendationsSheet.addRow(["Priorite", "Decision", "Action", "Description", "Concerne"]))
   overview.recommendations.forEach((item) => {
-    recommendationsSheet.addRow([item.tone, item.title, item.description])
+    recommendationsSheet.addRow([
+      item.priority,
+      item.title,
+      item.action,
+      item.description,
+      item.affectedItems.join(", "),
+    ])
   })
   autosizeColumns(recommendationsSheet)
 
