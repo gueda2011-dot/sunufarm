@@ -1,10 +1,20 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { CircleAlert, Plus, Trash2 } from "lucide-react"
 import { createSale } from "@/src/actions/sales"
 import { formatMoneyFCFA } from "@/src/lib/formatters"
+import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
+import {
+  deleteOfflineDailyQueueItem,
+  enqueueOfflineSale,
+  flushOfflineDailyQueue,
+  listPendingOfflineQueueItemsByScope,
+  readOfflineDailySyncMeta,
+  retryOfflineDailyQueueItem,
+  subscribeToOfflineDailyQueue,
+} from "@/src/lib/offline-daily-queue"
 
 type Props = {
   organizationId: string
@@ -78,11 +88,25 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [productType, setProductType] = useState<ProductType>("POULET_VIF")
   const [customerId, setCustomerId] = useState("")
   const [saleDate, setSaleDate] = useState(new Date().toISOString().slice(0, 10))
   const [notes, setNotes] = useState("")
   const [items, setItems] = useState<Item[]>([getDefaultItem("POULET_VIF")])
+  const [isOnline, setIsOnline] = useState<boolean>(() => (
+    typeof navigator === "undefined" ? true : navigator.onLine
+  ))
+  const [pendingItems, setPendingItems] = useState<Array<{
+    id: string
+    label: string
+    createdAt: string
+    status: "pending" | "failed"
+    lastError?: string
+  }>>([])
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null)
 
   const totalFcfa = useMemo(
     () => items.reduce((sum, item) => sum + computeItemTotal(item), 0),
@@ -90,6 +114,70 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
   )
 
   const selectedProduct = PRODUCT_TYPE_OPTIONS.find((item) => item.value === productType)
+
+  const refreshOfflineState = useCallback(async () => {
+    const nextItems = await listPendingOfflineQueueItemsByScope("sales")
+    setPendingItems(nextItems)
+    const meta = readOfflineDailySyncMeta()
+    setLastSyncedAt(meta.lastSyncedAt)
+    setLastSyncError(meta.lastError)
+  }, [])
+
+  const syncOfflineQueue = useCallback(async () => {
+    if (!isOnline || isSyncing) return
+
+    setIsSyncing(true)
+    try {
+      await flushOfflineDailyQueue()
+      await refreshOfflineState()
+      router.refresh()
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [isOnline, isSyncing, refreshOfflineState, router])
+
+  const retryOfflineItem = useCallback(async (itemId: string) => {
+    if (!isOnline || isSyncing) return
+
+    setIsSyncing(true)
+    try {
+      await retryOfflineDailyQueueItem(itemId)
+      await flushOfflineDailyQueue({ itemId })
+      await refreshOfflineState()
+      router.refresh()
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [isOnline, isSyncing, refreshOfflineState, router])
+
+  const removeOfflineItem = useCallback(async (itemId: string) => {
+    await deleteOfflineDailyQueueItem(itemId)
+    await refreshOfflineState()
+  }, [refreshOfflineState])
+
+  useEffect(() => {
+    void refreshOfflineState()
+
+    const unsubscribe = subscribeToOfflineDailyQueue(() => {
+      void refreshOfflineState()
+    })
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      unsubscribe()
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [refreshOfflineState])
+
+  useEffect(() => {
+    if (!isOnline || pendingItems.length === 0) return
+    void syncOfflineQueue()
+  }, [isOnline, pendingItems.length, syncOfflineQueue])
 
   function updateItem(index: number, field: keyof Item, value: string | number) {
     setItems((current) => {
@@ -129,6 +217,7 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError(null)
+    setSuccess(null)
 
     const cleanedItems = items.map((item) => ({
       batchId: item.batchId || undefined,
@@ -147,26 +236,52 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
       return
     }
 
-    setLoading(true)
-
-    const result = await createSale({
+    const payload = {
       organizationId,
       customerId: customerId || undefined,
       productType,
       saleDate,
       notes: notes.trim() || undefined,
       items: cleanedItems,
-    })
-
-    setLoading(false)
-
-    if (!result.success) {
-      setError(result.error)
-      return
     }
 
-    router.push(`/sales/${result.data.id}`)
-    router.refresh()
+    const queueSale = async () => {
+      await enqueueOfflineSale(payload)
+      setSuccess("Vente enregistree hors ligne et mise en attente.")
+      await refreshOfflineState()
+    }
+
+    setLoading(true)
+
+    try {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        await queueSale()
+        return
+      }
+
+      const result = await createSale(payload)
+
+      if (!result.success) {
+        setError(result.error)
+        return
+      }
+
+      setSuccess("Vente enregistree.")
+      router.push(`/sales/${result.data.id}`)
+      router.refresh()
+    } catch (submitError) {
+      const offlineFailure =
+        (typeof navigator !== "undefined" && !navigator.onLine) ||
+        (submitError instanceof Error && /fetch|network|offline|failed to fetch/i.test(submitError.message))
+
+      if (!offlineFailure) {
+        throw submitError
+      }
+
+      await queueSale()
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -369,6 +484,25 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
         </section>
 
         <aside className="space-y-5">
+          <OfflineSyncCard
+            isOnline={isOnline}
+            pendingCount={pendingItems.length}
+            failedCount={pendingItems.filter((item) => item.status === "failed").length}
+            isSyncing={isSyncing}
+            lastSyncedAt={lastSyncedAt}
+            lastError={lastSyncError}
+            items={pendingItems}
+            onSync={() => {
+              void syncOfflineQueue()
+            }}
+            onRetryItem={(itemId) => {
+              void retryOfflineItem(itemId)
+            }}
+            onRemoveItem={(itemId) => {
+              void removeOfflineItem(itemId)
+            }}
+          />
+
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-medium text-gray-500">Resume de la vente</p>
             <p className="mt-2 text-3xl font-bold text-gray-900">
@@ -406,6 +540,12 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
           {error ? (
             <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               {error}
+            </div>
+          ) : null}
+
+          {success ? (
+            <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+              {success}
             </div>
           ) : null}
 

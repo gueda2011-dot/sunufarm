@@ -9,9 +9,11 @@ import { DailyForm } from "./DailyForm"
 import { RecentRecords } from "./RecentRecords"
 import { OfflineSyncCard } from "./OfflineSyncCard"
 import {
+  deleteOfflineDailyQueueItem,
   flushOfflineDailyQueue,
   listPendingOfflineQueueItemsByScope,
   readOfflineDailySyncMeta,
+  retryOfflineDailyQueueItem,
   subscribeToOfflineDailyQueue,
 } from "@/src/lib/offline-daily-queue"
 
@@ -141,6 +143,25 @@ export function DailyEntryClient({
     }
   }, [isOnline, isSyncing, organizationId, queryClient, refreshOfflineState])
 
+  const retryOfflineItem = useCallback(async (itemId: string) => {
+    if (!isOnline || isSyncing) return
+
+    setIsSyncing(true)
+    try {
+      await retryOfflineDailyQueueItem(itemId)
+      await flushOfflineDailyQueue({ itemId })
+      await refreshOfflineState()
+      queryClient.invalidateQueries({ queryKey: ["dailyRecords", organizationId] })
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [isOnline, isSyncing, organizationId, queryClient, refreshOfflineState])
+
+  const removeOfflineItem = useCallback(async (itemId: string) => {
+    await deleteOfflineDailyQueueItem(itemId)
+    await refreshOfflineState()
+  }, [refreshOfflineState])
+
   useEffect(() => {
     void refreshOfflineState()
 
@@ -222,6 +243,12 @@ export function DailyEntryClient({
         items={pendingItems}
         onSync={() => {
           void syncOfflineQueue()
+        }}
+        onRetryItem={(itemId) => {
+          void retryOfflineItem(itemId)
+        }}
+        onRemoveItem={(itemId) => {
+          void removeOfflineItem(itemId)
         }}
       />
 

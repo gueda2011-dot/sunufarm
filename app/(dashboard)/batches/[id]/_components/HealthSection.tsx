@@ -17,11 +17,13 @@ import { createVaccination, createTreatment } from "@/src/actions/health"
 import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 import {
+  deleteOfflineDailyQueueItem,
   enqueueOfflineTreatment,
   enqueueOfflineVaccination,
   flushOfflineDailyQueue,
   listPendingOfflineQueueItemsByScope,
   readOfflineDailySyncMeta,
+  retryOfflineDailyQueueItem,
   subscribeToOfflineDailyQueue,
 } from "@/src/lib/offline-daily-queue"
 import type {
@@ -116,6 +118,23 @@ export function HealthSection({
       setIsSyncing(false)
     }
   }, [isOnline, isSyncing, refreshOfflineState])
+
+  const retryOfflineItem = useCallback(async (itemId: string) => {
+    if (!isOnline || isSyncing) return
+    setIsSyncing(true)
+    try {
+      await retryOfflineDailyQueueItem(itemId)
+      await flushOfflineDailyQueue({ itemId })
+      await refreshOfflineState()
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [isOnline, isSyncing, refreshOfflineState])
+
+  const removeOfflineItem = useCallback(async (itemId: string) => {
+    await deleteOfflineDailyQueueItem(itemId)
+    await refreshOfflineState()
+  }, [refreshOfflineState])
 
   useEffect(() => {
     void refreshOfflineState()
@@ -340,6 +359,12 @@ export function HealthSection({
         items={pendingItems}
         onSync={() => {
           void syncOfflineQueue()
+        }}
+        onRetryItem={(itemId) => {
+          void retryOfflineItem(itemId)
+        }}
+        onRemoveItem={(itemId) => {
+          void removeOfflineItem(itemId)
         }}
       />
 

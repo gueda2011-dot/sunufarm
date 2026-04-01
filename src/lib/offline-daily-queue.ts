@@ -3,6 +3,7 @@
 import { createDailyRecord } from "@/src/actions/daily-records"
 import { createExpense } from "@/src/actions/expenses"
 import { createTreatment, createVaccination } from "@/src/actions/health"
+import { createSale } from "@/src/actions/sales"
 
 const DB_NAME = "sunufarm-offline"
 const DB_VERSION = 1
@@ -58,17 +59,36 @@ export interface OfflineTreatmentQueuePayload {
   notes?: string
 }
 
+export interface OfflineSaleQueueItemPayload {
+  batchId?: string
+  description: string
+  quantity: number
+  unit: "KG" | "PIECE" | "PLATEAU" | "CAISSE"
+  unitPriceFcfa: number
+}
+
+export interface OfflineSaleQueuePayload {
+  organizationId: string
+  customerId?: string
+  saleDate: string
+  productType: "POULET_VIF" | "OEUF" | "FIENTE"
+  notes?: string
+  items: OfflineSaleQueueItemPayload[]
+}
+
 type OfflineQueuePayload =
   | OfflineDailyQueuePayload
   | OfflineExpenseQueuePayload
   | OfflineVaccinationQueuePayload
   | OfflineTreatmentQueuePayload
+  | OfflineSaleQueuePayload
 
 export type OfflineQueueItemType =
   | "CREATE_DAILY_RECORD"
   | "CREATE_EXPENSE"
   | "CREATE_VACCINATION"
   | "CREATE_TREATMENT"
+  | "CREATE_SALE"
 
 export interface OfflineQueueItem {
   id: string
@@ -172,6 +192,14 @@ function createQueueKey(parts: string[]) {
   return parts.join(":")
 }
 
+function createRandomQueueKey(prefix: string) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}:${crypto.randomUUID()}`
+  }
+
+  return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`
+}
+
 function buildQueueLabel(item: {
   type: OfflineQueueItemType
   payload: OfflineQueuePayload
@@ -193,6 +221,10 @@ function buildQueueLabel(item: {
       const payload = item.payload as OfflineTreatmentQueuePayload
       return `Traitement ${payload.medicineName}`
     }
+    case "CREATE_SALE": {
+      const payload = item.payload as OfflineSaleQueuePayload
+      return `Vente ${payload.productType} - ${payload.saleDate}`
+    }
   }
 }
 
@@ -208,6 +240,8 @@ function buildQueueScope(item: {
     case "CREATE_VACCINATION":
     case "CREATE_TREATMENT":
       return "health"
+    case "CREATE_SALE":
+      return "sales"
   }
 }
 
@@ -219,6 +253,16 @@ function isLikelyOfflineError(error: unknown) {
 
 function isAlreadyCreatedError(message: string | undefined) {
   return !!message && /Une saisie existe deja pour ce lot a cette date/i.test(message)
+}
+
+function isAlreadyHandledError(item: OfflineQueueItem, message: string | undefined) {
+  if (!message) return false
+
+  if (item.type === "CREATE_DAILY_RECORD") {
+    return isAlreadyCreatedError(message)
+  }
+
+  return false
 }
 
 async function listOfflineQueueItems(): Promise<OfflineQueueItem[]> {
@@ -240,6 +284,13 @@ export async function listPendingOfflineQueueItemsByScope(scope: string) {
   return items.filter((item) => item.scope === scope)
 }
 
+async function getOfflineQueueItem(id: string): Promise<OfflineQueueItem | undefined> {
+  return withStore<OfflineQueueItem | undefined>("readonly", async (store) => {
+    const request = store.get(id)
+    return requestToPromise(request)
+  })
+}
+
 async function putQueueItem(item: OfflineQueueItem) {
   await withStore<void>("readwrite", (store) => requestToPromise(store.put(item)).then(() => undefined))
   emitQueueChanged()
@@ -248,6 +299,21 @@ async function putQueueItem(item: OfflineQueueItem) {
 export async function deleteOfflineDailyQueueItem(id: string) {
   await withStore<void>("readwrite", (store) => requestToPromise(store.delete(id)).then(() => undefined))
   emitQueueChanged()
+}
+
+export async function retryOfflineDailyQueueItem(id: string) {
+  const item = await getOfflineQueueItem(id)
+  if (!item) return null
+
+  const nextItem: OfflineQueueItem = {
+    ...item,
+    status: "pending",
+    updatedAt: new Date().toISOString(),
+    lastError: undefined,
+  }
+
+  await putQueueItem(nextItem)
+  return nextItem
 }
 
 async function enqueueOfflineItem(
@@ -302,6 +368,14 @@ export async function enqueueOfflineTreatment(payload: OfflineTreatmentQueuePayl
     "CREATE_TREATMENT",
     payload,
     createQueueKey(["treatment", payload.organizationId, payload.batchId, payload.startDate, payload.medicineName]),
+  )
+}
+
+export async function enqueueOfflineSale(payload: OfflineSaleQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_SALE",
+    payload,
+    createRandomQueueKey("sale"),
   )
 }
 
@@ -363,11 +437,28 @@ async function replayQueueItem(item: OfflineQueueItem) {
         notes: payload.notes,
       })
     }
+    case "CREATE_SALE": {
+      const payload = item.payload as OfflineSaleQueuePayload
+      return createSale({
+        organizationId: payload.organizationId,
+        customerId: payload.customerId,
+        saleDate: payload.saleDate,
+        productType: payload.productType,
+        notes: payload.notes,
+        items: payload.items,
+      })
+    }
   }
 }
 
-export async function flushOfflineDailyQueue() {
-  const items = await listPendingOfflineDailyQueueItems()
+export async function flushOfflineDailyQueue(options?: { itemId?: string }) {
+  const targetItem = options?.itemId ? await getOfflineQueueItem(options.itemId) : null
+  const items = targetItem
+    ? [targetItem]
+    : options?.itemId
+      ? []
+      : await listPendingOfflineDailyQueueItems()
+
   if (items.length === 0) {
     const previous = readOfflineDailySyncMeta()
     writeOfflineDailySyncMeta({
@@ -384,7 +475,7 @@ export async function flushOfflineDailyQueue() {
     try {
       const result = await replayQueueItem(item)
 
-      if (result.success || isAlreadyCreatedError(result.error)) {
+      if (result.success || isAlreadyHandledError(item, result.error)) {
         await deleteOfflineDailyQueueItem(item.id)
         synced += 1
         continue

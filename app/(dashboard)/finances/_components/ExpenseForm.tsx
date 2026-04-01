@@ -9,10 +9,12 @@ import { Label } from "@/src/components/ui/label"
 import { Button } from "@/src/components/ui/button"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 import {
+  deleteOfflineDailyQueueItem,
   enqueueOfflineExpense,
   flushOfflineDailyQueue,
   listPendingOfflineQueueItemsByScope,
   readOfflineDailySyncMeta,
+  retryOfflineDailyQueueItem,
   subscribeToOfflineDailyQueue,
 } from "@/src/lib/offline-daily-queue"
 
@@ -66,6 +68,25 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
       setIsSyncing(false)
     }
   }, [isOnline, isSyncing, refreshOfflineState, router])
+
+  const retryOfflineItem = useCallback(async (itemId: string) => {
+    if (!isOnline || isSyncing) return
+
+    setIsSyncing(true)
+    try {
+      await retryOfflineDailyQueueItem(itemId)
+      await flushOfflineDailyQueue({ itemId })
+      await refreshOfflineState()
+      router.refresh()
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [isOnline, isSyncing, refreshOfflineState, router])
+
+  const removeOfflineItem = useCallback(async (itemId: string) => {
+    await deleteOfflineDailyQueueItem(itemId)
+    await refreshOfflineState()
+  }, [refreshOfflineState])
 
   useEffect(() => {
     void refreshOfflineState()
@@ -152,6 +173,12 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
           items={pendingItems}
           onSync={() => {
             void syncOfflineQueue()
+          }}
+          onRetryItem={(itemId) => {
+            void retryOfflineItem(itemId)
+          }}
+          onRemoveItem={(itemId) => {
+            void removeOfflineItem(itemId)
           }}
         />
 

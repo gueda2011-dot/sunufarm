@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-03-30 (Session 56)
+> Derniere mise a jour : 2026-04-01 (Session 58)
 
 ---
 
@@ -18,28 +18,32 @@
 | Achats / finance / stock | Paiement fournisseur, envoi au stock, sorties terrain, integrite admin V1 | En place, encore a durcir |
 | Donnees demo | Seed / demo stable pour onboarding et validations manuelles | En place |
 | Observabilite / securite | Health admin, logs critiques, backup / restore, incident response, rate limiting | En place |
-| Chantiers ouverts | Durcissement anti-orphelins, outillage admin V2, simplification UX restante | En cours |
+| Hors ligne / resilience terrain | File locale navigateur + resynchronisation V1 sur flux critiques | En place, a etendre |
+| Chantiers ouverts | Durcissement anti-orphelins, outillage admin V2, extension offline et simplification UX restante | En cours |
 
 ### Lecture rapide
 
 - Le projet n'est plus au stade "schema + maquettes" : le coeur applicatif fonctionne deja sur les domaines principaux
 - Les modules terrain critiques sont presents : `lots`, `saisie journaliere`, `stock`, `sante`, `achats`, `depenses`, `ventes`, `dashboard`
-- Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin et de simplification UX, pas des blocs coeur absents
+- Une V1 hors ligne existe maintenant pour `saisie journaliere`, `vaccinations`, `traitements`, `depenses` et `ventes`
+- Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
 
 | Module | Etat |
 |---|---|
 | Lots | Fonctionnel |
-| Saisie journaliere | Fonctionnelle, avec impact stock aliment |
-| Sante | Fonctionnelle, avec impact stock medicament |
+| Saisie journaliere | Fonctionnelle, avec impact stock aliment et creation offline V1 |
+| Sante | Fonctionnelle, avec impact stock medicament et creation offline V1 |
 | Stock | Fonctionnel, avec creation d'articles, mouvements et correction admin V1 |
 | Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
-| Depenses / finances | Fonctionnel |
+| Depenses / finances | Fonctionnel, avec creation offline V1 |
+| Ventes | Fonctionnel, avec creation offline V1 |
 | Dashboard | Fonctionnel, achats + depenses integres dans les KPI |
 | Rapports | Fonctionnels au MVP |
 | Admin plateforme | Fonctionnel, avec supervision de base et integrite stock V1 |
 | Emails transactionnels | Fonctionnels si Resend est correctement configure |
+| Offline / sync terrain | V1 operationnelle sur creations critiques |
 
 ---
 
@@ -61,6 +65,7 @@
 - Eviter a la source les orphelins de stock lors des suppressions d'achat
 - Etendre l'outillage admin de correction au-dela des cas simples deja couverts
 - Continuer a reduire la charge cognitive utilisateur entre `Achats`, `Depenses`, `Stock` et `Saisie`
+- Etendre la synchro hors ligne aux autres flux terrain critiques et ajouter une resolution de conflits plus explicite
 
 ---
 
@@ -77,6 +82,59 @@
 | Permissions ferme | JSON dans `UserOrganization.farmPermissions` | MVP - table separee en V2 |
 | Motif mortalite | Optionnel, defaut "Non precise" | Decision terrain validee |
 | Types de ventes MVP | Poulets vifs, oeufs, fientes uniquement | Decision produit validee |
+
+---
+
+## Session 57 - 2026-04-01
+
+### Travail effectue
+
+- Ajout de notifications admin evenementielles pour les paiements et abonnements avec push `SUPER_ADMIN`
+- Correction des erreurs lint restantes sur les composants PWA
+- Mise en place d'une file locale navigateur pour les mutations offline dans `src/lib/offline-daily-queue.ts`
+- Ajout d'une V1 hors ligne + resynchronisation pour :
+  - `Saisie journaliere`
+  - `Vaccinations`
+  - `Traitements`
+  - `Depenses`
+- Ajout d'un panneau de synchronisation detaille avec elements en attente / erreur et relance manuelle
+- Validation complete avec `npm run lint` et `npm run build`
+
+### Resultat
+
+- Les flux terrain critiques supportent maintenant une perte reseau temporaire sans perdre les creations utilisateur
+- Les evenements de paiement remontent aux super admins dans la cloche et par push, plus seulement par email
+- Le projet gagne en resilience terrain sur mobile sans changer le backend metier principal
+
+### Prochaine session recommandee
+
+- Etendre le mode hors ligne aux `ventes`, puis aux mouvements `stock` terrain si le besoin est confirme
+- Ajouter une strategie plus explicite de resolution de conflits et de reprise utilisateur sur les elements en erreur
+- Ajouter des tests cibles sur la couche offline/sync pour verrouiller les cas de rejouement et de deduplication
+
+---
+
+## Session 58 - 2026-04-01
+
+### Travail effectue
+
+- Extension de la file offline V1 au flux `Ventes`
+- Branchement du formulaire `CreateSaleForm` sur l'enregistrement hors ligne et la resynchronisation automatique
+- Ajout d'actions explicites `Retenter` et `Supprimer` sur les elements en erreur ou en attente dans le panneau de synchro
+- Rebranchement de ces actions fines sur `saisie journaliere`, `depenses` et `sante`
+- Ajout de tests cibles sur `tests/offline-daily-queue.test.ts` pour couvrir stockage local, rejeu cible et deduplication de saisie journaliere
+
+### Resultat
+
+- Les ventes rejoignent les flux terrain resilients quand la connexion tombe
+- L'utilisateur peut maintenant reprendre un element en echec sans relancer aveuglement toute la file
+- La couche offline/sync commence a etre verrouillee par des tests unitaires dedies
+
+### Prochaine session recommandee
+
+- Etendre la meme logique hors ligne aux mouvements `stock` si le besoin terrain est confirme
+- Introduire une vraie strategie d'idempotence serveur pour les mutations offline les plus sensibles
+- Ajouter une vue transversale de synchronisation globale, pas seulement par module
 
 ---
 

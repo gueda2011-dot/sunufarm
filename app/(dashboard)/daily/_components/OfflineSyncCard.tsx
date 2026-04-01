@@ -15,6 +15,8 @@ interface OfflineSyncCardProps {
     lastError?: string
   }>
   onSync: () => void
+  onRetryItem?: (itemId: string) => void
+  onRemoveItem?: (itemId: string) => void
 }
 
 function formatLastSync(value: string | null) {
@@ -39,6 +41,8 @@ export function OfflineSyncCard({
   lastError,
   items = [],
   onSync,
+  onRetryItem,
+  onRemoveItem,
 }: OfflineSyncCardProps) {
   if (pendingCount === 0 && !lastError) {
     return null
@@ -104,6 +108,29 @@ export function OfflineSyncCard({
               </p>
               {item.lastError && (
                 <p className="mt-1 text-[11px] text-red-700">{item.lastError}</p>
+              )}
+              {(onRetryItem || onRemoveItem) && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {item.status === "failed" && onRetryItem ? (
+                    <button
+                      type="button"
+                      onClick={() => onRetryItem(item.id)}
+                      disabled={!isOnline || isSyncing}
+                      className="rounded-lg bg-amber-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+                    >
+                      Retenter
+                    </button>
+                  ) : null}
+                  {onRemoveItem ? (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveItem(item.id)}
+                      className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50"
+                    >
+                      Supprimer
+                    </button>
+                  ) : null}
+                </div>
               )}
             </div>
           ))}

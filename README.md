@@ -42,6 +42,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - enregistrement quotidien des donnees terrain
 - mortalite, alimentation, eau, temperature, humidite et observations
 - historique structure pour mieux comprendre ce qui se passe dans l'elevage
+- mode hors ligne V1 avec mise en file locale et resynchronisation automatique au retour du reseau
 
 ### Production
 
@@ -56,6 +57,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - alimentation du stock depuis les achats fournisseur quand la marchandise est recue
 - enregistrement des ventes
 - meilleure visibilite sur les mouvements et les sorties
+- creation de ventes disponible hors ligne en V1 avec synchro differee
 
 ### Finances
 
@@ -64,6 +66,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - separation claire entre `Achats fournisseur` et `Depenses` pour eviter les doublons
 - lecture plus simple des couts par lot
 - analyse de la rentabilite pour savoir ce qui marche vraiment
+- creation de depenses disponible hors ligne en V1 avec synchro differée
 
 ### Parcours achats et stock
 
@@ -78,6 +81,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - suivi des traitements et vaccinations
 - meilleure tracabilite sanitaire
 - alertes et historique plus faciles a exploiter
+- vaccinations et traitements disponibles hors ligne en V1 avec synchro differée
 
 ## Cas d'usage concret
 
@@ -192,8 +196,22 @@ Configuration Firebase Cloud Messaging :
 - le cron `/api/cron/notifications` requiert `CRON_SECRET` en production, sinon toutes les requetes retournent 401
 - autoriser les notifications dans le navigateur pour enregistrer le device — le bouton disparait une fois le device enregistre avec succes
 - les notifications push ciblent les membres SUPER_ADMIN, OWNER et MANAGER de chaque organisation
+- les evenements admin de paiement et abonnement creent aussi des notifications in-app/push pour les SUPER_ADMIN
 - le bouton "Declencher les notifications" dans `/admin` permet de tester le cycle complet sans attendre le cron
 - la cloche dans le header affiche les notifications en temps reel avec lecture et archivage
+
+Mode hors ligne V1 :
+
+- l'application peut deja conserver localement puis resynchroniser certaines creations metier si la connexion tombe
+- flux couverts en V1 :
+  - `Saisie journaliere`
+  - `Vaccinations`
+  - `Traitements`
+  - `Depenses`
+  - `Ventes`
+- les actions sont stockees localement dans le navigateur puis rejouees automatiquement au retour du reseau
+- un panneau de synchronisation affiche les elements en attente, les erreurs, permet une resynchronisation globale et des actions `Retenter` / `Supprimer` par element
+- le perimetre V1 couvre uniquement la creation hors ligne, pas encore l'edition hors ligne ni la resolution avancee de conflits
 
 Scripts utiles :
 
