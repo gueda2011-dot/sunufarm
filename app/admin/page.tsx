@@ -31,6 +31,7 @@ import { AdminSubscriptionControl } from "./_components/AdminSubscriptionControl
 import { AdminPaymentTransactions } from "./_components/AdminPaymentTransactions"
 import { AdminStockIntegrityPanel } from "./_components/AdminStockIntegrityPanel"
 import { AdminTriggerNotificationsButton } from "./_components/AdminTriggerNotificationsButton"
+import { AdminUnverifiedUsersPanel } from "./_components/AdminUnverifiedUsersPanel"
 
 export const metadata: Metadata = { title: "Admin Plateforme" }
 
@@ -126,6 +127,7 @@ export default async function AdminPage() {
   const [
     organizations,
     usersCount,
+    unverifiedUsers,
     pendingPaymentsCount,
     pendingPayments,
     pendingTransactions,
@@ -164,6 +166,31 @@ export default async function AdminPage() {
     }),
     prisma.user.count({
       where: { deletedAt: null },
+    }),
+    prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        emailVerified: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        createdAt: true,
+        organizations: {
+          select: {
+            organization: {
+              select: {
+                name: true,
+              },
+            },
+          },
+          take: 3,
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
     }),
     prisma.subscriptionPayment.count({
       where: { status: "PENDING" },
@@ -298,6 +325,42 @@ export default async function AdminPage() {
     critical: healthReport.checks.filter((check) => check.status === "critical").length,
   }
   const stockOrphanIssues = stockOrphanIssuesResult.success ? stockOrphanIssuesResult.data : []
+  const verificationIdentifiers = unverifiedUsers.map((user) => `verify:${user.email}`)
+  const verificationTokens = verificationIdentifiers.length > 0
+    ? await prisma.verificationToken.findMany({
+        where: {
+          identifier: {
+            in: verificationIdentifiers,
+          },
+          expires: {
+            gt: new Date(),
+          },
+        },
+        select: {
+          identifier: true,
+          expires: true,
+        },
+        orderBy: { expires: "desc" },
+      })
+    : []
+  const tokenByIdentifier = new Map(
+    verificationTokens.map((token) => [token.identifier, token.expires]),
+  )
+  const unverifiedUsersForPanel = unverifiedUsers.map((user) => {
+    const identifier = `verify:${user.email}`
+    const tokenExpiry = tokenByIdentifier.get(identifier) ?? null
+
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      createdAt: formatDateTime(user.createdAt),
+      organizations: user.organizations.map((membership) => membership.organization.name),
+      hasActiveToken: Boolean(tokenExpiry),
+      latestTokenExpiresAt: tokenExpiry ? formatDateTime(tokenExpiry) : null,
+    }
+  })
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
@@ -333,6 +396,11 @@ export default async function AdminPage() {
             label="Utilisateurs actifs"
             value={String(usersCount)}
             icon={Users}
+          />
+          <StatCard
+            label="Emails non confirmes"
+            value={String(unverifiedUsers.length)}
+            icon={AlertTriangle}
           />
           <StatCard
             label="Paiements en attente"
@@ -507,6 +575,11 @@ export default async function AdminPage() {
             </div>
           </div>
         </section>
+
+        <AdminUnverifiedUsersPanel
+          users={unverifiedUsersForPanel}
+          emailConfigured={environmentReadiness.emailReady}
+        />
 
         <AdminStockIntegrityPanel issues={stockOrphanIssues} />
 
