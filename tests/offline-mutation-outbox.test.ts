@@ -6,12 +6,16 @@ const {
   createVaccinationMock,
   createTreatmentMock,
   createSaleMock,
+  createFeedMovementMock,
+  createMedicineMovementMock,
 } = vi.hoisted(() => ({
   createDailyRecordMock: vi.fn(),
   createExpenseMock: vi.fn(),
   createVaccinationMock: vi.fn(),
   createTreatmentMock: vi.fn(),
   createSaleMock: vi.fn(),
+  createFeedMovementMock: vi.fn(),
+  createMedicineMovementMock: vi.fn(),
 }))
 
 vi.mock("@/src/actions/daily-records", () => ({
@@ -29,6 +33,11 @@ vi.mock("@/src/actions/health", () => ({
 
 vi.mock("@/src/actions/sales", () => ({
   createSale: createSaleMock,
+}))
+
+vi.mock("@/src/actions/stock", () => ({
+  createFeedMovement: createFeedMovementMock,
+  createMedicineMovement: createMedicineMovementMock,
 }))
 
 import {
@@ -206,18 +215,29 @@ function installBrowserMocks() {
     }
   }
 
-  Object.assign(globalThis, {
-    window: {
-      indexedDB,
-      localStorage,
-      addEventListener: eventTarget.addEventListener.bind(eventTarget),
-      removeEventListener: eventTarget.removeEventListener.bind(eventTarget),
-      dispatchEvent: eventTarget.dispatchEvent.bind(eventTarget),
-    },
-    navigator: {
-      onLine: true,
-    },
-    CustomEvent: FakeCustomEvent,
+  const windowMock = {
+    indexedDB,
+    localStorage,
+    addEventListener: eventTarget.addEventListener.bind(eventTarget),
+    removeEventListener: eventTarget.removeEventListener.bind(eventTarget),
+    dispatchEvent: eventTarget.dispatchEvent.bind(eventTarget),
+  }
+
+  Object.defineProperty(globalThis, "window", {
+    value: windowMock,
+    configurable: true,
+    writable: true,
+  })
+
+  Object.defineProperty(globalThis, "navigator", {
+    value: { onLine: true },
+    configurable: true,
+  })
+
+  Object.defineProperty(globalThis, "CustomEvent", {
+    value: FakeCustomEvent,
+    configurable: true,
+    writable: true,
   })
 }
 

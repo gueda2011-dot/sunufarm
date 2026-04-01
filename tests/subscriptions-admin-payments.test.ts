@@ -9,6 +9,8 @@ const {
   prismaTransactionMock,
   createAuditLogMock,
   revalidatePathMock,
+  sendAdminAlertEmailMock,
+  createAdminEventNotificationsMock,
 } = vi.hoisted(() => ({
   requireSessionMock: vi.fn(),
   userOrganizationFindFirstMock: vi.fn(),
@@ -18,6 +20,8 @@ const {
   prismaTransactionMock: vi.fn(),
   createAuditLogMock: vi.fn(),
   revalidatePathMock: vi.fn(),
+  sendAdminAlertEmailMock: vi.fn(),
+  createAdminEventNotificationsMock: vi.fn(),
 }))
 
 vi.mock("next/cache", () => ({
@@ -47,6 +51,15 @@ vi.mock("@/src/lib/audit", () => ({
   },
 }))
 
+vi.mock("@/src/lib/admin-alerts", () => ({
+  getAdminBaseUrl: vi.fn((path: string) => `https://admin.sunufarm.test${path}`),
+  sendAdminAlertEmail: sendAdminAlertEmailMock,
+}))
+
+vi.mock("@/src/lib/admin-event-notifications", () => ({
+  createAdminEventNotifications: createAdminEventNotificationsMock,
+}))
+
 import { adminRejectPaymentTransaction } from "@/src/actions/subscriptions"
 
 const USER_ID = "clw8user0000000000000001"
@@ -57,6 +70,8 @@ const SUBSCRIPTION_PAYMENT_ID = "clw8paym0000000000000001"
 describe("adminRejectPaymentTransaction", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sendAdminAlertEmailMock.mockResolvedValue({ success: true })
+    createAdminEventNotificationsMock.mockResolvedValue({ success: true })
     prismaTransactionMock.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => (
       callback({
         paymentTransaction: { update: transactionPaymentUpdateMock },
