@@ -10,11 +10,20 @@
  *   CREATE_VACCINATION / CREATE_TREATMENT → OWNER, MANAGER, VET, SUPER_ADMIN
  */
 
-import { useState, useTransition } from "react"
+import { useCallback, useEffect, useState, useTransition } from "react"
 import type { BatchType } from "@/src/generated/prisma/client"
 import { formatDate }              from "@/src/lib/formatters"
 import { createVaccination, createTreatment } from "@/src/actions/health"
 import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
+import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
+import {
+  enqueueOfflineTreatment,
+  enqueueOfflineVaccination,
+  flushOfflineDailyQueue,
+  listPendingOfflineQueueItemsByScope,
+  readOfflineDailySyncMeta,
+  subscribeToOfflineDailyQueue,
+} from "@/src/lib/offline-daily-queue"
 import type {
   VaccinationSummary,
   TreatmentSummary,
@@ -67,6 +76,19 @@ export function HealthSection({
   const [panel,        setPanel]        = useState<Panel>(null)
   const [error,        setError]        = useState<string | null>(null)
   const [isPending,    startTransition]  = useTransition()
+  const [isOnline, setIsOnline] = useState<boolean>(() => (
+    typeof navigator === "undefined" ? true : navigator.onLine
+  ))
+  const [pendingItems, setPendingItems] = useState<Array<{
+    id: string
+    label: string
+    createdAt: string
+    status: "pending" | "failed"
+    lastError?: string
+  }>>([])
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null)
 
   const today = new Date().toISOString().slice(0, 10)
   const vaccinationSuggestions = getVaccinationSuggestions({
@@ -75,6 +97,46 @@ export function HealthSection({
     recordedVaccines: vaccinations.map((item) => item.vaccineName),
   })
   const dueSuggestions = vaccinationSuggestions.filter((item) => item.status === "due" || item.status === "overdue")
+
+  const refreshOfflineState = useCallback(async () => {
+    const items = await listPendingOfflineQueueItemsByScope("health")
+    setPendingItems(items)
+    const meta = readOfflineDailySyncMeta()
+    setLastSyncedAt(meta.lastSyncedAt)
+    setLastSyncError(meta.lastError)
+  }, [])
+
+  const syncOfflineQueue = useCallback(async () => {
+    if (!isOnline || isSyncing) return
+    setIsSyncing(true)
+    try {
+      await flushOfflineDailyQueue()
+      await refreshOfflineState()
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [isOnline, isSyncing, refreshOfflineState])
+
+  useEffect(() => {
+    void refreshOfflineState()
+    const unsubscribe = subscribeToOfflineDailyQueue(() => {
+      void refreshOfflineState()
+    })
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+    return () => {
+      unsubscribe()
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [refreshOfflineState])
+
+  useEffect(() => {
+    if (!isOnline || pendingItems.length === 0) return
+    void syncOfflineQueue()
+  }, [isOnline, pendingItems.length, syncOfflineQueue])
 
   // ---------------------------------------------------------------------------
   // Création vaccination
@@ -86,43 +148,69 @@ export function HealthSection({
     const fd = new FormData(e.currentTarget)
 
     startTransition(async () => {
-      const result = await createVaccination({
+      const payload = {
         organizationId,
         batchId,
-        date:            new Date(fd.get("date") as string),
-        vaccineName:     fd.get("vaccineName") as string,
-        route:           (fd.get("route") as string) || undefined,
-        dose:            (fd.get("dose") as string) || undefined,
+        date: fd.get("date") as string,
+        vaccineName: fd.get("vaccineName") as string,
+        route: (fd.get("route") as string) || undefined,
+        dose: (fd.get("dose") as string) || undefined,
         countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
         medicineStockId: (fd.get("medicineStockId") as string) || undefined,
         medicineQuantity: (fd.get("medicineQuantity") as string)
           ? Number.parseFloat(fd.get("medicineQuantity") as string)
           : undefined,
-        notes:           (fd.get("notes") as string) || undefined,
-      })
-
-      if (!result.success) { setError(result.error); return }
-
-      // Optimistic prepend
-      const newVax: VaccinationSummary = {
-        id:              result.data.id,
-        organizationId,
-        batchId,
-        date:            new Date(fd.get("date") as string),
-        batchAgeDay:     result.data.batchAgeDay,
-        vaccineName:     fd.get("vaccineName") as string,
-        route:           (fd.get("route") as string) || null,
-        dose:            (fd.get("dose") as string) || null,
-        countVaccinated: parseInt(fd.get("countVaccinated") as string, 10),
-        medicineStockId: (fd.get("medicineStockId") as string) || null,
-        notes:           (fd.get("notes") as string) || null,
-        recordedById:    null,
-        createdAt:       new Date(),
-        updatedAt:       new Date(),
+        notes: (fd.get("notes") as string) || undefined,
       }
-      setVaccinations((prev) => [newVax, ...prev])
-      setPanel(null)
-      ;(e.target as HTMLFormElement).reset()
+
+      const queueVaccination = async () => {
+        await enqueueOfflineVaccination(payload)
+        setPanel(null)
+        ;(e.target as HTMLFormElement).reset()
+        await refreshOfflineState()
+      }
+
+      try {
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          await queueVaccination()
+          return
+        }
+
+        const result = await createVaccination({
+          ...payload,
+          date: new Date(payload.date),
+        })
+
+        if (!result.success) { setError(result.error); return }
+
+        const newVax: VaccinationSummary = {
+          id: result.data.id,
+          organizationId,
+          batchId,
+          date: new Date(payload.date),
+          batchAgeDay: result.data.batchAgeDay,
+          vaccineName: payload.vaccineName,
+          route: payload.route || null,
+          dose: payload.dose || null,
+          countVaccinated: payload.countVaccinated,
+          medicineStockId: payload.medicineStockId || null,
+          notes: payload.notes || null,
+          recordedById: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+        setVaccinations((prev) => [newVax, ...prev])
+        setPanel(null)
+        ;(e.target as HTMLFormElement).reset()
+      } catch (submitError) {
+        const offlineFailure =
+          (typeof navigator !== "undefined" && !navigator.onLine) ||
+          (submitError instanceof Error && /fetch|network|offline|failed to fetch/i.test(submitError.message))
+        if (!offlineFailure) {
+          throw submitError
+        }
+        await queueVaccination()
+      }
     })
   }
 
@@ -139,44 +227,71 @@ export function HealthSection({
     const countRaw    = fd.get("countTreated")  as string
 
     startTransition(async () => {
-      const result = await createTreatment({
+      const payload = {
         organizationId,
         batchId,
-        startDate:    new Date(fd.get("startDate") as string),
+        startDate: fd.get("startDate") as string,
         medicineName: fd.get("medicineName") as string,
-        dose:         (fd.get("dose") as string) || undefined,
+        dose: (fd.get("dose") as string) || undefined,
         durationDays: durationRaw ? parseInt(durationRaw, 10) : undefined,
-        countTreated: countRaw    ? parseInt(countRaw, 10)    : undefined,
+        countTreated: countRaw ? parseInt(countRaw, 10) : undefined,
         medicineStockId: (fd.get("medicineStockId") as string) || undefined,
         medicineQuantity: (fd.get("medicineQuantity") as string)
           ? Number.parseFloat(fd.get("medicineQuantity") as string)
           : undefined,
-        indication:   (fd.get("indication") as string) || undefined,
-        notes:        (fd.get("notes") as string) || undefined,
-      })
-
-      if (!result.success) { setError(result.error); return }
-
-      const newTreatment: TreatmentSummary = {
-        id:              result.data.id,
-        organizationId,
-        batchId,
-        startDate:       new Date(fd.get("startDate") as string),
-        endDate:         null,
-        medicineName:    fd.get("medicineName") as string,
-        dose:            (fd.get("dose") as string) || null,
-        durationDays:    durationRaw ? parseInt(durationRaw, 10) : null,
-        countTreated:    countRaw    ? parseInt(countRaw, 10)    : null,
-        medicineStockId: (fd.get("medicineStockId") as string) || null,
-        indication:      (fd.get("indication") as string) || null,
-        notes:           (fd.get("notes") as string) || null,
-        recordedById:    null,
-        createdAt:       new Date(),
-        updatedAt:       new Date(),
+        indication: (fd.get("indication") as string) || undefined,
+        notes: (fd.get("notes") as string) || undefined,
       }
-      setTreatments((prev) => [newTreatment, ...prev])
-      setPanel(null)
-      ;(e.target as HTMLFormElement).reset()
+
+      const queueTreatment = async () => {
+        await enqueueOfflineTreatment(payload)
+        setPanel(null)
+        ;(e.target as HTMLFormElement).reset()
+        await refreshOfflineState()
+      }
+
+      try {
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          await queueTreatment()
+          return
+        }
+
+        const result = await createTreatment({
+          ...payload,
+          startDate: new Date(payload.startDate),
+        })
+
+        if (!result.success) { setError(result.error); return }
+
+        const newTreatment: TreatmentSummary = {
+          id: result.data.id,
+          organizationId,
+          batchId,
+          startDate: new Date(payload.startDate),
+          endDate: null,
+          medicineName: payload.medicineName,
+          dose: payload.dose || null,
+          durationDays: payload.durationDays ?? null,
+          countTreated: payload.countTreated ?? null,
+          medicineStockId: payload.medicineStockId || null,
+          indication: payload.indication || null,
+          notes: payload.notes || null,
+          recordedById: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+        setTreatments((prev) => [newTreatment, ...prev])
+        setPanel(null)
+        ;(e.target as HTMLFormElement).reset()
+      } catch (submitError) {
+        const offlineFailure =
+          (typeof navigator !== "undefined" && !navigator.onLine) ||
+          (submitError instanceof Error && /fetch|network|offline|failed to fetch/i.test(submitError.message))
+        if (!offlineFailure) {
+          throw submitError
+        }
+        await queueTreatment()
+      }
     })
   }
 
@@ -214,6 +329,19 @@ export function HealthSection({
       {error && (
         <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
       )}
+
+      <OfflineSyncCard
+        isOnline={isOnline}
+        pendingCount={pendingItems.length}
+        failedCount={pendingItems.filter((item) => item.status === "failed").length}
+        isSyncing={isSyncing}
+        lastSyncedAt={lastSyncedAt}
+        lastError={lastSyncError}
+        items={pendingItems}
+        onSync={() => {
+          void syncOfflineQueue()
+        }}
+      />
 
       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 space-y-3">
         <div className="flex items-start justify-between gap-3">

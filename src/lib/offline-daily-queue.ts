@@ -1,0 +1,438 @@
+"use client"
+
+import { createDailyRecord } from "@/src/actions/daily-records"
+import { createExpense } from "@/src/actions/expenses"
+import { createTreatment, createVaccination } from "@/src/actions/health"
+
+const DB_NAME = "sunufarm-offline"
+const DB_VERSION = 1
+const STORE_NAME = "mutation-outbox"
+const SYNC_META_KEY = "sunufarm:offline-sync-meta"
+const QUEUE_EVENT = "sunufarm:offline-outbox-changed"
+
+export interface OfflineDailyQueuePayload {
+  organizationId: string
+  batchId: string
+  dateIso: string
+  mortality: number
+  feedKg: number
+  feedStockId?: string
+  waterLiters?: number
+  avgWeightG?: number
+  observations?: string
+}
+
+export interface OfflineExpenseQueuePayload {
+  organizationId: string
+  date: string
+  description: string
+  amountFcfa: number
+  reference?: string
+  notes?: string
+}
+
+export interface OfflineVaccinationQueuePayload {
+  organizationId: string
+  batchId: string
+  date: string
+  vaccineName: string
+  route?: string
+  dose?: string
+  countVaccinated: number
+  medicineStockId?: string
+  medicineQuantity?: number
+  notes?: string
+}
+
+export interface OfflineTreatmentQueuePayload {
+  organizationId: string
+  batchId: string
+  startDate: string
+  medicineName: string
+  dose?: string
+  durationDays?: number
+  countTreated?: number
+  medicineStockId?: string
+  medicineQuantity?: number
+  indication?: string
+  notes?: string
+}
+
+type OfflineQueuePayload =
+  | OfflineDailyQueuePayload
+  | OfflineExpenseQueuePayload
+  | OfflineVaccinationQueuePayload
+  | OfflineTreatmentQueuePayload
+
+export type OfflineQueueItemType =
+  | "CREATE_DAILY_RECORD"
+  | "CREATE_EXPENSE"
+  | "CREATE_VACCINATION"
+  | "CREATE_TREATMENT"
+
+export interface OfflineQueueItem {
+  id: string
+  type: OfflineQueueItemType
+  status: "pending" | "failed"
+  payload: OfflineQueuePayload
+  label: string
+  scope: string
+  createdAt: string
+  updatedAt: string
+  lastError?: string
+}
+
+export interface OfflineDailyQueueItem extends OfflineQueueItem {
+  type: "CREATE_DAILY_RECORD"
+  payload: OfflineDailyQueuePayload
+}
+
+export interface OfflineDailySyncMeta {
+  lastSyncedAt: string | null
+  lastError: string | null
+}
+
+function emitQueueChanged() {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new CustomEvent(QUEUE_EVENT))
+}
+
+function getDefaultSyncMeta(): OfflineDailySyncMeta {
+  return {
+    lastSyncedAt: null,
+    lastError: null,
+  }
+}
+
+export function readOfflineDailySyncMeta(): OfflineDailySyncMeta {
+  if (typeof window === "undefined") {
+    return getDefaultSyncMeta()
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SYNC_META_KEY)
+    if (!raw) return getDefaultSyncMeta()
+    return {
+      ...getDefaultSyncMeta(),
+      ...(JSON.parse(raw) as Partial<OfflineDailySyncMeta>),
+    }
+  } catch {
+    return getDefaultSyncMeta()
+  }
+}
+
+function writeOfflineDailySyncMeta(meta: OfflineDailySyncMeta) {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta))
+}
+
+function openOfflineDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION)
+
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: "id" })
+        store.createIndex("status", "status", { unique: false })
+        store.createIndex("createdAt", "createdAt", { unique: false })
+        store.createIndex("type", "type", { unique: false })
+      }
+    }
+
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error ?? new Error("INDEXED_DB_OPEN_FAILED"))
+  })
+}
+
+function withStore<T>(
+  mode: IDBTransactionMode,
+  handler: (store: IDBObjectStore) => Promise<T>,
+): Promise<T> {
+  return openOfflineDb().then((db) => new Promise<T>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, mode)
+    const store = transaction.objectStore(STORE_NAME)
+
+    transaction.onerror = () => reject(transaction.error ?? new Error("INDEXED_DB_TX_FAILED"))
+    transaction.onabort = () => reject(transaction.error ?? new Error("INDEXED_DB_TX_ABORTED"))
+    transaction.addEventListener("complete", () => db.close())
+
+    void handler(store).then(resolve).catch(reject)
+  }))
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error ?? new Error("INDEXED_DB_REQUEST_FAILED"))
+  })
+}
+
+function createQueueKey(parts: string[]) {
+  return parts.join(":")
+}
+
+function buildQueueLabel(item: {
+  type: OfflineQueueItemType
+  payload: OfflineQueuePayload
+}) {
+  switch (item.type) {
+    case "CREATE_DAILY_RECORD": {
+      const payload = item.payload as OfflineDailyQueuePayload
+      return `Saisie journaliere ${payload.batchId} - ${payload.dateIso.slice(0, 10)}`
+    }
+    case "CREATE_EXPENSE": {
+      const payload = item.payload as OfflineExpenseQueuePayload
+      return `Depense - ${payload.description}`
+    }
+    case "CREATE_VACCINATION": {
+      const payload = item.payload as OfflineVaccinationQueuePayload
+      return `Vaccination ${payload.vaccineName}`
+    }
+    case "CREATE_TREATMENT": {
+      const payload = item.payload as OfflineTreatmentQueuePayload
+      return `Traitement ${payload.medicineName}`
+    }
+  }
+}
+
+function buildQueueScope(item: {
+  type: OfflineQueueItemType
+  payload: OfflineQueuePayload
+}) {
+  switch (item.type) {
+    case "CREATE_DAILY_RECORD":
+      return "daily"
+    case "CREATE_EXPENSE":
+      return "expenses"
+    case "CREATE_VACCINATION":
+    case "CREATE_TREATMENT":
+      return "health"
+  }
+}
+
+function isLikelyOfflineError(error: unknown) {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return true
+  if (!(error instanceof Error)) return false
+  return /fetch|network|offline|failed to fetch/i.test(error.message)
+}
+
+function isAlreadyCreatedError(message: string | undefined) {
+  return !!message && /Une saisie existe deja pour ce lot a cette date/i.test(message)
+}
+
+async function listOfflineQueueItems(): Promise<OfflineQueueItem[]> {
+  return withStore<OfflineQueueItem[]>("readonly", async (store) => {
+    const request = store.getAll()
+    return requestToPromise(request)
+  })
+}
+
+export async function listPendingOfflineDailyQueueItems(): Promise<OfflineQueueItem[]> {
+  const items = await listOfflineQueueItems()
+  return items
+    .filter((item) => item.status === "pending" || item.status === "failed")
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+export async function listPendingOfflineQueueItemsByScope(scope: string) {
+  const items = await listPendingOfflineDailyQueueItems()
+  return items.filter((item) => item.scope === scope)
+}
+
+async function putQueueItem(item: OfflineQueueItem) {
+  await withStore<void>("readwrite", (store) => requestToPromise(store.put(item)).then(() => undefined))
+  emitQueueChanged()
+}
+
+export async function deleteOfflineDailyQueueItem(id: string) {
+  await withStore<void>("readwrite", (store) => requestToPromise(store.delete(id)).then(() => undefined))
+  emitQueueChanged()
+}
+
+async function enqueueOfflineItem(
+  type: OfflineQueueItemType,
+  payload: OfflineQueuePayload,
+  id: string,
+): Promise<OfflineQueueItem> {
+  const now = new Date().toISOString()
+  const item: OfflineQueueItem = {
+    id,
+    type,
+    status: "pending",
+    payload,
+    label: buildQueueLabel({ type, payload }),
+    scope: buildQueueScope({ type, payload }),
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  await putQueueItem(item)
+  return item
+}
+
+export async function enqueueOfflineDailyRecord(
+  payload: OfflineDailyQueuePayload,
+): Promise<OfflineDailyQueueItem> {
+  return enqueueOfflineItem(
+    "CREATE_DAILY_RECORD",
+    payload,
+    createQueueKey(["daily", payload.organizationId, payload.batchId, payload.dateIso]),
+  ) as Promise<OfflineDailyQueueItem>
+}
+
+export async function enqueueOfflineExpense(payload: OfflineExpenseQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_EXPENSE",
+    payload,
+    createQueueKey(["expense", payload.organizationId, payload.date, payload.description]),
+  )
+}
+
+export async function enqueueOfflineVaccination(payload: OfflineVaccinationQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_VACCINATION",
+    payload,
+    createQueueKey(["vaccination", payload.organizationId, payload.batchId, payload.date, payload.vaccineName]),
+  )
+}
+
+export async function enqueueOfflineTreatment(payload: OfflineTreatmentQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_TREATMENT",
+    payload,
+    createQueueKey(["treatment", payload.organizationId, payload.batchId, payload.startDate, payload.medicineName]),
+  )
+}
+
+async function replayQueueItem(item: OfflineQueueItem) {
+  switch (item.type) {
+    case "CREATE_DAILY_RECORD": {
+      const payload = item.payload as OfflineDailyQueuePayload
+      return createDailyRecord({
+        organizationId: payload.organizationId,
+        batchId: payload.batchId,
+        date: new Date(payload.dateIso),
+        mortality: payload.mortality,
+        feedKg: payload.feedKg,
+        feedStockId: payload.feedStockId,
+        waterLiters: payload.waterLiters,
+        avgWeightG: payload.avgWeightG,
+        observations: payload.observations,
+      })
+    }
+    case "CREATE_EXPENSE": {
+      const payload = item.payload as OfflineExpenseQueuePayload
+      return createExpense({
+        organizationId: payload.organizationId,
+        description: payload.description,
+        amountFcfa: payload.amountFcfa,
+        date: payload.date,
+        reference: payload.reference,
+        notes: payload.notes,
+      })
+    }
+    case "CREATE_VACCINATION": {
+      const payload = item.payload as OfflineVaccinationQueuePayload
+      return createVaccination({
+        organizationId: payload.organizationId,
+        batchId: payload.batchId,
+        date: new Date(payload.date),
+        vaccineName: payload.vaccineName,
+        route: payload.route,
+        dose: payload.dose,
+        countVaccinated: payload.countVaccinated,
+        medicineStockId: payload.medicineStockId,
+        medicineQuantity: payload.medicineQuantity,
+        notes: payload.notes,
+      })
+    }
+    case "CREATE_TREATMENT": {
+      const payload = item.payload as OfflineTreatmentQueuePayload
+      return createTreatment({
+        organizationId: payload.organizationId,
+        batchId: payload.batchId,
+        startDate: new Date(payload.startDate),
+        medicineName: payload.medicineName,
+        dose: payload.dose,
+        durationDays: payload.durationDays,
+        countTreated: payload.countTreated,
+        medicineStockId: payload.medicineStockId,
+        medicineQuantity: payload.medicineQuantity,
+        indication: payload.indication,
+        notes: payload.notes,
+      })
+    }
+  }
+}
+
+export async function flushOfflineDailyQueue() {
+  const items = await listPendingOfflineDailyQueueItems()
+  if (items.length === 0) {
+    const previous = readOfflineDailySyncMeta()
+    writeOfflineDailySyncMeta({
+      lastSyncedAt: previous.lastSyncedAt ?? new Date().toISOString(),
+      lastError: null,
+    })
+    emitQueueChanged()
+    return { processed: 0, synced: 0, failed: 0 }
+  }
+
+  let synced = 0
+
+  for (const item of items) {
+    try {
+      const result = await replayQueueItem(item)
+
+      if (result.success || isAlreadyCreatedError(result.error)) {
+        await deleteOfflineDailyQueueItem(item.id)
+        synced += 1
+        continue
+      }
+
+      await putQueueItem({
+        ...item,
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+        lastError: result.error,
+      })
+    } catch (error) {
+      if (isLikelyOfflineError(error)) {
+        break
+      }
+
+      await putQueueItem({
+        ...item,
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+        lastError: error instanceof Error ? error.message : "SYNC_FAILED",
+      })
+    }
+  }
+
+  const remainingItems = await listPendingOfflineDailyQueueItems()
+  writeOfflineDailySyncMeta({
+    lastSyncedAt: new Date().toISOString(),
+    lastError: remainingItems[0]?.lastError ?? null,
+  })
+  emitQueueChanged()
+
+  return {
+    processed: items.length,
+    synced,
+    failed: remainingItems.length,
+  }
+}
+
+export function subscribeToOfflineDailyQueue(callback: () => void) {
+  if (typeof window === "undefined") {
+    return () => {}
+  }
+
+  const handler = () => callback()
+  window.addEventListener(QUEUE_EVENT, handler)
+
+  return () => {
+    window.removeEventListener(QUEUE_EVENT, handler)
+  }
+}

@@ -1,127 +1,77 @@
 "use client"
 
-/**
- * SunuFarm — Formulaire saisie journalière
- *
- * Périmètre MVP (ajustement 4) : mortality, feedKg, waterLiters, avgWeightG,
- * observations uniquement. Pas d'introduction d'autres champs backend.
- *
- * Validations (ajustements 2 + 3) :
- *   - mortality > entryCount = erreur BLOQUANTE (pas un warning)
- *   - Champs optionnels vides : z.preprocess(emptyToUndefined, ...) — pas de
- *     z.coerce.number() nu sur champ optionnel (évite "" → 0)
- *
- * Doublon hors fenêtre (ajustement 1) :
- *   Si le doublon n'est pas dans les 14 records chargés, le serveur retourne
- *   "Une saisie existe déjà pour ce lot à cette date" — affiché en erreur inline.
- */
-
-import { useEffect, useState }         from "react"
+import { useEffect, useState } from "react"
 import { useForm, useWatch, type Resolver } from "react-hook-form"
-import { zodResolver }                 from "@hookform/resolvers/zod"
-import { z }                           from "zod"
-import { toast }                       from "sonner"
-import { ChevronDown }                 from "lucide-react"
-import { Button }                      from "@/src/components/ui/button"
-import { NumericField }                from "./NumericField"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
+import { toast } from "sonner"
+import { ChevronDown } from "lucide-react"
+import { Button } from "@/src/components/ui/button"
+import { NumericField } from "./NumericField"
 import {
   createDailyRecord,
   updateDailyRecord,
-}                                      from "@/src/actions/daily-records"
+} from "@/src/actions/daily-records"
 import {
   clearFormDraft,
   getFormDraft,
   saveFormDraft,
 } from "@/src/actions/form-drafts"
-import { cn }                          from "@/src/lib/utils"
+import { enqueueOfflineDailyRecord } from "@/src/lib/offline-daily-queue"
+import { cn } from "@/src/lib/utils"
 
-// ---------------------------------------------------------------------------
-// Schéma Zod
-// ---------------------------------------------------------------------------
-
-/**
- * Convertit "" / null / undefined en undefined avant coercition.
- * Ajustement 3 : évite que z.coerce.number() transforme "" en 0
- * sur les champs optionnels.
- */
 function emptyToUndefined(val: unknown): unknown {
   return val === "" || val === null || val === undefined ? undefined : val
 }
 
-/**
- * Construit le schéma avec entryCount pour la validation bloquante.
- * Le composant est re-keyed par son parent quand entryCount change (nouveau lot)
- * donc buildFormSchema est appelé à la création du composant uniquement.
- * Ajustement 2 : mortality > entryCount = erreur bloquante.
- */
 function buildFormSchema(entryCount: number) {
   return z.object({
-    // Zod v4 : "error" remplace "invalid_type_error" (API v3)
     mortality: z
       .coerce.number({ error: "Entier requis" })
-      .int("Doit être un entier")
-      .min(0, "Doit être ≥ 0")
+      .int("Doit etre un entier")
+      .min(0, "Doit etre >= 0")
       .max(entryCount, `Maximum : ${entryCount} (effectif initial)`),
-
     feedKg: z
       .coerce.number({ error: "Nombre requis" })
-      .min(0, "Doit être ≥ 0"),
-
+      .min(0, "Doit etre >= 0"),
     feedStockId: z.preprocess(
       emptyToUndefined,
       z.string().cuid("Stock invalide").optional(),
     ),
-
-    // Ajustement 3 : "" → undefined avant la coercition
     waterLiters: z.preprocess(
       emptyToUndefined,
-      z.coerce.number().min(0, "Doit être ≥ 0").optional(),
+      z.coerce.number().min(0, "Doit etre >= 0").optional(),
     ),
-
     avgWeightG: z.preprocess(
       emptyToUndefined,
-      z.coerce.number().int("Doit être un entier").positive("Doit être > 0").optional(),
+      z.coerce.number().int("Doit etre un entier").positive("Doit etre > 0").optional(),
     ),
-
-    observations: z.string().max(2000, "Maximum 2 000 caractères").optional(),
+    observations: z.string().max(2000, "Maximum 2 000 caracteres").optional(),
   })
 }
 
-/**
- * Type des valeurs du formulaire après parsing Zod (output).
- *
- * Défini explicitement plutôt que via z.infer<> car z.coerce.number() et
- * z.preprocess() ont un input type "unknown" qui crée un mismatch TypeScript
- * entre Resolver<z.input<Schema>> (retourné par zodResolver) et
- * useForm<z.output<Schema>>. Le cast Resolver<ParsedValues> ci-dessous résout
- * ce décalage — accepté car zodResolver fait bien la transformation en runtime.
- */
 type ParsedValues = {
-  mortality:     number
-  feedKg:        number
-  feedStockId?:  string
-  waterLiters?:  number
-  avgWeightG?:   number
+  mortality: number
+  feedKg: number
+  feedStockId?: string
+  waterLiters?: number
+  avgWeightG?: number
   observations?: string
 }
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
 interface DailyFormProps {
-  organizationId:   string
-  batchId:          string
-  selectedDate:     string  // YYYY-MM-DD
-  entryCount:       number
-  isEditMode:       boolean
+  organizationId: string
+  batchId: string
+  selectedDate: string
+  entryCount: number
+  isEditMode: boolean
   editingRecordId?: string
   defaultValues: {
-    mortality:     number
-    feedKg:        number
-    feedStockId?:  string | null
-    waterLiters?:  number | null
-    avgWeightG?:   number | null
+    mortality: number
+    feedKg: number
+    feedStockId?: string | null
+    waterLiters?: number | null
+    avgWeightG?: number | null
     observations?: string | null
   }
   feedStocks: Array<{
@@ -130,11 +80,15 @@ interface DailyFormProps {
     quantityKg: number
   }>
   onSuccess: () => void
+  onOfflineQueued?: () => void
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+function isOfflineFailure(error: unknown) {
+  return (
+    (typeof navigator !== "undefined" && !navigator.onLine) ||
+    (error instanceof Error && /fetch|network|offline|failed to fetch/i.test(error.message))
+  )
+}
 
 export function DailyForm({
   organizationId,
@@ -146,10 +100,10 @@ export function DailyForm({
   defaultValues,
   feedStocks,
   onSuccess,
+  onOfflineQueued,
 }: DailyFormProps) {
   const draftStorageKey = `sunufarm:draft:daily:${organizationId}:${batchId}:${selectedDate}`
   const draftFormKey = `daily:${organizationId}:${batchId}:${selectedDate}`
-  // Ouvrir la section détails si des valeurs optionnelles existent déjà
   const [detailsOpen, setDetailsOpen] = useState(
     !!(defaultValues.waterLiters || defaultValues.avgWeightG || defaultValues.observations),
   )
@@ -165,19 +119,17 @@ export function DailyForm({
     reset,
     formState: { errors, isSubmitting },
   } = useForm<ParsedValues>({
-    // Cast nécessaire : zodResolver retourne Resolver<z.input<Schema>> où les
-    // champs coercés ont le type "unknown". ParsedValues (z.output) est correct
-    // en runtime — le resolver fait bien la transformation.
     resolver: zodResolver(schema) as Resolver<ParsedValues>,
     defaultValues: {
-      mortality:    defaultValues.mortality,
-      feedKg:       defaultValues.feedKg,
-      feedStockId:  defaultValues.feedStockId ?? undefined,
-      waterLiters:  defaultValues.waterLiters  ?? undefined,
-      avgWeightG:   defaultValues.avgWeightG   ?? undefined,
+      mortality: defaultValues.mortality,
+      feedKg: defaultValues.feedKg,
+      feedStockId: defaultValues.feedStockId ?? undefined,
+      waterLiters: defaultValues.waterLiters ?? undefined,
+      avgWeightG: defaultValues.avgWeightG ?? undefined,
       observations: defaultValues.observations ?? "",
     },
   })
+
   const draftValues = useWatch({ control })
 
   useEffect(() => {
@@ -246,6 +198,7 @@ export function DailyForm({
 
   useEffect(() => {
     if (isEditMode || !draftReady || typeof window === "undefined") return
+
     window.localStorage.setItem(draftStorageKey, JSON.stringify(draftValues))
 
     const timeout = window.setTimeout(() => {
@@ -260,62 +213,87 @@ export function DailyForm({
     return () => window.clearTimeout(timeout)
   }, [draftFormKey, draftReady, draftStorageKey, draftValues, isEditMode, organizationId])
 
+  const clearDrafts = async () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(draftStorageKey)
+    }
+    await clearFormDraft({ formKey: draftFormKey, organizationId })
+  }
+
+  const queueCurrentEntry = async (data: ParsedValues) => {
+    await enqueueOfflineDailyRecord({
+      organizationId,
+      batchId,
+      dateIso: new Date(`${selectedDate}T00:00:00Z`).toISOString(),
+      mortality: data.mortality,
+      feedKg: data.feedKg,
+      feedStockId: data.feedStockId,
+      waterLiters: data.waterLiters,
+      avgWeightG: data.avgWeightG,
+      observations: data.observations,
+    })
+
+    await clearDrafts()
+    toast.success("Saisie enregistree hors ligne et mise en attente")
+    onOfflineQueued?.()
+  }
+
   const onSubmit = async (data: ParsedValues) => {
     setSubmitError(null)
 
     if (isEditMode && editingRecordId) {
-      // ── Mise à jour ──────────────────────────────────────────────────────
       const result = await updateDailyRecord({
         organizationId,
         batchId,
         dailyRecordId: editingRecordId,
-        mortality:     data.mortality,
-        feedKg:        data.feedKg,
-        feedStockId:   data.feedStockId ?? null,
-        waterLiters:   data.waterLiters,
-        avgWeightG:    data.avgWeightG,
-        observations:  data.observations,
-      })
-
-      if (result.success) {
-        if (!isEditMode && typeof window !== "undefined") {
-          window.localStorage.removeItem(draftStorageKey)
-        }
-        if (!isEditMode) {
-          await clearFormDraft({ formKey: draftFormKey, organizationId })
-        }
-        toast.success("Saisie corrigée")
-        onSuccess()
-      } else {
-        setSubmitError(result.error)
-      }
-    } else {
-      // ── Création ─────────────────────────────────────────────────────────
-      // La date locale YYYY-MM-DD est envoyée normalisée en UTC minuit.
-      // Ajustement 1 : si doublon hors fenêtre des 14 records, le serveur
-      // retourne "Une saisie existe déjà..." — affiché dans submitError ci-dessous.
-      const result = await createDailyRecord({
-        organizationId,
-        batchId,
-        date:         new Date(`${selectedDate}T00:00:00Z`),
-        mortality:    data.mortality,
-        feedKg:       data.feedKg,
-        feedStockId:  data.feedStockId,
-        waterLiters:  data.waterLiters,
-        avgWeightG:   data.avgWeightG,
+        mortality: data.mortality,
+        feedKg: data.feedKg,
+        feedStockId: data.feedStockId ?? null,
+        waterLiters: data.waterLiters,
+        avgWeightG: data.avgWeightG,
         observations: data.observations,
       })
 
       if (result.success) {
-        if (typeof window !== "undefined") {
-          window.localStorage.removeItem(draftStorageKey)
-        }
-        await clearFormDraft({ formKey: draftFormKey, organizationId })
-        toast.success("Saisie enregistrée")
+        toast.success("Saisie corrigee")
         onSuccess()
       } else {
         setSubmitError(result.error)
       }
+      return
+    }
+
+    try {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        await queueCurrentEntry(data)
+        return
+      }
+
+      const result = await createDailyRecord({
+        organizationId,
+        batchId,
+        date: new Date(`${selectedDate}T00:00:00Z`),
+        mortality: data.mortality,
+        feedKg: data.feedKg,
+        feedStockId: data.feedStockId,
+        waterLiters: data.waterLiters,
+        avgWeightG: data.avgWeightG,
+        observations: data.observations,
+      })
+
+      if (result.success) {
+        await clearDrafts()
+        toast.success("Saisie enregistree")
+        onSuccess()
+      } else {
+        setSubmitError(result.error)
+      }
+    } catch (error) {
+      if (!isOfflineFailure(error)) {
+        throw error
+      }
+
+      await queueCurrentEntry(data)
     }
   }
 
@@ -327,10 +305,9 @@ export function DailyForm({
         </div>
       )}
 
-      {/* ── Mortalité ────────────────────────────────────────────────────── */}
       <NumericField
         id="mortality"
-        label="Mortalité"
+        label="Mortalite"
         unit="sujets"
         integer
         placeholder="0"
@@ -338,10 +315,9 @@ export function DailyForm({
         {...register("mortality")}
       />
 
-      {/* ── Aliment distribué ────────────────────────────────────────────── */}
       <NumericField
         id="feedKg"
-        label="Aliment distribué"
+        label="Aliment distribue"
         unit="kg"
         placeholder="0"
         error={errors.feedKg?.message}
@@ -350,14 +326,14 @@ export function DailyForm({
 
       <div className="space-y-1.5">
         <label htmlFor="feedStockId" className="block text-sm font-medium text-gray-700">
-          Stock aliment utilisé
+          Stock aliment utilise
         </label>
         <select
           id="feedStockId"
-          className="w-full h-[52px] rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent"
+          className="h-[52px] w-full rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-600"
           {...register("feedStockId")}
         >
-          <option value="">— Sélectionner un stock —</option>
+          <option value="">- Selectionner un stock -</option>
           {feedStocks.map((stock) => (
             <option key={stock.id} value={stock.id}>
               {stock.name} · {stock.quantityKg.toLocaleString("fr-SN")} kg
@@ -366,69 +342,63 @@ export function DailyForm({
         </select>
         {feedStocks.length === 0 ? (
           <p className="text-sm text-amber-700">
-            Aucun stock aliment disponible pour cette ferme. Créez d&apos;abord un article dans Stock.
+            Aucun stock aliment disponible pour cette ferme. Creez d&apos;abord un article dans Stock.
           </p>
         ) : (
           <p className="text-sm text-gray-500">
-            La quantité distribuée sera automatiquement sortie du stock choisi.
+            La quantite distribuee sera automatiquement sortie du stock choisi.
           </p>
         )}
       </div>
 
-      {/* ── Section repliable — détails optionnels ───────────────────────── */}
       <div>
         <button
           type="button"
-          onClick={() => setDetailsOpen((v) => !v)}
-          className="flex items-center gap-1.5 text-sm font-medium text-green-600 hover:text-green-700 py-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 rounded"
+          onClick={() => setDetailsOpen((value) => !value)}
+          className="rounded py-1 text-sm font-medium text-green-600 hover:text-green-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600"
           aria-expanded={detailsOpen}
         >
-          <ChevronDown
-            className={cn(
-              "h-4 w-4 transition-transform duration-150",
-              detailsOpen && "rotate-180",
-            )}
-            aria-hidden
-          />
-          {detailsOpen ? "Masquer les détails" : "+ Ajouter des détails"}
+          <span className="inline-flex items-center gap-1.5">
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 transition-transform duration-150",
+                detailsOpen && "rotate-180",
+              )}
+              aria-hidden
+            />
+            {detailsOpen ? "Masquer les details" : "+ Ajouter des details"}
+          </span>
         </button>
 
-        <div className={cn(!detailsOpen && "hidden", "mt-4 space-y-5")}>
-
-          {/* Eau ─────────────────────────────────────────────────────────── */}
+        <div className={cn("mt-4 space-y-5", !detailsOpen && "hidden")}>
           <NumericField
             id="waterLiters"
-            label="Eau consommée"
+            label="Eau consommee"
             unit="litres"
-            placeholder="—"
+            placeholder="-"
             error={errors.waterLiters?.message}
             {...register("waterLiters")}
           />
 
-          {/* Poids moyen ──────────────────────────────────────────────────── */}
           <NumericField
             id="avgWeightG"
             label="Poids moyen"
             unit="g"
             integer
-            placeholder="—"
+            placeholder="-"
             error={errors.avgWeightG?.message}
             {...register("avgWeightG")}
           />
 
-          {/* Observations ────────────────────────────────────────────────── */}
           <div className="space-y-1.5">
-            <label
-              htmlFor="observations"
-              className="block text-sm font-medium text-gray-700"
-            >
+            <label htmlFor="observations" className="block text-sm font-medium text-gray-700">
               Observations
             </label>
             <textarea
               id="observations"
               rows={3}
-              placeholder="Notes libres, incidents, comportements observés…"
-              className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent resize-none"
+              placeholder="Notes libres, incidents, comportements observes..."
+              className="w-full resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-600"
               {...register("observations")}
             />
             {errors.observations && (
@@ -440,7 +410,6 @@ export function DailyForm({
         </div>
       </div>
 
-      {/* ── Erreur serveur (doublon hors fenêtre, permission, etc.) ──────── */}
       {submitError && (
         <div
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
@@ -450,13 +419,7 @@ export function DailyForm({
         </div>
       )}
 
-      {/* ── Bouton principal ─────────────────────────────────────────────── */}
-      <Button
-        type="submit"
-        variant="primary"
-        className="w-full"
-        loading={isSubmitting}
-      >
+      <Button type="submit" variant="primary" className="w-full" loading={isSubmitting}>
         {isEditMode ? "Enregistrer la correction" : "Enregistrer"}
       </Button>
     </form>
