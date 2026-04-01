@@ -21,6 +21,11 @@ export const KPI_THRESHOLDS = {
   FEED_STOCK_WARNING_DAYS:  3, // < 3 jours → warning
   FEED_STOCK_CRITICAL_DAYS: 1, // < 1 jour  → critical
 
+  // Stock médicament (jours de consommation estimée)
+  // Seuil plus élevé car les ruptures médicament ont un impact sanitaire direct.
+  MEDICINE_STOCK_WARNING_DAYS:  7, // < 7 jours → warning
+  MEDICINE_STOCK_CRITICAL_DAYS: 2, // < 2 jours → critical
+
   // Retard vaccination (jours)
   VACCINATION_DELAY_WARNING_DAYS: 2,
 

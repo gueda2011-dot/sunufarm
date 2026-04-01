@@ -28,6 +28,7 @@ export type SubscriptionFeature =
   | "TEAM_MANAGEMENT"
   | "ADVANCED_EXPORTS"
   | "AI_BATCH_ANALYSIS"
+  | "PREDICTIVE_STOCK_ALERTS"
 
 interface PlanDefinition {
   label: string
@@ -65,6 +66,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
       AI_BATCH_ANALYSIS: false,
+      PREDICTIVE_STOCK_ALERTS: false,
     },
   },
   PRO: {
@@ -90,6 +92,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
       AI_BATCH_ANALYSIS: true,
+      PREDICTIVE_STOCK_ALERTS: true,
     },
   },
   BUSINESS: {
@@ -114,6 +117,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       TEAM_MANAGEMENT: true,
       ADVANCED_EXPORTS: true,
       AI_BATCH_ANALYSIS: true,
+      PREDICTIVE_STOCK_ALERTS: true,
     },
   },
 }
@@ -179,5 +183,7 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
       return "Les exports avances sont disponibles dans le plan Business."
     case "AI_BATCH_ANALYSIS":
       return "L'analyse intelligente des lots est disponible a partir du plan Pro."
+    case "PREDICTIVE_STOCK_ALERTS":
+      return "Les alertes predictives de rupture stock sont disponibles a partir du plan Pro."
   }
 }

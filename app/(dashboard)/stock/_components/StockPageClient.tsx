@@ -8,6 +8,8 @@ import type {
   MedicineMovementSummary,
   MedicineStockSummary,
 } from "@/src/actions/stock"
+import type { StockRupturePrediction } from "@/src/lib/predictive-rules"
+import type { StockTrendResult } from "@/src/lib/predictive-snapshots"
 import {
   createFeedStock,
   createMedicineStock,
@@ -32,6 +34,10 @@ type Props = {
   initialFeedMovements: FeedMovementSummary[]
   initialMedicineStocks: MedicineStockSummary[]
   initialMedicineMovements: MedicineMovementSummary[]
+  feedPredictions: Record<string, StockRupturePrediction>
+  medicinePredictions: Record<string, StockRupturePrediction>
+  feedTrends: Record<string, StockTrendResult>
+  medicineTrends: Record<string, StockTrendResult>
 }
 
 type StockTab = "ALIMENT" | "MEDICAMENT"
@@ -84,6 +90,21 @@ function getMedicineAlertClass(stock: MedicineStockSummary) {
   return "bg-green-100 text-green-700"
 }
 
+function getTrendBadge(trend: StockTrendResult | undefined): { label: string; cls: string } | null {
+  if (!trend || trend.trend === "unknown") return null
+  if (trend.trend === "improving")  return { label: "↑ S'ameliore", cls: "bg-green-100 text-green-700" }
+  if (trend.trend === "degrading")  return { label: "↓ Se degrade",  cls: "bg-red-100 text-red-700" }
+  return { label: "→ Stable", cls: "bg-gray-100 text-gray-500" }
+}
+
+function getRuptureClass(alertLevel: string) {
+  switch (alertLevel) {
+    case "critical": return "bg-red-100 text-red-700"
+    case "warning":  return "bg-orange-100 text-orange-700"
+    default:         return "bg-gray-100 text-gray-500"
+  }
+}
+
 export function StockPageClient({
   organizationId,
   canCreateStock,
@@ -95,6 +116,10 @@ export function StockPageClient({
   initialFeedMovements,
   initialMedicineStocks,
   initialMedicineMovements,
+  feedPredictions,
+  medicinePredictions,
+  feedTrends,
+  medicineTrends,
 }: Props) {
   const [tab, setTab] = useState<StockTab>("ALIMENT")
   const [isPending, startTransition] = useTransition()
@@ -289,8 +314,124 @@ export function StockPageClient({
     })
   }
 
+  // Construire la liste unifiée des articles à risque, triée par date de rupture estimée
+  const atRiskItems = useMemo(() => {
+    type RiskItem = {
+      id: string
+      name: string
+      type: "ALIMENT" | "MEDICAMENT"
+      alertLevel: "warning" | "critical"
+      daysToStockout: number | null
+      estimatedRuptureDate: Date | null
+      label: string
+      trend: StockTrendResult | undefined
+    }
+
+    const items: RiskItem[] = []
+
+    for (const stock of feedStocks) {
+      const pred = feedPredictions[stock.id]
+      if (!pred || pred.alertLevel === "ok") continue
+      items.push({
+        id: stock.id,
+        name: stock.name,
+        type: "ALIMENT",
+        alertLevel: pred.alertLevel as "warning" | "critical",
+        daysToStockout: pred.daysToStockout,
+        estimatedRuptureDate: pred.estimatedRuptureDate ?? null,
+        label: pred.label,
+        trend: feedTrends[stock.id],
+      })
+    }
+
+    for (const stock of medicineStocks) {
+      const pred = medicinePredictions[stock.id]
+      if (!pred || pred.alertLevel === "ok") continue
+      items.push({
+        id: stock.id,
+        name: stock.name,
+        type: "MEDICAMENT",
+        alertLevel: pred.alertLevel as "warning" | "critical",
+        daysToStockout: pred.daysToStockout,
+        estimatedRuptureDate: pred.estimatedRuptureDate ?? null,
+        label: pred.label,
+        trend: medicineTrends[stock.id],
+      })
+    }
+
+    // Trier : ruptures imminentes (daysToStockout faible) en premier, null à la fin
+    return items.sort((a, b) => {
+      if (a.daysToStockout === null && b.daysToStockout === null) return 0
+      if (a.daysToStockout === null) return 1
+      if (b.daysToStockout === null) return -1
+      return a.daysToStockout - b.daysToStockout
+    })
+  }, [feedStocks, medicineStocks, feedPredictions, medicinePredictions, feedTrends, medicineTrends])
+
+  const hasCritical = atRiskItems.some((i) => i.alertLevel === "critical")
+
   return (
     <div className="space-y-5">
+      {atRiskItems.length > 0 ? (
+        <div className={cn(
+          "rounded-2xl border",
+          hasCritical ? "border-red-200 bg-red-50" : "border-orange-200 bg-orange-50"
+        )}>
+          <div className={cn(
+            "flex items-center justify-between border-b px-4 py-3",
+            hasCritical ? "border-red-100" : "border-orange-100"
+          )}>
+            <div>
+              <p className={cn("text-sm font-semibold", hasCritical ? "text-red-800" : "text-orange-800")}>
+                {hasCritical
+                  ? `${atRiskItems.filter((i) => i.alertLevel === "critical").length} rupture${atRiskItems.filter((i) => i.alertLevel === "critical").length > 1 ? "s" : ""} imminente${atRiskItems.filter((i) => i.alertLevel === "critical").length > 1 ? "s" : ""}`
+                  : `${atRiskItems.length} article${atRiskItems.length > 1 ? "s" : ""} en risque de rupture`}
+              </p>
+              <p className={cn("text-xs opacity-75", hasCritical ? "text-red-700" : "text-orange-700")}>
+                Prevision sur 14 jours · tries par urgence
+              </p>
+            </div>
+          </div>
+          <div className="divide-y divide-red-100/60 px-4">
+            {atRiskItems.map((item) => {
+              const trendBadge = getTrendBadge(item.trend)
+              const ruptureDateStr = item.estimatedRuptureDate
+                ? new Date(item.estimatedRuptureDate).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })
+                : null
+              return (
+                <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                  <div className="flex flex-wrap items-center gap-2 min-w-0">
+                    <span className={cn(
+                      "rounded-full px-2 py-0.5 text-xs font-medium",
+                      item.alertLevel === "critical" ? "bg-red-200 text-red-800" : "bg-orange-200 text-orange-800"
+                    )}>
+                      {item.type === "ALIMENT" ? "Aliment" : "Medicament"}
+                    </span>
+                    <span className="text-sm font-medium text-gray-900 truncate">{item.name}</span>
+                    {trendBadge ? (
+                      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", trendBadge.cls)}>
+                        {trendBadge.label}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-right">
+                    <span className={cn(
+                      "font-semibold",
+                      item.alertLevel === "critical" ? "text-red-700" : "text-orange-700"
+                    )}>
+                      {item.label}
+                    </span>
+                    {ruptureDateStr ? (
+                      <span className="text-gray-500">→ {ruptureDateStr}</span>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {canCreateStock ? (
         <div className="flex justify-end">
           <button
@@ -685,6 +826,28 @@ export function StockPageClient({
                           >
                             {stock.isBelowAlert ? "Stock bas" : "OK"}
                           </span>
+                          {feedPredictions[stock.id] && feedPredictions[stock.id].alertLevel !== "ok" ? (
+                            <span
+                              className={cn(
+                                "rounded-full px-2.5 py-1 text-xs font-medium",
+                                getRuptureClass(feedPredictions[stock.id].alertLevel)
+                              )}
+                              title={`Conso moy : ${feedPredictions[stock.id].avgDailyConsumption} kg/j`}
+                            >
+                              {feedPredictions[stock.id].label}
+                            </span>
+                          ) : null}
+                          {(() => {
+                            const trendBadge = getTrendBadge(feedTrends[stock.id])
+                            return trendBadge ? (
+                              <span
+                                className={cn("rounded-full px-2.5 py-1 text-xs font-medium", trendBadge.cls)}
+                                title="Tendance sur 7 jours"
+                              >
+                                {trendBadge.label}
+                              </span>
+                            ) : null
+                          })()}
                         </div>
 
                         <p className="mt-1 text-sm text-gray-500">
@@ -863,6 +1026,28 @@ export function StockPageClient({
                         >
                           {getMedicineAlertLabel(stock)}
                         </span>
+                        {medicinePredictions[stock.id] && medicinePredictions[stock.id].alertLevel !== "ok" ? (
+                          <span
+                            className={cn(
+                              "rounded-full px-2.5 py-1 text-xs font-medium",
+                              getRuptureClass(medicinePredictions[stock.id].alertLevel)
+                            )}
+                            title={`Conso moy : ${medicinePredictions[stock.id].avgDailyConsumption} ${medicinePredictions[stock.id].unit}/j`}
+                          >
+                            {medicinePredictions[stock.id].label}
+                          </span>
+                        ) : null}
+                        {(() => {
+                          const trendBadge = getTrendBadge(medicineTrends[stock.id])
+                          return trendBadge ? (
+                            <span
+                              className={cn("rounded-full px-2.5 py-1 text-xs font-medium", trendBadge.cls)}
+                              title="Tendance sur 7 jours"
+                            >
+                              {trendBadge.label}
+                            </span>
+                          ) : null
+                        })()}
                       </div>
 
                       <div className="mt-3 grid gap-2 text-sm text-gray-600 sm:grid-cols-2 lg:grid-cols-4">

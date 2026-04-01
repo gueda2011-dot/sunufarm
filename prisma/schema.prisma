@@ -1265,3 +1265,43 @@ model AIBatchAnalysis {
   @@index([createdById, createdAt])
   @@index([organizationId, inputHash, accessTier])
 }
+
+// =============================================================================
+// PRÉDICTIONS STOCK — SNAPSHOTS
+// =============================================================================
+
+/**
+ * Historique des prédictions de rupture stock.
+ *
+ * Un snapshot est créé (ou mis à jour) à chaque exécution du cron notifications.
+ * La clé naturelle est (organizationId, predictionType, entityId, snapshotDate)
+ * ce qui garantit au plus un snapshot par stock par jour.
+ *
+ * predictionType : "FEED_STOCK" | "MEDICINE_STOCK"
+ * alertLevel     : "ok" | "warning" | "critical"
+ * modelVersion   : identifiant de la version des règles utilisées (ex: "v1.0")
+ *                  permet de distinguer les prédictions calculées avec des règles différentes
+ * features       : JSON libre pour persister les features brutes (avgDailyConsumption, windowDays...)
+ */
+model PredictiveSnapshot {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  predictionType      String   // "FEED_STOCK" | "MEDICINE_STOCK"
+  entityId            String   // feedStockId ou medicineStockId
+  snapshotDate        DateTime @db.Date // date de la prise de snapshot (1 par jour)
+  alertLevel           String    // "ok" | "warning" | "critical"
+  daysToStockout       Float?    // null = pas de consommation connue
+  estimatedRuptureDate DateTime? @db.Date // date calendaire estimée de rupture (UTC)
+  avgDailyConsumption  Float     @default(0)
+  unit                String   // "kg" ou unité médicament
+  label               String   // label lisible au moment du snapshot
+  features            Json     // features brutes : { windowDays, totalConsumed, ... }
+  modelVersion        String   @default("v1.0")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([organizationId, predictionType, entityId, snapshotDate])
+  @@index([organizationId, predictionType, entityId, snapshotDate])
+  @@index([organizationId, snapshotDate])
+  @@index([alertLevel, snapshotDate])
+}

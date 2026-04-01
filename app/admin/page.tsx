@@ -32,6 +32,7 @@ import { AdminPaymentTransactions } from "./_components/AdminPaymentTransactions
 import { AdminStockIntegrityPanel } from "./_components/AdminStockIntegrityPanel"
 import { AdminTriggerNotificationsButton } from "./_components/AdminTriggerNotificationsButton"
 import { AdminUnverifiedUsersPanel } from "./_components/AdminUnverifiedUsersPanel"
+import { AdminPredictiveCriticalPanel } from "./_components/AdminPredictiveCriticalPanel"
 
 export const metadata: Metadata = { title: "Admin Plateforme" }
 
@@ -136,6 +137,7 @@ export default async function AdminPage() {
     failedWebhookEventsLast24h,
     auditLogsLast24h,
     stockOrphanIssuesResult,
+    criticalStockSnapshots,
   ] = await Promise.all([
     prisma.organization.findMany({
       where: {
@@ -290,6 +292,34 @@ export default async function AdminPage() {
       },
     }),
     getStockOrphanIssues(),
+    // Snapshots prédictifs critiques ou warning du jour (ou dernier snapshot disponible par org)
+    prisma.$queryRaw<Array<{
+      organizationId: string
+      predictionType: string
+      entityId: string
+      alertLevel: string
+      daysToStockout: number | null
+      estimatedRuptureDate: Date | null
+      label: string
+      stockName: string | null
+    }>>`
+      SELECT DISTINCT ON (ps."organizationId", ps."entityId")
+        ps."organizationId",
+        ps."predictionType",
+        ps."entityId",
+        ps."alertLevel",
+        ps."daysToStockout",
+        ps."estimatedRuptureDate",
+        ps."label",
+        COALESCE(fs.name, ms.name) AS "stockName"
+      FROM "PredictiveSnapshot" ps
+      LEFT JOIN "FeedStock" fs
+        ON ps."predictionType" = 'FEED_STOCK' AND fs.id = ps."entityId"
+      LEFT JOIN "MedicineStock" ms
+        ON ps."predictionType" = 'MEDICINE_STOCK' AND ms.id = ps."entityId"
+      WHERE ps."alertLevel" IN ('critical', 'warning')
+      ORDER BY ps."organizationId", ps."entityId", ps."snapshotDate" DESC
+    `,
   ])
 
   const visibleOrganizations = organizations.filter((org) => org.slug !== "sunufarm-platform")
@@ -325,6 +355,45 @@ export default async function AdminPage() {
     critical: healthReport.checks.filter((check) => check.status === "critical").length,
   }
   const stockOrphanIssues = stockOrphanIssuesResult.success ? stockOrphanIssuesResult.data : []
+
+  // Construire le résumé prédictif par organisation
+  const orgNameById = new Map(visibleOrganizations.map((o) => [o.id, o.name]))
+  const snapshotsByOrg = new Map<string, typeof criticalStockSnapshots>()
+  for (const snap of criticalStockSnapshots) {
+    const list = snapshotsByOrg.get(snap.organizationId) ?? []
+    list.push(snap)
+    snapshotsByOrg.set(snap.organizationId, list)
+  }
+  const criticalOrgSummaries = Array.from(snapshotsByOrg.entries())
+    .map(([orgId, snaps]) => {
+      const criticalCount = snaps.filter((s) => s.alertLevel === "critical").length
+      const warningCount  = snaps.filter((s) => s.alertLevel === "warning").length
+      // Le plus urgent = plus petit daysToStockout (null à la fin)
+      const sorted = [...snaps].sort((a, b) => {
+        if (a.daysToStockout === null) return 1
+        if (b.daysToStockout === null) return -1
+        return a.daysToStockout - b.daysToStockout
+      })
+      const mostUrgent = sorted[0]
+      // Retrouver le nom du stock via les feedStocks / medicineStocks n'est pas disponible ici
+      // On affiche l'entityId de manière lisible (sera remplacé quand on aura un join)
+      return {
+        organizationId:       orgId,
+        organizationName:     orgNameById.get(orgId) ?? orgId,
+        criticalCount,
+        warningCount,
+        mostUrgentName:       mostUrgent.stockName ?? mostUrgent.label,
+        mostUrgentRuptureDate: mostUrgent.estimatedRuptureDate,
+        mostUrgentDays:       mostUrgent.daysToStockout,
+      }
+    })
+    .filter((s) => s.criticalCount > 0) // afficher uniquement les orgs avec du critical
+    .sort((a, b) => {
+      // Trier par urgence : ceux avec le plus petit daysToStockout en premier
+      const aMin = a.mostUrgentDays ?? Infinity
+      const bMin = b.mostUrgentDays ?? Infinity
+      return aMin - bMin
+    })
   const verificationIdentifiers = unverifiedUsers.map((user) => `verify:${user.email}`)
   const verificationTokens = verificationIdentifiers.length > 0
     ? await prisma.verificationToken.findMany({
@@ -582,6 +651,8 @@ export default async function AdminPage() {
         />
 
         <AdminStockIntegrityPanel issues={stockOrphanIssues} />
+
+        <AdminPredictiveCriticalPanel orgs={criticalOrgSummaries} />
 
         <section className="rounded-3xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-6 py-5">

@@ -44,6 +44,7 @@ const FEATURE_LABELS = [
   { key: "REPORTS", label: "Rapports mensuels" },
   { key: "PROFITABILITY", label: "Rentabilite par lot" },
   { key: "AI_BATCH_ANALYSIS", label: "Analyse AI des lots" },
+  { key: "PREDICTIVE_STOCK_ALERTS", label: "Prediction de rupture stock" },
   { key: "ALERTS", label: "Alertes intelligentes" },
   { key: "MULTI_FARM", label: "Plusieurs fermes" },
   { key: "TEAM_MANAGEMENT", label: "Gestion d'equipe" },

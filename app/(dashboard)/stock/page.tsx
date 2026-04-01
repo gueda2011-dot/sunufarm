@@ -11,6 +11,9 @@ import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import prisma from "@/src/lib/prisma"
 import { canAccessFarm } from "@/src/lib/permissions"
+import { getStockPredictions, getStockTrends } from "@/src/actions/predictive"
+import { hasPlanFeature } from "@/src/lib/subscriptions"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { StockPageClient } from "./_components/StockPageClient"
 
 export const metadata: Metadata = { title: "Stock" }
@@ -30,7 +33,10 @@ export default async function StockPage() {
 
   const { organizationId, role } = activeMembership
 
-  const [feedStocksResult, feedMovementsResult, medicineStocksResult, medicineMovementsResult, farms, feedTypes, batches, membership] =
+  const subscription = await getOrganizationSubscription(organizationId)
+  const canSeePredictiveStockAlerts = hasPlanFeature(subscription.plan, "PREDICTIVE_STOCK_ALERTS")
+
+  const [feedStocksResult, feedMovementsResult, medicineStocksResult, medicineMovementsResult, farms, feedTypes, batches, membership, predictionsResult] =
     await Promise.all([
       getFeedStocks({ organizationId }),
       getFeedMovements({ organizationId, limit: 20 }),
@@ -54,7 +60,14 @@ export default async function StockPage() {
         where: { userId: session.user.id, organizationId },
         select: { farmPermissions: true },
       }),
+      canSeePredictiveStockAlerts
+        ? getStockPredictions(organizationId)
+        : Promise.resolve({ success: true as const, data: { feed: {}, medicine: {} } }),
     ])
+
+  const trendsResult = canSeePredictiveStockAlerts
+    ? await getStockTrends(organizationId)
+    : { success: true as const, data: { feed: {}, medicine: {} } }
 
   const feedStocks = feedStocksResult.success ? feedStocksResult.data : []
   const feedMovements = feedMovementsResult.success ? feedMovementsResult.data : []
@@ -66,6 +79,10 @@ export default async function StockPage() {
   )
   const canCreateStock = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(role)
   const canCreateMovement = ["SUPER_ADMIN", "OWNER", "MANAGER", "TECHNICIAN"].includes(role)
+  const feedPredictions = predictionsResult.success ? predictionsResult.data.feed : {}
+  const medicinePredictions = predictionsResult.success ? predictionsResult.data.medicine : {}
+  const feedTrends = trendsResult.success ? trendsResult.data.feed : {}
+  const medicineTrends = trendsResult.success ? trendsResult.data.medicine : {}
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -87,6 +104,10 @@ export default async function StockPage() {
         initialFeedMovements={feedMovements}
         initialMedicineStocks={medicineStocks}
         initialMedicineMovements={medicineMovements}
+        feedPredictions={feedPredictions}
+        medicinePredictions={medicinePredictions}
+        feedTrends={feedTrends}
+        medicineTrends={medicineTrends}
       />
     </div>
   )

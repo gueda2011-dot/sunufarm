@@ -63,6 +63,8 @@ import {
   requiredIdSchema,
 } from "@/src/lib/validators"
 import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
+import { getStockPredictionsInternal } from "@/src/actions/predictive"
+import { upsertOrganizationSnapshots } from "@/src/lib/predictive-snapshots"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -873,5 +875,113 @@ export async function generateNotificationsForOrganization(
     // Erreur silencieuse
   }
 
+  // Signal 7 — Rupture stock prédictive (aliment + médicament en critical uniquement)
+  try {
+    totalCreated += await checkStockRuptureAlerts(organizationId, userIds)
+  } catch {
+    // Erreur silencieuse
+  }
+
+  // Snapshot prédictif — persister les prédictions du jour pour le suivi de tendance
+  try {
+    const predictions = await getStockPredictionsInternal(organizationId)
+    await upsertOrganizationSnapshots(
+      prisma,
+      organizationId,
+      predictions.feed,
+      predictions.medicine,
+    )
+  } catch {
+    // Erreur silencieuse — ne bloque pas le cron
+  }
+
   return { created: totalCreated, targetUserIds: userIds }
+}
+
+// ---------------------------------------------------------------------------
+// Signal 7 — Rupture de stock prédictive (critical uniquement)
+// ---------------------------------------------------------------------------
+
+/**
+ * Génère des notifications pour les stocks aliment et médicament dont la
+ * prédiction de rupture est "critical" (daysToStockout <= seuil critique).
+ *
+ * Seuls les niveaux "critical" sont notifiés ici pour limiter le bruit —
+ * les niveaux "warning" sont visibles directement sur la page stock.
+ */
+async function checkStockRuptureAlerts(
+  organizationId: string,
+  userIds: string[],
+): Promise<number> {
+  const predictions = await getStockPredictionsInternal(organizationId)
+
+  // Récupérer les noms des stocks pour construire les messages
+  const feedStockIds    = Object.keys(predictions.feed).filter((id) => predictions.feed[id].alertLevel === "critical")
+  const medicineStockIds = Object.keys(predictions.medicine).filter((id) => predictions.medicine[id].alertLevel === "critical")
+
+  if (feedStockIds.length === 0 && medicineStockIds.length === 0) return 0
+
+  const [feedStocks, medicineStocks] = await Promise.all([
+    feedStockIds.length > 0
+      ? prisma.feedStock.findMany({
+          where:  { id: { in: feedStockIds }, organizationId },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
+    medicineStockIds.length > 0
+      ? prisma.medicineStock.findMany({
+          where:  { id: { in: medicineStockIds }, organizationId },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
+  ])
+
+  const feedNameMap     = Object.fromEntries(feedStocks.map((s) => [s.id, s.name]))
+  const medicineNameMap = Object.fromEntries(medicineStocks.map((s) => [s.id, s.name]))
+
+  const feedCandidates = feedStockIds.map((id) => {
+    const pred = predictions.feed[id]
+    const days = pred.daysToStockout !== null ? Math.round(pred.daysToStockout * 10) / 10 : 0
+    return {
+      title:      "Rupture aliment imminente",
+      message:    `Le stock "${feedNameMap[id] ?? id}" sera epuise dans environ ${days} jour(s) au rythme actuel de consommation.`,
+      resourceId: id,
+      metadata:   { daysToStockout: days, avgDailyConsumption: pred.avgDailyConsumption },
+    }
+  })
+
+  const medicineCandidates = medicineStockIds.map((id) => {
+    const pred = predictions.medicine[id]
+    const days = pred.daysToStockout !== null ? Math.round(pred.daysToStockout * 10) / 10 : 0
+    return {
+      title:      "Rupture medicament imminente",
+      message:    `Le stock "${medicineNameMap[id] ?? id}" sera epuise dans environ ${days} jour(s) au rythme actuel de consommation.`,
+      resourceId: id,
+      metadata:   { daysToStockout: days, avgDailyConsumption: pred.avgDailyConsumption },
+    }
+  })
+
+  let created = 0
+
+  if (feedCandidates.length > 0) {
+    created += await createNotificationsIfAbsent({
+      organizationId,
+      userIds,
+      type:         NotificationType.STOCK_ALIMENT_CRITIQUE,
+      resourceType: "FEED_STOCK_RUPTURE",
+      candidates:   feedCandidates,
+    })
+  }
+
+  if (medicineCandidates.length > 0) {
+    created += await createNotificationsIfAbsent({
+      organizationId,
+      userIds,
+      type:         NotificationType.AUTRE,
+      resourceType: "MEDICINE_STOCK_RUPTURE",
+      candidates:   medicineCandidates,
+    })
+  }
+
+  return created
 }
