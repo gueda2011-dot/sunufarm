@@ -14,6 +14,7 @@
  */
 
 import { useState, useRef, useEffect } from "react"
+import Link from "next/link"
 import { signOut } from "next-auth/react"
 import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import { LogOut, User, ChevronDown } from "lucide-react"
@@ -178,15 +179,14 @@ export function Header({
                 <p className="truncate text-xs text-gray-500">{userEmail}</p>
               </div>
 
-              <button
-                type="button"
+              <Link
+                href="/profile"
+                onClick={() => setDropdownOpen(false)}
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                disabled
               >
                 <User className="h-4 w-4" aria-hidden="true" />
                 Mon profil
-                <span className="ml-auto text-xs text-gray-400">V2</span>
-              </button>
+              </Link>
 
               <button
                 type="button"
