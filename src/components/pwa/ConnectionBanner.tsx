@@ -1,25 +1,24 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
 import { CloudOff, Wifi } from "lucide-react"
 
+function subscribe(callback: () => void) {
+  window.addEventListener("online", callback)
+  window.addEventListener("offline", callback)
+
+  return () => {
+    window.removeEventListener("online", callback)
+    window.removeEventListener("offline", callback)
+  }
+}
+
+function getOnlineSnapshot() {
+  return navigator.onLine
+}
+
 export function ConnectionBanner() {
-  const [isOnline, setIsOnline] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    setIsOnline(navigator.onLine)
-
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
-
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-
-    return () => {
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [])
+  const isOnline = useSyncExternalStore(subscribe, getOnlineSnapshot, () => null)
 
   if (isOnline === null) return null
 

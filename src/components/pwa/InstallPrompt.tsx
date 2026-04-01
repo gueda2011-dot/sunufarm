@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { Download, Share2 } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
 
@@ -9,19 +9,27 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>
 }
 
+function subscribeToInstallAvailability() {
+  return () => {}
+}
+
+function getIosInstallHintSnapshot() {
+  const userAgent = window.navigator.userAgent.toLowerCase()
+  const isIos = /iphone|ipad|ipod/.test(userAgent)
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+    || ("standalone" in window.navigator && Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone))
+
+  return isIos && !isStandalone
+}
+
 export function InstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [dismissed, setDismissed] = useState(false)
-  const [showIosHint, setShowIosHint] = useState(false)
-
-  useEffect(() => {
-    const userAgent = window.navigator.userAgent.toLowerCase()
-    const isIos = /iphone|ipad|ipod/.test(userAgent)
-    const isStandalone = window.matchMedia("(display-mode: standalone)").matches
-      || ("standalone" in window.navigator && Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone))
-
-    setShowIosHint(isIos && !isStandalone)
-  }, [])
+  const showIosHint = useSyncExternalStore(
+    subscribeToInstallAvailability,
+    getIosInstallHintSnapshot,
+    () => false,
+  )
 
   useEffect(() => {
     const handler = (event: Event) => {

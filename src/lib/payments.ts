@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual, randomUUID } from "node:crypto"
 import prisma from "@/src/lib/prisma"
 import { getServerEnv } from "@/src/lib/env"
+import { createAdminEventNotifications } from "@/src/lib/admin-event-notifications"
 import {
   type Prisma,
   PaymentMethod,
@@ -301,10 +302,11 @@ export async function confirmPaymentTransaction(input: {
   providerTransactionId?: string | null
   providerStatus?: string | null
   providerPayload?: unknown
+  excludeUserIds?: string[]
 }) {
   const now = new Date()
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const transaction = await tx.paymentTransaction.findUnique({
       where: { id: input.transactionId },
       select: {
@@ -312,6 +314,13 @@ export async function confirmPaymentTransaction(input: {
         status: true,
         subscriptionPaymentId: true,
         organizationId: true,
+        requestedPlan: true,
+        amountFcfa: true,
+        organization: {
+          select: {
+            name: true,
+          },
+        },
       },
     })
 
@@ -332,6 +341,17 @@ export async function confirmPaymentTransaction(input: {
         providerStatus: input.providerStatus ?? undefined,
         providerPayload: input.providerPayload ?? undefined,
         confirmedAt: now,
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        requestedPlan: true,
+        amountFcfa: true,
+        organization: {
+          select: {
+            name: true,
+          },
+        },
       },
     })
 
@@ -379,20 +399,80 @@ export async function confirmPaymentTransaction(input: {
 
     return updatedTransaction
   })
+
+  await createAdminEventNotifications({
+    organizationId: result.organizationId,
+    title: "Paiement confirme",
+    message:
+      `${result.organization.name} a un paiement confirme pour le plan ${result.requestedPlan} ` +
+      `(${result.amountFcfa.toLocaleString("fr-SN")} FCFA).`,
+    resourceType: "PAYMENT_TRANSACTION_CONFIRMED",
+    resourceId: result.id,
+    link: `/admin/organizations/${result.organizationId}`,
+    excludeUserIds: input.excludeUserIds,
+    metadata: {
+      transactionId: result.id,
+      requestedPlan: result.requestedPlan,
+      amountFcfa: result.amountFcfa,
+      providerStatus: input.providerStatus ?? null,
+    },
+  })
+
+  return result
 }
 
 export async function failPaymentTransaction(input: {
   transactionId: string
+  status?: PaymentTransactionStatus
   providerStatus?: string | null
   providerPayload?: unknown
 }) {
-  return prisma.paymentTransaction.update({
+  const finalStatus = input.status ?? PaymentTransactionStatus.FAILED
+  const result = await prisma.paymentTransaction.update({
     where: { id: input.transactionId },
     data: {
-      status: PaymentTransactionStatus.FAILED,
+      status: finalStatus,
       providerStatus: input.providerStatus ?? undefined,
       providerPayload: input.providerPayload ?? undefined,
       failedAt: new Date(),
     },
+    select: {
+      id: true,
+      organizationId: true,
+      requestedPlan: true,
+      amountFcfa: true,
+      status: true,
+      organization: {
+        select: {
+          name: true,
+        },
+      },
+    },
   })
+
+  const statusLabel = finalStatus === PaymentTransactionStatus.EXPIRED
+    ? "expire"
+    : finalStatus === PaymentTransactionStatus.CANCELED
+      ? "annule"
+      : "echoue"
+
+  await createAdminEventNotifications({
+    organizationId: result.organizationId,
+    title: "Paiement non abouti",
+    message:
+      `${result.organization.name} a un paiement ${statusLabel} pour le plan ${result.requestedPlan} ` +
+      `(${result.amountFcfa.toLocaleString("fr-SN")} FCFA).`,
+    resourceType: `PAYMENT_TRANSACTION_${result.status}`,
+    resourceId: result.id,
+    link: `/admin/organizations/${result.organizationId}`,
+    metadata: {
+      transactionId: result.id,
+      requestedPlan: result.requestedPlan,
+      amountFcfa: result.amountFcfa,
+      providerStatus: input.providerStatus ?? null,
+      status: result.status,
+    },
+  })
+
+  return result
 }

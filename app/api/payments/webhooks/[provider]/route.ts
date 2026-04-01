@@ -185,6 +185,10 @@ export async function POST(
       ) {
         await failPaymentTransaction({
           transactionId: resolvedTransactionId,
+          status:
+            payload.data.checkout_status === "expired"
+              ? PaymentTransactionStatus.EXPIRED
+              : PaymentTransactionStatus.FAILED,
           providerStatus: payload.data.payment_status ?? payload.data.checkout_status ?? payload.type,
           providerPayload: parsedJson,
         })
@@ -261,6 +265,7 @@ export async function POST(
     ) {
       await failPaymentTransaction({
         transactionId: payload.transactionId,
+        status: payload.status,
         providerStatus: payload.status,
         providerPayload: parsedJson,
       })

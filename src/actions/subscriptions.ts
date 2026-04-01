@@ -42,6 +42,7 @@ import {
   resolveAiCreditsRemaining,
 } from "@/src/lib/subscription-rules"
 import { getAdminBaseUrl, sendAdminAlertEmail } from "@/src/lib/admin-alerts"
+import { createAdminEventNotifications } from "@/src/lib/admin-event-notifications"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -93,6 +94,10 @@ export async function createSubscriptionPaymentRequest(
     const accessResult = await requireOrganizationModuleContext(organizationId, "SETTINGS")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { name: true },
+    })
 
     const currentSubscription = await getOrganizationSubscription(organizationId)
     if (currentSubscription.plan === requestedPlan) {
@@ -167,6 +172,25 @@ export async function createSubscriptionPaymentRequest(
       ],
       actionLabel: "Voir l'organisation",
       actionUrl: getAdminBaseUrl(`/admin/organizations/${organizationId}`),
+    })
+
+    await createAdminEventNotifications({
+      organizationId,
+      title: "Nouvelle demande de paiement",
+      message:
+        `${organization?.name ?? "Une organisation"} a demande le plan ${requestedPlan} ` +
+        `pour ${PLAN_DEFINITIONS[requestedPlan].monthlyPriceFcfa.toLocaleString("fr-SN")} FCFA.`,
+      resourceType: "SUBSCRIPTION_PAYMENT_REQUEST",
+      resourceId: payment.id,
+      link: `/admin/organizations/${organizationId}`,
+      excludeUserIds: [actorId],
+      metadata: {
+        requestedPlan,
+        amountFcfa: PLAN_DEFINITIONS[requestedPlan].monthlyPriceFcfa,
+        paymentMethod,
+        paymentId: payment.id,
+        transactionId: transaction.id,
+      },
     })
 
     revalidatePath("/settings")
@@ -597,6 +621,7 @@ export async function adminConfirmPaymentTransaction(
       select: {
         id: true,
         organizationId: true,
+        requestedPlan: true,
       },
     })
 
@@ -608,6 +633,7 @@ export async function adminConfirmPaymentTransaction(
     await confirmPaymentTransaction({
       transactionId: transaction.id,
       providerStatus: "MANUAL_CONFIRMED",
+      excludeUserIds: [actorId],
     })
 
     await createAuditLog({
@@ -672,6 +698,7 @@ export async function adminRejectPaymentTransaction(
         id: true,
         organizationId: true,
         subscriptionPaymentId: true,
+        requestedPlan: true,
       },
     })
 
@@ -721,6 +748,21 @@ export async function adminRejectPaymentTransaction(
       ],
       actionLabel: "Voir l'organisation",
       actionUrl: getAdminBaseUrl(`/admin/organizations/${transaction.organizationId}`),
+    })
+
+    await createAdminEventNotifications({
+      organizationId: transaction.organizationId,
+      title: "Paiement rejete",
+      message: `La transaction ${transaction.id} pour le plan ${transaction.requestedPlan} a ete rejetee.`,
+      resourceType: "PAYMENT_TRANSACTION_REJECTED",
+      resourceId: transaction.id,
+      link: `/admin/organizations/${transaction.organizationId}`,
+      excludeUserIds: [actorId],
+      metadata: {
+        transactionId: transaction.id,
+        requestedPlan: transaction.requestedPlan,
+        status: "MANUAL_REJECTED",
+      },
     })
 
     revalidatePath("/admin")
