@@ -49,7 +49,7 @@ interface PlanDefinition {
 export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
   BASIC: {
     label: "Basic",
-    monthlyPriceFcfa: 5_000,
+    monthlyPriceFcfa: 3_000,
     promise: "Mettre de l'ordre dans l'elevage au quotidien.",
     audience: "Petits eleveurs et exploitations en demarrage",
     valueHeadline: "Commencer a suivre proprement son elevage",

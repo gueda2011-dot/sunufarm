@@ -126,7 +126,7 @@ Le produit est pense pour des usages concrets, avec une interface simple et une 
 
 ## Pricing
 
-### Basic - 5 000 FCFA / mois
+### Basic - 3 000 FCFA / mois
 
 Pour les petits elevages qui veulent digitaliser leur suivi de base.
 
