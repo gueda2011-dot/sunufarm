@@ -71,6 +71,7 @@ export interface BatchProfitability {
   profitFcfa:          number          // revenue - totalCost (peut être négatif)
   marginRate:          number | null   // (profit / totalCost) × 100, null si coûts = 0
   costPerBird:         number | null   // totalCost / entryCount, null si entryCount = 0
+  breakEvenSalePricePerLiveBirdFcfa: number | null // prix moyen minimum par sujet vivant pour couvrir les coûts
 
   // Opérationnel
   totalMortality:      number

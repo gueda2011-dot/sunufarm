@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-01 (Session 65)
+> Derniere mise a jour : 2026-04-01 (Session 66)
 
 ---
 
@@ -30,6 +30,7 @@
 - Une V1 predictive `rupture stock` existe maintenant sur `stock`, avec gating abonnement `PRO / BUSINESS`, snapshots et tendances
 - Une V1 predictive `risque mortalite 7 jours` existe maintenant sur les lots actifs, avec snapshots, tendance et notifications critiques
 - Une V1 predictive `projection marge finale lot` existe maintenant sur les lots actifs, avec benchmark interne, snapshots, tendance et alertes critiques
+- Une V1 `prix minimum de vente` existe maintenant sur la rentabilite lot pour les plans `PRO / BUSINESS`
 - Une V1 `Business` existe maintenant pour le pilotage global exploitation, reservee au plan `BUSINESS`
 - La couche `Business` a deja une phase de polissage produit et de differenciation conversion, sans changer son architecture
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
@@ -45,6 +46,7 @@
 | Prediction stock | V1 fonctionnelle, avec seuils, tendances, snapshots et vue admin |
 | Prediction mortalite | V1 fonctionnelle, avec score 7 jours, snapshots, tendance et alertes critiques |
 | Prediction marge | V1 fonctionnelle, avec projection finale, tendance, benchmark interne et alertes critiques |
+| Prix minimum de vente | V1 fonctionnelle sur la rentabilite lot, reservee a `PRO / BUSINESS` |
 | Business dashboard | V1 fonctionnelle, avec KPI exploitation, priorisation des risques, recommandations et mise en scene produit |
 | Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
 | Depenses / finances | Fonctionnel, avec creation offline V1 |
@@ -92,6 +94,32 @@
 | Permissions ferme | JSON dans `UserOrganization.farmPermissions` | MVP - table separee en V2 |
 | Motif mortalite | Optionnel, defaut "Non precise" | Decision terrain validee |
 | Types de ventes MVP | Poulets vifs, oeufs, fientes uniquement | Decision produit validee |
+
+---
+
+## Session 66 - 2026-04-01
+
+### Travail effectue
+
+- Extension du calcul de rentabilite lot dans `src/lib/batch-profitability.ts` pour exposer un `prix minimum de vente`
+- Branchement de cette valeur dans `src/actions/profitability.ts`
+- Ajout de l'affichage `Prix minimum de vente` dans `app/(dashboard)/batches/[id]/_components/ProfitabilityCard.tsx`
+- Positionnement de cette nouvelle lecture dans le gate existant `PROFITABILITY`, donc reservee aux plans `PRO` et `BUSINESS`
+- Mise a jour des tests unitaires de rentabilite dans `src/lib/batch-profitability.test.ts`
+- Mise a jour de `README.md` pour documenter cette nouvelle valeur produit
+
+### Resultat
+
+- La carte de rentabilite parle maintenant un langage plus metier et plus commercial
+- Un eleveur peut voir plus directement a partir de quel prix moyen vendre ses poulets pour couvrir les couts du lot
+- La valeur percue du plan `PRO` devient plus concrete en demo, car le logiciel ne montre plus seulement la marge mais aussi un repere de vente exploitable
+- Validation ciblee relancee : `npx vitest run src/lib/batch-profitability.test.ts --configLoader native` passe
+
+### Prochaine session recommandee
+
+- Affiner ensuite le calcul en distinguant, si besoin, `sujets vivants`, `sujets reellement vendables` et `prix cible avec marge`
+- Ajouter eventuellement un second indicateur de type `prix conseille` ou `prix cible rentable`
+- Continuer le travail de packaging commercial pour rendre la valeur `PRO` encore plus evidente en demonstration
 
 ---
 

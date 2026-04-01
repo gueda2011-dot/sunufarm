@@ -14,6 +14,7 @@ export interface ComputedBatchProfitability extends BatchProfitabilitySnapshot {
   profitFcfa: number
   marginRate: number | null
   costPerBird: number | null
+  breakEvenSalePricePerLiveBirdFcfa: number | null
   mortalityRatePct: number | null
   liveCount: number
 }
@@ -34,6 +35,10 @@ export function computeBatchProfitability(
     costPerBird:
       totalCostFcfa > 0 && snapshot.entryCount > 0
         ? Math.round(totalCostFcfa / snapshot.entryCount)
+        : null,
+    breakEvenSalePricePerLiveBirdFcfa:
+      totalCostFcfa > 0 && liveCountValue > 0
+        ? Math.ceil(totalCostFcfa / liveCountValue)
         : null,
     mortalityRatePct,
     liveCount: liveCountValue,

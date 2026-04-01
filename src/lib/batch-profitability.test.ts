@@ -23,6 +23,7 @@ describe("batch-profitability", () => {
       profitFcfa: 70000,
       marginRate: 28,
       costPerBird: 2500,
+      breakEvenSalePricePerLiveBirdFcfa: 2605,
       mortalityRatePct: 4,
       liveCount: 96,
     })
@@ -41,6 +42,7 @@ describe("batch-profitability", () => {
     expect(result.profitFcfa).toBe(-40000)
     expect(result.marginRate).toBeCloseTo(-30.77, 2)
     expect(result.liveCount).toBe(48)
+    expect(result.breakEvenSalePricePerLiveBirdFcfa).toBe(2709)
   })
 
   it("renvoie des ratios nuls quand il n y a pas assez de base de calcul", () => {
@@ -58,6 +60,7 @@ describe("batch-profitability", () => {
       profitFcfa: 0,
       marginRate: null,
       costPerBird: null,
+      breakEvenSalePricePerLiveBirdFcfa: null,
       mortalityRatePct: null,
       liveCount: 0,
     })

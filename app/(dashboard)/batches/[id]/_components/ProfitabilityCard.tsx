@@ -39,6 +39,8 @@ export function ProfitabilityCard({ profitability }: Props) {
     profitFcfa,
     marginRate,
     costPerBird,
+    breakEvenSalePricePerLiveBirdFcfa,
+    liveCount,
   } = profitability
 
   const isProfit   = profitFcfa >= 0
@@ -108,6 +110,26 @@ export function ProfitabilityCard({ profitability }: Props) {
 
       {/* ── Détail des charges ────────────────────────────────────────────── */}
       <div className="rounded-xl border border-gray-100 bg-white divide-y divide-gray-50 text-sm">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div>
+            <span className="text-gray-500">Prix minimum de vente</span>
+            <p className="mt-0.5 text-xs text-gray-400">
+              Prix moyen minimum par sujet vivant pour couvrir les couts du lot.
+            </p>
+          </div>
+          <div className="text-right">
+            <span className="font-medium text-gray-900 tabular-nums">
+              {breakEvenSalePricePerLiveBirdFcfa != null
+                ? `${formatMoneyFCFA(breakEvenSalePricePerLiveBirdFcfa)} / poulet`
+                : "—"}
+            </span>
+            <p className="mt-0.5 text-xs text-gray-400">
+              {liveCount > 0
+                ? `Base de calcul : ${liveCount} sujet${liveCount > 1 ? "s" : ""} vivant${liveCount > 1 ? "s" : ""}`
+                : "Aucun sujet vivant a valoriser"}
+            </p>
+          </div>
+        </div>
         <div className="flex items-center justify-between px-4 py-3">
           <span className="text-gray-500">Achat poussins</span>
           <span className="font-medium text-gray-900 tabular-nums">

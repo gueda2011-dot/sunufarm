@@ -78,6 +78,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - separation claire entre `Achats fournisseur` et `Depenses` pour eviter les doublons
 - lecture plus simple des couts par lot
 - analyse de la rentabilite pour savoir ce qui marche vraiment
+- affichage d'un `Prix minimum de vente` pour aider a savoir a partir de quel niveau vendre un poulet sans perdre d'argent
 - projection predictive de la marge finale des lots actifs pour les plans `Pro` et `Business`
 - creation de depenses disponible hors ligne en V1 avec synchro differée
 
@@ -138,6 +139,7 @@ Inclut maintenant :
 
 - rapports
 - rentabilite par lot
+- prix minimum de vente par lot
 - alertes intelligentes
 - analyse AI des lots
 - prediction de rupture stock
@@ -153,6 +155,7 @@ Inclut aussi :
 - vue globale exploitation avec synthese dirigeant
 - signaux prioritaires et recommandations de pilotage
 - export Business consolide
+- prix minimum de vente par lot
 - prediction de rupture stock
 - prediction risque mortalite
 - projection marge finale
@@ -275,6 +278,13 @@ Projection marge finale V1 :
 - affiche une carte predictive avec statut `Favorable / Fragile / Negatif`, explications principales et tendance simple de marge
 - persiste ses snapshots quotidiens dans `PredictiveSnapshot` pour suivre les derives de rentabilite
 - remonte uniquement les cas critiques dans les notifications serveur pour signaler les lots qui se dirigent vers une marge negative
+
+Prix minimum de vente V1 :
+
+- disponible dans la carte `Rentabilite` sur la page detail d'un lot pour les plans `Pro` et `Business`
+- calcule un prix moyen minimum par sujet vivant pour couvrir les couts engages sur le lot
+- donne un repere simple et directement exploitable en fin de cycle pour negocier ou arbitrer une vente
+- s'appuie sur les couts du lot et l'effectif vivant estime, avec l'hypothese MVP `effectif vivant = effectif d'entree - mortalite`
 
 Vue Business V1 :
 
