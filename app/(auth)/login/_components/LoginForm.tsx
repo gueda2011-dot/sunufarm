@@ -18,7 +18,10 @@ import {
   CardTitle,
   CardDescription,
 } from "@/src/components/ui/card"
-import { requestEmailVerification } from "@/src/actions/auth-recovery"
+import {
+  detectPendingEmailVerification,
+  requestEmailVerification,
+} from "@/src/actions/auth-recovery"
 
 const loginSchema = z.object({
   identifier: z.string().trim().min(3, "Email ou numero requis"),
@@ -29,6 +32,7 @@ type LoginFormValues = z.infer<typeof loginSchema>
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   CredentialsSignin: "Email ou mot de passe incorrect.",
+  credentials: "Email ou mot de passe incorrect.",
   email_not_verified: "Votre adresse email n'est pas encore confirmee.",
   "no-org": "Votre compte n'est associe a aucune organisation.",
   OAuthSignin: "Erreur lors de la connexion. Reessayez.",
@@ -57,6 +61,7 @@ export function LoginForm() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
   const [submitErrorCode, setSubmitErrorCode] = useState("")
+  const [verificationEmail, setVerificationEmail] = useState("")
   const [resendMessage, setResendMessage] = useState("")
   const [isResending, startResendTransition] = useTransition()
 
@@ -70,14 +75,20 @@ export function LoginForm() {
   })
 
   const typedIdentifier = watch("identifier") ?? ""
+  const resendTargetEmail = verificationEmail || (
+    typedIdentifier.includes("@")
+      ? typedIdentifier.trim().toLowerCase()
+      : ""
+  )
   const canResendVerification =
     (submitErrorCode || urlErrorCode) === "email_not_verified"
-    && typedIdentifier.includes("@")
+    && Boolean(resendTargetEmail)
 
   const onSubmit = async (data: LoginFormValues) => {
     setSubmitting(true)
     setSubmitError("")
     setSubmitErrorCode("")
+    setVerificationEmail("")
     setResendMessage("")
 
     try {
@@ -88,11 +99,22 @@ export function LoginForm() {
       })
 
       if (result?.error) {
-        const code = result.code ?? result.error
+        let code = result.code ?? result.error
+
+        if (code === "credentials" || code === "CredentialsSignin") {
+          const recovery = await detectPendingEmailVerification({
+            identifier: data.identifier.trim(),
+            password: data.password,
+          })
+
+          if (recovery.success && recovery.data.verificationRequired) {
+            code = "email_not_verified"
+            setVerificationEmail(recovery.data.email ?? data.identifier.trim().toLowerCase())
+          }
+        }
+
         setSubmitErrorCode(code)
-        setSubmitError(
-          AUTH_ERROR_MESSAGES[code] ?? AUTH_ERROR_MESSAGES.Default,
-        )
+        setSubmitError(AUTH_ERROR_MESSAGES[code] ?? AUTH_ERROR_MESSAGES.Default)
         return
       }
 
@@ -112,7 +134,7 @@ export function LoginForm() {
 
     startResendTransition(async () => {
       const result = await requestEmailVerification({
-        email: typedIdentifier.trim().toLowerCase(),
+        email: resendTargetEmail,
       })
 
       if (!result.success) {

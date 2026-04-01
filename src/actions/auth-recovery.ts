@@ -1,5 +1,6 @@
 "use server"
 
+import bcrypt from "bcryptjs"
 import { headers } from "next/headers"
 import { z } from "zod"
 import prisma from "@/src/lib/prisma"
@@ -16,9 +17,15 @@ import {
   isEmailDeliveryConfigured,
   sendTransactionalEmail,
 } from "@/src/lib/email"
+import { normalizePhoneNumber } from "@/src/lib/validators"
 
 const emailSchema = z.object({
   email: z.string().trim().toLowerCase().email("Adresse email invalide"),
+})
+
+const loginVerificationRecoverySchema = z.object({
+  identifier: z.string().trim().min(3, "Email ou numero requis"),
+  password: z.string().min(1, "Mot de passe requis"),
 })
 
 const resetPasswordSchema = z.object({
@@ -145,6 +152,74 @@ export async function requestEmailVerification(
     return {
       success: false,
       error: "Impossible d'envoyer l'email de confirmation pour le moment.",
+    }
+  }
+}
+
+export async function detectPendingEmailVerification(
+  data: unknown,
+): Promise<ActionResult<{ verificationRequired: boolean; email?: string }>> {
+  const parsed = loginVerificationRecoverySchema.safeParse(data)
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "Donnees invalides.",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    }
+  }
+
+  try {
+    const identifier = parsed.data.identifier.trim()
+    const normalizedEmail = identifier.toLowerCase()
+    const normalizedPhone = normalizePhoneNumber(identifier)
+
+    const user = await prisma.user.findFirst({
+      where: {
+        deletedAt: null,
+        OR: [
+          { email: normalizedEmail },
+          { phone: normalizedPhone || "__never__" },
+        ],
+      },
+      select: {
+        email: true,
+        emailVerified: true,
+        passwordHash: true,
+      },
+    })
+
+    if (!user || !user.passwordHash) {
+      return {
+        success: true,
+        data: { verificationRequired: false },
+      }
+    }
+
+    const passwordValid = await bcrypt.compare(
+      parsed.data.password,
+      user.passwordHash,
+    )
+
+    if (!passwordValid || user.emailVerified) {
+      return {
+        success: true,
+        data: { verificationRequired: false },
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        verificationRequired: true,
+        email: user.email,
+      },
+    }
+  } catch (error) {
+    logger.error("auth.detect_pending_email_verification_failed", { error })
+    return {
+      success: false,
+      error: "Impossible de verifier l'etat du compte pour le moment.",
     }
   }
 }
