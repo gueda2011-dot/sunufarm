@@ -68,6 +68,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - separation claire entre `Achats fournisseur` et `Depenses` pour eviter les doublons
 - lecture plus simple des couts par lot
 - analyse de la rentabilite pour savoir ce qui marche vraiment
+- projection predictive de la marge finale des lots actifs pour les plans `Pro` et `Business`
 - creation de depenses disponible hors ligne en V1 avec synchro differée
 
 ### Parcours achats et stock
@@ -131,6 +132,7 @@ Inclut maintenant :
 - analyse AI des lots
 - prediction de rupture stock
 - prediction risque mortalite
+- projection marge finale
 
 ### Business - 25 000 FCFA / mois
 
@@ -140,6 +142,7 @@ Inclut aussi :
 
 - prediction de rupture stock
 - prediction risque mortalite
+- projection marge finale
 - multi-fermes
 - gestion d'equipe
 - exports avances
@@ -251,6 +254,14 @@ Prediction mortalite V1 :
 - affiche une carte predictive avec score, resume des signaux et tendance `S'ameliore / Stable / Se degrade`
 - persiste aussi ses snapshots quotidiens dans `PredictiveSnapshot` pour suivre l'evolution du risque
 - remonte uniquement les cas critiques dans les notifications serveur pour limiter le bruit
+
+Projection marge finale V1 :
+
+- disponible sur la page detail d'un lot actif pour les plans `Pro` et `Business`
+- projette le chiffre d'affaires, le cout total, le profit et le taux de marge final a partir des ventes, depenses, donnees journalieres et d'un benchmark interne de lots comparables
+- affiche une carte predictive avec statut `Favorable / Fragile / Negatif`, explications principales et tendance simple de marge
+- persiste ses snapshots quotidiens dans `PredictiveSnapshot` pour suivre les derives de rentabilite
+- remonte uniquement les cas critiques dans les notifications serveur pour signaler les lots qui se dirigent vers une marge negative
 
 Scripts utiles :
 

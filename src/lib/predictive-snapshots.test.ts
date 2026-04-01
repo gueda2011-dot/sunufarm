@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { computeRiskScoreTrend, computeStockTrend } from "./predictive-snapshots"
+import { computeMarginRateTrend, computeRiskScoreTrend, computeStockTrend } from "./predictive-snapshots"
 import type { SnapshotRecord } from "./predictive-snapshots"
 
 function snap(daysAgo: number, daysToStockout: number | null, alertLevel = "ok"): SnapshotRecord {
@@ -86,5 +86,25 @@ describe("computeRiskScoreTrend", () => {
     ])
     expect(result.trend).toBe("improving")
     expect(result.deltaScore).toBeCloseTo(-25)
+  })
+})
+
+describe("computeMarginRateTrend", () => {
+  it("returns improving when projected margin rate increases", () => {
+    const result = computeMarginRateTrend([
+      { snapshotDate: snap(6, 5).snapshotDate, marginRate: 4 },
+      { snapshotDate: snap(0, 5).snapshotDate, marginRate: 12 },
+    ])
+    expect(result.trend).toBe("improving")
+    expect(result.deltaMarginRate).toBeCloseTo(8)
+  })
+
+  it("returns degrading when projected margin rate decreases", () => {
+    const result = computeMarginRateTrend([
+      { snapshotDate: snap(6, 5).snapshotDate, marginRate: 15 },
+      { snapshotDate: snap(0, 5).snapshotDate, marginRate: 6 },
+    ])
+    expect(result.trend).toBe("degrading")
+    expect(result.deltaMarginRate).toBeCloseTo(-9)
   })
 })

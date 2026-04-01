@@ -64,10 +64,12 @@ import {
 } from "@/src/lib/validators"
 import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
 import {
+  getBatchMarginPredictionsInternal,
   getBatchMortalityPredictionsInternal,
   getStockPredictionsInternal,
 } from "@/src/actions/predictive"
 import {
+  upsertOrganizationBatchMarginSnapshots,
   upsertOrganizationBatchMortalitySnapshots,
   upsertOrganizationSnapshots,
 } from "@/src/lib/predictive-snapshots"
@@ -844,6 +846,7 @@ export async function generateNotificationsForOrganization(
   const subscription = await getOrganizationSubscription(organizationId)
   const canSeePredictiveStock = hasPlanFeature(subscription.plan, "PREDICTIVE_STOCK_ALERTS")
   const canSeePredictiveHealth = hasPlanFeature(subscription.plan, "PREDICTIVE_HEALTH_ALERTS")
+  const canSeePredictiveMargin = hasPlanFeature(subscription.plan, "PREDICTIVE_MARGIN_ALERTS")
 
   // Signal 1 — Stock aliment sous seuil (Ajustement 2 : try/catch indépendant)
   try {
@@ -903,6 +906,14 @@ export async function generateNotificationsForOrganization(
     }
   }
 
+  if (canSeePredictiveMargin) {
+    try {
+      totalCreated += await checkBatchMarginProjectionAlerts(organizationId, userIds)
+    } catch {
+      // Erreur silencieuse
+    }
+  }
+
   if (canSeePredictiveStock) {
     try {
       const predictions = await getStockPredictionsInternal(organizationId)
@@ -927,6 +938,19 @@ export async function generateNotificationsForOrganization(
       )
     } catch {
       // Erreur silencieuse — ne bloque pas le cron
+    }
+  }
+
+  if (canSeePredictiveMargin) {
+    try {
+      const marginPredictions = await getBatchMarginPredictionsInternal(organizationId)
+      await upsertOrganizationBatchMarginSnapshots(
+        prisma,
+        organizationId,
+        marginPredictions,
+      )
+    } catch {
+      // Erreur silencieuse â€” ne bloque pas le cron
     }
   }
 
@@ -1058,6 +1082,50 @@ async function checkBatchMortalityRiskAlerts(
           riskScore: prediction.riskScore,
           reasons: prediction.reasons,
           summary: prediction.summary,
+        },
+      }
+    }),
+  })
+}
+
+async function checkBatchMarginProjectionAlerts(
+  organizationId: string,
+  userIds: string[],
+): Promise<number> {
+  const predictions = await getBatchMarginPredictionsInternal(organizationId)
+  const negativeBatchIds = Object.keys(predictions).filter((id) => predictions[id].alertLevel === "critical")
+
+  if (negativeBatchIds.length === 0) return 0
+
+  const batches = await prisma.batch.findMany({
+    where: {
+      organizationId,
+      id: { in: negativeBatchIds },
+    },
+    select: {
+      id: true,
+      number: true,
+    },
+  })
+
+  const batchNameMap = Object.fromEntries(batches.map((batch) => [batch.id, batch.number]))
+
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.AUTRE,
+    resourceType: "BATCH_MARGIN_PREDICTIVE",
+    candidates: negativeBatchIds.map((batchId) => {
+      const prediction = predictions[batchId]
+      return {
+        title: "Projection de marge negative",
+        message: `Le lot ${batchNameMap[batchId] ?? batchId} projette une marge negative (${prediction.projectedProfitFcfa} FCFA).`,
+        resourceId: batchId,
+        metadata: {
+          projectedProfitFcfa: prediction.projectedProfitFcfa,
+          projectedMarginRate: prediction.projectedMarginRate,
+          confidence: prediction.confidence,
+          reasons: prediction.reasons,
         },
       }
     }),

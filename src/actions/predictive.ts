@@ -11,6 +11,14 @@ import {
   computeBatchMortalityFeatures,
 } from "@/src/lib/predictive-mortality-features"
 import {
+  computeBatchMarginProjectionFeatures,
+  type MarginBenchmarkFeatures,
+} from "@/src/lib/predictive-margin-features"
+import {
+  predictBatchMarginProjection,
+  type BatchMarginProjection,
+} from "@/src/lib/predictive-margin-rules"
+import {
   predictBatchMortalityRisk,
   type BatchMortalityPrediction,
 } from "@/src/lib/predictive-mortality-rules"
@@ -22,6 +30,7 @@ import {
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import type {
+  MarginTrendResult,
   RiskTrendResult,
   StockTrendResult,
 } from "@/src/lib/predictive-snapshots"
@@ -42,6 +51,11 @@ export interface StockTrendsResult {
 export interface BatchMortalityInsight {
   prediction: BatchMortalityPrediction
   trend: RiskTrendResult
+}
+
+export interface BatchMarginInsight {
+  prediction: BatchMarginProjection
+  trend: MarginTrendResult
 }
 
 async function computeOrganizationStockPredictions(
@@ -164,6 +178,136 @@ async function computeOrganizationBatchMortalityPredictions(
   return predictions
 }
 
+async function computeOrganizationBatchMarginPredictions(
+  organizationId: string,
+): Promise<Record<string, BatchMarginProjection>> {
+  const batches = await prisma.batch.findMany({
+    where: {
+      organizationId,
+      deletedAt: null,
+      status: "ACTIVE",
+    },
+    select: {
+      id: true,
+      type: true,
+      entryDate: true,
+      entryAgeDay: true,
+      entryCount: true,
+      totalCostFcfa: true,
+      expenses: {
+        select: { amountFcfa: true },
+      },
+      saleItems: {
+        select: { totalFcfa: true },
+      },
+      dailyRecords: {
+        select: { mortality: true },
+      },
+    },
+  })
+
+  const comparableBatches = await prisma.batch.findMany({
+    where: {
+      organizationId,
+      deletedAt: null,
+      status: { in: ["CLOSED", "SOLD", "SLAUGHTERED"] },
+    },
+    select: {
+      id: true,
+      type: true,
+      entryCount: true,
+      entryDate: true,
+      entryAgeDay: true,
+      closedAt: true,
+      totalCostFcfa: true,
+      expenses: {
+        select: { amountFcfa: true },
+      },
+      saleItems: {
+        select: { totalFcfa: true },
+      },
+      dailyRecords: {
+        select: { mortality: true },
+      },
+    },
+    orderBy: { entryDate: "desc" },
+    take: 24,
+  })
+
+  const benchmarkByType = new Map<string, MarginBenchmarkFeatures>()
+  for (const type of ["CHAIR", "PONDEUSE", "REPRODUCTEUR"] as const) {
+    const candidates = comparableBatches.filter((batch) => batch.type === type)
+    const normalized = candidates.flatMap((batch) => {
+      const operationalCostFcfa = batch.expenses.reduce((sum, expense) => sum + expense.amountFcfa, 0)
+      const revenueFcfa = batch.saleItems.reduce((sum, item) => sum + item.totalFcfa, 0)
+      const totalMortality = batch.dailyRecords.reduce((sum, record) => sum + record.mortality, 0)
+      const liveCount = Math.max(0, batch.entryCount - totalMortality)
+      const cycleDays = Math.max(
+        1,
+        batch.closedAt
+          ? Math.floor((batch.closedAt.getTime() - batch.entryDate.getTime()) / 86_400_000) + batch.entryAgeDay
+          : batch.entryAgeDay || 1,
+      )
+
+      if (liveCount <= 0) return []
+
+      return [{
+        revenuePerBirdFcfa: revenueFcfa / liveCount,
+        operationalCostPerDayFcfa: operationalCostFcfa / cycleDays,
+        totalCostFcfa: batch.totalCostFcfa + operationalCostFcfa,
+        revenueFcfa,
+      }]
+    })
+
+    const sampleSize = normalized.length
+    const average = (values: number[]) => (
+      values.length > 0
+        ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+        : null
+    )
+    const avgRevenuePerBirdFcfa = average(normalized.map((item) => item.revenuePerBirdFcfa))
+    const avgOperationalCostPerDayFcfa = average(normalized.map((item) => item.operationalCostPerDayFcfa))
+    const avgMarginRate = normalized.length > 0
+      ? Math.round(normalized.reduce((sum, item) => {
+          const profit = item.revenueFcfa - item.totalCostFcfa
+          const rate = item.totalCostFcfa > 0 ? (profit / item.totalCostFcfa) * 100 : 0
+          return sum + rate
+        }, 0) / normalized.length * 10) / 10
+      : null
+
+    benchmarkByType.set(type, {
+      sampleSize,
+      avgRevenuePerBirdFcfa,
+      avgOperationalCostPerDayFcfa,
+      avgMarginRate,
+    })
+  }
+
+  const predictions: Record<string, BatchMarginProjection> = {}
+  for (const batch of batches) {
+    const totalMortality = batch.dailyRecords.reduce((sum, record) => sum + record.mortality, 0)
+    const liveCount = Math.max(0, batch.entryCount - totalMortality)
+    const operationalCostFcfa = batch.expenses.reduce((sum, expense) => sum + expense.amountFcfa, 0)
+    const revenueFcfa = batch.saleItems.reduce((sum, item) => sum + item.totalFcfa, 0)
+    const features = computeBatchMarginProjectionFeatures({
+      batchId: batch.id,
+      batchType: batch.type,
+      entryDate: batch.entryDate,
+      entryAgeDay: batch.entryAgeDay,
+      entryCount: batch.entryCount,
+      liveCount,
+      purchaseCostFcfa: batch.totalCostFcfa,
+      operationalCostFcfa,
+      revenueFcfa,
+      totalMortality,
+      benchmark: benchmarkByType.get(batch.type) ?? null,
+    })
+    predictions[batch.id] = predictBatchMarginProjection(features)
+  }
+
+  return predictions
+}
+
 export async function getStockPredictions(
   organizationId: string,
 ): Promise<{ success: true; data: StockPredictionsResult } | { success: false; error: string }> {
@@ -241,6 +385,40 @@ export async function getBatchMortalityInsight(
   }
 }
 
+export async function getBatchMarginInsight(
+  organizationId: string,
+  batchId: string,
+): Promise<{ success: true; data: BatchMarginInsight } | { success: false; error: string }> {
+  const accessResult = await requireOrganizationModuleContext(organizationId, "BATCHES")
+  if (!accessResult.success) return accessResult
+
+  const subscription = await getOrganizationSubscription(organizationId)
+  if (!hasPlanFeature(subscription.plan, "PREDICTIVE_MARGIN_ALERTS")) {
+    return forbidden("Les projections predictives de marge sont disponibles a partir du plan Pro.")
+  }
+
+  try {
+    const predictions = await computeOrganizationBatchMarginPredictions(organizationId)
+    const prediction = predictions[batchId]
+    if (!prediction) {
+      return { success: false, error: "Lot introuvable ou inactif" }
+    }
+
+    const { getBatchMarginTrend } = await import("@/src/lib/predictive-snapshots")
+    const trend = await getBatchMarginTrend(prisma, organizationId, batchId, 7)
+
+    return {
+      success: true,
+      data: {
+        prediction,
+        trend,
+      },
+    }
+  } catch {
+    return { success: false, error: "Erreur lors du calcul de la projection de marge" }
+  }
+}
+
 export async function getStockPredictionsInternal(
   organizationId: string,
 ): Promise<StockPredictionsResult> {
@@ -251,4 +429,10 @@ export async function getBatchMortalityPredictionsInternal(
   organizationId: string,
 ): Promise<Record<string, BatchMortalityPrediction>> {
   return computeOrganizationBatchMortalityPredictions(organizationId)
+}
+
+export async function getBatchMarginPredictionsInternal(
+  organizationId: string,
+): Promise<Record<string, BatchMarginProjection>> {
+  return computeOrganizationBatchMarginPredictions(organizationId)
 }

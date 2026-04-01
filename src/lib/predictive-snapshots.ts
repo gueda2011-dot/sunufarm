@@ -7,12 +7,13 @@
  */
 
 import type { PrismaClient } from "@/src/generated/prisma/client"
+import type { BatchMarginProjection } from "@/src/lib/predictive-margin-rules"
 import type { BatchMortalityPrediction } from "@/src/lib/predictive-mortality-rules"
 import type { StockRupturePrediction } from "@/src/lib/predictive-rules"
 
 export const SNAPSHOT_MODEL_VERSION = "v1.0"
 
-export type PredictionType = "FEED_STOCK" | "MEDICINE_STOCK" | "BATCH_MORTALITY"
+export type PredictionType = "FEED_STOCK" | "MEDICINE_STOCK" | "BATCH_MORTALITY" | "BATCH_MARGIN"
 
 export type StockTrend = "degrading" | "stable" | "improving" | "unknown"
 
@@ -32,6 +33,12 @@ export interface RiskTrendResult {
   trend: StockTrend
   label: string
   deltaScore: number | null
+}
+
+export interface MarginTrendResult {
+  trend: StockTrend
+  label: string
+  deltaMarginRate: number | null
 }
 
 export function computeStockTrend(snapshots: SnapshotRecord[]): StockTrendResult {
@@ -84,11 +91,34 @@ export function computeRiskScoreTrend(
   return { trend: "stable", label: "Stable", deltaScore }
 }
 
+export function computeMarginRateTrend(
+  points: Array<{ snapshotDate: Date; marginRate: number | null }>,
+): MarginTrendResult {
+  if (points.length < 2) {
+    return { trend: "unknown", label: "Pas assez de donnees", deltaMarginRate: null }
+  }
+
+  const sorted = [...points].sort(
+    (a, b) => new Date(a.snapshotDate).getTime() - new Date(b.snapshotDate).getTime(),
+  )
+  const oldest = sorted[0]
+  const recent = sorted[sorted.length - 1]
+
+  if (oldest.marginRate === null || recent.marginRate === null) {
+    return { trend: "unknown", label: "Donnees partielles", deltaMarginRate: null }
+  }
+
+  const deltaMarginRate = Math.round((recent.marginRate - oldest.marginRate) * 10) / 10
+  if (deltaMarginRate >= 3) return { trend: "improving", label: "En amelioration", deltaMarginRate }
+  if (deltaMarginRate <= -3) return { trend: "degrading", label: "En degradation", deltaMarginRate }
+  return { trend: "stable", label: "Stable", deltaMarginRate }
+}
+
 export interface UpsertSnapshotInput {
   organizationId: string
   predictionType: PredictionType
   entityId: string
-  prediction: StockRupturePrediction | BatchMortalityPrediction
+  prediction: StockRupturePrediction | BatchMortalityPrediction | BatchMarginProjection
   snapshotDate?: Date
 }
 
@@ -100,8 +130,10 @@ export async function upsertPredictiveSnapshot(
   const snapshotDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
 
   const isBatchMortality = input.predictionType === "BATCH_MORTALITY"
+  const isBatchMargin = input.predictionType === "BATCH_MARGIN"
   const stockPrediction = input.prediction as StockRupturePrediction
   const batchPrediction = input.prediction as BatchMortalityPrediction
+  const marginPrediction = input.prediction as BatchMarginProjection
 
   const sharedData = {
     alertLevel: input.prediction.alertLevel,
@@ -124,10 +156,10 @@ export async function upsertPredictiveSnapshot(
       entityId: input.entityId,
       snapshotDate,
       ...sharedData,
-      daysToStockout: isBatchMortality ? null : stockPrediction.daysToStockout,
-      estimatedRuptureDate: isBatchMortality ? null : stockPrediction.estimatedRuptureDate,
-      avgDailyConsumption: isBatchMortality ? 0 : stockPrediction.avgDailyConsumption,
-      unit: isBatchMortality ? "score" : stockPrediction.unit,
+      daysToStockout: isBatchMortality || isBatchMargin ? null : stockPrediction.daysToStockout,
+      estimatedRuptureDate: isBatchMortality || isBatchMargin ? null : stockPrediction.estimatedRuptureDate,
+      avgDailyConsumption: isBatchMortality || isBatchMargin ? 0 : stockPrediction.avgDailyConsumption,
+      unit: isBatchMortality ? "score" : isBatchMargin ? "fcfa" : stockPrediction.unit,
       features: isBatchMortality
         ? {
             riskScore: batchPrediction.riskScore,
@@ -135,6 +167,17 @@ export async function upsertPredictiveSnapshot(
             reasons: batchPrediction.reasons,
             metrics: batchPrediction.metrics,
           }
+        : isBatchMargin
+          ? {
+              projectedProfitFcfa: marginPrediction.projectedProfitFcfa,
+              projectedMarginRate: marginPrediction.projectedMarginRate,
+              projectedRevenueFcfa: marginPrediction.projectedRevenueFcfa,
+              projectedTotalCostFcfa: marginPrediction.projectedTotalCostFcfa,
+              summary: marginPrediction.summary,
+              reasons: marginPrediction.reasons,
+              confidence: marginPrediction.confidence,
+              metrics: marginPrediction.metrics,
+            }
         : {
             avgDailyConsumption: stockPrediction.avgDailyConsumption,
             unit: stockPrediction.unit,
@@ -142,10 +185,10 @@ export async function upsertPredictiveSnapshot(
     },
     update: {
       ...sharedData,
-      daysToStockout: isBatchMortality ? null : stockPrediction.daysToStockout,
-      estimatedRuptureDate: isBatchMortality ? null : stockPrediction.estimatedRuptureDate,
-      avgDailyConsumption: isBatchMortality ? 0 : stockPrediction.avgDailyConsumption,
-      unit: isBatchMortality ? "score" : stockPrediction.unit,
+      daysToStockout: isBatchMortality || isBatchMargin ? null : stockPrediction.daysToStockout,
+      estimatedRuptureDate: isBatchMortality || isBatchMargin ? null : stockPrediction.estimatedRuptureDate,
+      avgDailyConsumption: isBatchMortality || isBatchMargin ? 0 : stockPrediction.avgDailyConsumption,
+      unit: isBatchMortality ? "score" : isBatchMargin ? "fcfa" : stockPrediction.unit,
       features: isBatchMortality
         ? {
             riskScore: batchPrediction.riskScore,
@@ -153,6 +196,17 @@ export async function upsertPredictiveSnapshot(
             reasons: batchPrediction.reasons,
             metrics: batchPrediction.metrics,
           }
+        : isBatchMargin
+          ? {
+              projectedProfitFcfa: marginPrediction.projectedProfitFcfa,
+              projectedMarginRate: marginPrediction.projectedMarginRate,
+              projectedRevenueFcfa: marginPrediction.projectedRevenueFcfa,
+              projectedTotalCostFcfa: marginPrediction.projectedTotalCostFcfa,
+              summary: marginPrediction.summary,
+              reasons: marginPrediction.reasons,
+              confidence: marginPrediction.confidence,
+              metrics: marginPrediction.metrics,
+            }
         : {
             avgDailyConsumption: stockPrediction.avgDailyConsumption,
             unit: stockPrediction.unit,
@@ -207,6 +261,28 @@ export async function upsertOrganizationBatchMortalitySnapshots(
     await upsertPredictiveSnapshot(prisma, {
       organizationId,
       predictionType: "BATCH_MORTALITY",
+      entityId,
+      prediction,
+      snapshotDate,
+    })
+    count++
+  }
+
+  return count
+}
+
+export async function upsertOrganizationBatchMarginSnapshots(
+  prisma: PrismaClient,
+  organizationId: string,
+  predictions: Record<string, BatchMarginProjection>,
+  snapshotDate?: Date,
+): Promise<number> {
+  let count = 0
+
+  for (const [entityId, prediction] of Object.entries(predictions)) {
+    await upsertPredictiveSnapshot(prisma, {
+      organizationId,
+      predictionType: "BATCH_MARGIN",
       entityId,
       prediction,
       snapshotDate,
@@ -291,6 +367,41 @@ export async function getBatchMortalityTrend(
       return {
         snapshotDate: snapshot.snapshotDate,
         riskScore: typeof features?.riskScore === "number" ? features.riskScore : null,
+      }
+    }),
+  )
+}
+
+export async function getBatchMarginTrend(
+  prisma: PrismaClient,
+  organizationId: string,
+  batchId: string,
+  lookbackDays = 7,
+): Promise<MarginTrendResult> {
+  const since = new Date()
+  since.setUTCDate(since.getUTCDate() - lookbackDays)
+  since.setUTCHours(0, 0, 0, 0)
+
+  const snapshots = await prisma.predictiveSnapshot.findMany({
+    where: {
+      organizationId,
+      predictionType: "BATCH_MARGIN",
+      entityId: batchId,
+      snapshotDate: { gte: since },
+    },
+    select: {
+      snapshotDate: true,
+      features: true,
+    },
+    orderBy: { snapshotDate: "asc" },
+  })
+
+  return computeMarginRateTrend(
+    snapshots.map((snapshot) => {
+      const features = snapshot.features as { projectedMarginRate?: unknown } | null
+      return {
+        snapshotDate: snapshot.snapshotDate,
+        marginRate: typeof features?.projectedMarginRate === "number" ? features.projectedMarginRate : null,
       }
     }),
   )

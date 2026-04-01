@@ -25,6 +25,7 @@ export type SubscriptionFeature =
   | "ALERTS"
   | "ADVANCED_HEALTH"
   | "PREDICTIVE_HEALTH_ALERTS"
+  | "PREDICTIVE_MARGIN_ALERTS"
   | "MULTI_FARM"
   | "TEAM_MANAGEMENT"
   | "ADVANCED_EXPORTS"
@@ -64,6 +65,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       ALERTS: false,
       ADVANCED_HEALTH: false,
       PREDICTIVE_HEALTH_ALERTS: false,
+      PREDICTIVE_MARGIN_ALERTS: false,
       MULTI_FARM: false,
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
@@ -91,6 +93,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       ALERTS: true,
       ADVANCED_HEALTH: true,
       PREDICTIVE_HEALTH_ALERTS: true,
+      PREDICTIVE_MARGIN_ALERTS: true,
       MULTI_FARM: false,
       TEAM_MANAGEMENT: false,
       ADVANCED_EXPORTS: false,
@@ -117,6 +120,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       ALERTS: true,
       ADVANCED_HEALTH: true,
       PREDICTIVE_HEALTH_ALERTS: true,
+      PREDICTIVE_MARGIN_ALERTS: true,
       MULTI_FARM: true,
       TEAM_MANAGEMENT: true,
       ADVANCED_EXPORTS: true,
@@ -181,6 +185,8 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
       return "La surveillance sanitaire avancee est disponible a partir du plan Pro."
     case "PREDICTIVE_HEALTH_ALERTS":
       return "Les alertes predictives de mortalite sont disponibles a partir du plan Pro."
+    case "PREDICTIVE_MARGIN_ALERTS":
+      return "Les projections predictives de marge sont disponibles a partir du plan Pro."
     case "MULTI_FARM":
       return "La gestion de plusieurs fermes est reservee au plan Business."
     case "TEAM_MANAGEMENT":

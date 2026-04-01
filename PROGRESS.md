@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-01 (Session 62)
+> Derniere mise a jour : 2026-04-01 (Session 63)
 
 ---
 
@@ -29,6 +29,7 @@
 - Les flux offline prioritaires commencent a etre durcis cote serveur avec idempotence sur rejeu
 - Une V1 predictive `rupture stock` existe maintenant sur `stock`, avec gating abonnement `PRO / BUSINESS`, snapshots et tendances
 - Une V1 predictive `risque mortalite 7 jours` existe maintenant sur les lots actifs, avec snapshots, tendance et notifications critiques
+- Une V1 predictive `projection marge finale lot` existe maintenant sur les lots actifs, avec benchmark interne, snapshots, tendance et alertes critiques
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
@@ -41,6 +42,7 @@
 | Stock | Fonctionnel, avec creation d'articles, mouvements et correction admin V1 |
 | Prediction stock | V1 fonctionnelle, avec seuils, tendances, snapshots et vue admin |
 | Prediction mortalite | V1 fonctionnelle, avec score 7 jours, snapshots, tendance et alertes critiques |
+| Prediction marge | V1 fonctionnelle, avec projection finale, tendance, benchmark interne et alertes critiques |
 | Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
 | Depenses / finances | Fonctionnel, avec creation offline V1 |
 | Ventes | Fonctionnel, avec creation offline V1 |
@@ -262,6 +264,41 @@
 - Construire la V1 predictive `projection marge finale lot`
 - Reutiliser le meme socle `features` -> `rules` -> `snapshots` -> `UI`
 - Ensuite seulement envisager un dashboard predictif transverse
+
+---
+
+## Session 63 - 2026-04-01
+
+### Travail effectue
+
+- Ajout des features predictives de marge dans `src/lib/predictive-margin-features.ts`
+- Ajout des regles de projection dans `src/lib/predictive-margin-rules.ts`
+- Extension de `src/actions/predictive.ts` avec `getBatchMarginInsight(...)` et la logique interne de calcul organisationnel
+- Extension de `src/lib/predictive-snapshots.ts` pour historiser aussi `BATCH_MARGIN` et calculer sa tendance
+- Ajout d'une carte predictive lot dans `app/(dashboard)/batches/[id]/_components/BatchMarginProjectionCard.tsx`
+- Branchement de la page lot `app/(dashboard)/batches/[id]/page.tsx` avec gating abonnement `PREDICTIVE_MARGIN_ALERTS`
+- Ajout de notifications critiques dediees dans `src/actions/notifications.ts` pour les lots projetes en marge negative
+- Ajout de la feature d'abonnement `PREDICTIVE_MARGIN_ALERTS` dans `src/lib/subscriptions.ts` et affichage dans `app/(dashboard)/settings/page.tsx`
+- Ajout des tests :
+  - `src/lib/predictive-margin-features.test.ts`
+  - `src/lib/predictive-margin-rules.test.ts`
+  - extension de `src/lib/predictive-snapshots.test.ts`
+
+### Resultat
+
+- Les lots actifs disposent maintenant d'une projection simple et explicable de leur marge finale
+- Le socle predictif de SunuFarm couvre desormais trois axes concrets :
+  - rupture stock
+  - risque mortalite
+  - projection marge finale
+- Les plans `PRO` et `BUSINESS` gagnent une nouvelle differenciation visible sur les pages lot avec un signal direct sur la rentabilite projetee
+- Validation complete connue : `30` fichiers de test, `122` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Construire un dashboard predictif transverse pour remonter les lots et stocks les plus a risque
+- Ajouter une vue admin globale des lots en marge negative projetee
+- Enrichir ensuite les recommandations prescriptives a partir des trois briques predictives disponibles
 
 ---
 
