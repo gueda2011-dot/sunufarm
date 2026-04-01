@@ -61,6 +61,8 @@ import {
 // Schémas Zod
 // ---------------------------------------------------------------------------
 
+const clientMutationIdSchema = z.string().trim().min(1).max(100)
+
 const getDailyRecordsSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,
@@ -90,6 +92,7 @@ const mortalityDetailSchema = z.object({
 const createDailyRecordSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,
+  clientMutationId: clientMutationIdSchema.optional(),
   date:           dateSchema,
 
   // Champs principaux — écran terrain 30 secondes
@@ -585,6 +588,7 @@ export async function createDailyRecord(
     const {
       organizationId,
       batchId,
+      clientMutationId,
       date,
       feedStockId,
       mortalityDetails,
@@ -613,6 +617,17 @@ export async function createDailyRecord(
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
     }
 
+    if (clientMutationId) {
+      const existingByMutation = await prisma.dailyRecord.findFirst({
+        where: { organizationId, clientMutationId },
+        select: dailyRecordDetailSelect,
+      })
+      if (existingByMutation) {
+        const [enrichedExistingRecord] = await enrichRecordsWithFeedStock(organizationId, [existingByMutation])
+        return { success: true, data: enrichedExistingRecord }
+      }
+    }
+
     // Normaliser la date à minuit UTC pour la contrainte unique batchId/date
     const normalizedDate = toUtcDate(date)
 
@@ -636,6 +651,7 @@ export async function createDailyRecord(
         data: {
           organizationId,
           batchId,
+          clientMutationId: clientMutationId ?? null,
           date:         normalizedDate,
           recordedById: actorId,
           ...recordData,
@@ -683,7 +699,7 @@ export async function createDailyRecord(
       action:         AuditAction.CREATE,
       resourceType:   "DAILY_RECORD",
       resourceId:     record.id,
-      after:          { batchId, date: normalizedDate, feedStockId, ...recordData },
+      after:          { clientMutationId, batchId, date: normalizedDate, feedStockId, ...recordData },
     })
 
     const [enrichedRecord] = await enrichRecordsWithFeedStock(organizationId, [record])

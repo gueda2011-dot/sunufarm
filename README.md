@@ -209,8 +209,10 @@ Mode hors ligne V1 :
   - `Traitements`
   - `Depenses`
   - `Ventes`
+  - `Mouvements de stock`
 - les actions sont stockees localement dans le navigateur puis rejouees automatiquement au retour du reseau
 - un panneau de synchronisation affiche les elements en attente, les erreurs, permet une resynchronisation globale et des actions `Retenter` / `Supprimer` par element
+- les flux offline critiques utilisent maintenant une `clientMutationId` persistée cote serveur pour limiter les doublons lors d'un rejeu apres reconnexion
 - le perimetre V1 couvre uniquement la creation hors ligne, pas encore l'edition hors ligne ni la resolution avancee de conflits
 
 Scripts utiles :

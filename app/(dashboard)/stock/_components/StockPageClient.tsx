@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import type {
   FeedMovementSummary,
   FeedStockSummary,
+  MedicineMovementSummary,
   MedicineStockSummary,
 } from "@/src/actions/stock"
 import {
@@ -18,15 +19,19 @@ import {
   formatMoneyFCFA,
   formatNumber,
 } from "@/src/lib/formatters"
+import { StockMovementPanel } from "./StockMovementPanel"
 
 type Props = {
   organizationId: string
   canCreateStock: boolean
+  canCreateMovement: boolean
   farms: Array<{ id: string; name: string }>
+  batches: Array<{ id: string; number: string }>
   feedTypes: Array<{ id: string; name: string; code: string }>
   initialFeedStocks: FeedStockSummary[]
   initialFeedMovements: FeedMovementSummary[]
   initialMedicineStocks: MedicineStockSummary[]
+  initialMedicineMovements: MedicineMovementSummary[]
 }
 
 type StockTab = "ALIMENT" | "MEDICAMENT"
@@ -82,11 +87,14 @@ function getMedicineAlertClass(stock: MedicineStockSummary) {
 export function StockPageClient({
   organizationId,
   canCreateStock,
+  canCreateMovement,
   farms,
+  batches,
   feedTypes,
   initialFeedStocks,
   initialFeedMovements,
   initialMedicineStocks,
+  initialMedicineMovements,
 }: Props) {
   const [tab, setTab] = useState<StockTab>("ALIMENT")
   const [isPending, startTransition] = useTransition()
@@ -495,6 +503,15 @@ export function StockPageClient({
         </div>
       ) : null}
 
+      <StockMovementPanel
+        organizationId={organizationId}
+        tab={tab}
+        canCreateMovement={canCreateMovement}
+        feedStocks={feedStocks}
+        medicineStocks={medicineStocks}
+        batches={batches}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -893,6 +910,52 @@ export function StockPageClient({
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
+            <div className="border-b border-gray-100 px-4 py-4">
+              <h2 className="text-base font-semibold text-gray-900">
+                Derniers mouvements de medicaments
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Historique recent des entrees, sorties, peremptions et inventaires.
+              </p>
+            </div>
+
+            {initialMedicineMovements.length === 0 ? (
+              <div className="px-4 py-10 text-center">
+                <p className="text-sm text-gray-500">Aucun mouvement enregistre.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 text-left text-gray-500">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Date</th>
+                      <th className="px-4 py-3 font-medium">Article</th>
+                      <th className="px-4 py-3 font-medium">Type</th>
+                      <th className="px-4 py-3 font-medium">Quantite</th>
+                      <th className="px-4 py-3 font-medium">Montant</th>
+                      <th className="px-4 py-3 font-medium">Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {initialMedicineMovements.map((movement) => (
+                      <tr key={movement.id} className="text-gray-700">
+                        <td className="px-4 py-3">{formatDate(movement.date)}</td>
+                        <td className="px-4 py-3 font-medium">
+                          {movement.medicineStock.name}
+                        </td>
+                        <td className="px-4 py-3">{movement.type}</td>
+                        <td className="px-4 py-3">{formatNumber(movement.quantity)}</td>
+                        <td className="px-4 py-3">{formatMoneyFCFA(movement.totalFcfa)}</td>
+                        <td className="px-4 py-3">{movement.reference || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

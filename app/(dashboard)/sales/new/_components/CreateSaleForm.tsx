@@ -7,6 +7,7 @@ import { createSale } from "@/src/actions/sales"
 import { formatMoneyFCFA } from "@/src/lib/formatters"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 import {
+  createClientMutationId,
   deleteOfflineDailyQueueItem,
   enqueueOfflineSale,
   flushOfflineDailyQueue,
@@ -14,7 +15,7 @@ import {
   readOfflineDailySyncMeta,
   retryOfflineDailyQueueItem,
   subscribeToOfflineDailyQueue,
-} from "@/src/lib/offline-daily-queue"
+} from "@/src/lib/offline-mutation-outbox"
 
 type Props = {
   organizationId: string
@@ -237,6 +238,7 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
     }
 
     const payload = {
+      clientMutationId: createClientMutationId("sale"),
       organizationId,
       customerId: customerId || undefined,
       productType,

@@ -9,6 +9,7 @@ import { Label } from "@/src/components/ui/label"
 import { Button } from "@/src/components/ui/button"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 import {
+  createClientMutationId,
   deleteOfflineDailyQueueItem,
   enqueueOfflineExpense,
   flushOfflineDailyQueue,
@@ -16,7 +17,7 @@ import {
   readOfflineDailySyncMeta,
   retryOfflineDailyQueueItem,
   subscribeToOfflineDailyQueue,
-} from "@/src/lib/offline-daily-queue"
+} from "@/src/lib/offline-mutation-outbox"
 
 interface ExpenseFormProps {
   organizationId: string
@@ -118,6 +119,7 @@ export function ExpenseForm({ organizationId }: ExpenseFormProps) {
 
     startTransition(async () => {
       const payload = {
+        clientMutationId: createClientMutationId("expense"),
         organizationId,
         description: String(formData.get("description") ?? ""),
         amountFcfa: Number(formData.get("amountFcfa") ?? 0),

@@ -52,6 +52,8 @@ import { UserRole } from "@/src/generated/prisma/client"
 // Schémas Zod
 // ---------------------------------------------------------------------------
 
+const clientMutationIdSchema = z.string().trim().min(1).max(100)
+
 const getExpensesSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        optionalIdSchema,
@@ -75,6 +77,7 @@ const getExpenseSchema = z.object({
 
 const createExpenseSchema = z.object({
   organizationId: requiredIdSchema,
+  clientMutationId: clientMutationIdSchema.optional(),
   /** Charge directe — lot auquel la dépense est imputée */
   batchId:        optionalIdSchema,
   /** Charge indirecte — ferme à laquelle la dépense est imputée */
@@ -347,7 +350,7 @@ export async function createExpense(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, batchId, farmId, ...expenseData } = parsed.data
+    const { organizationId, clientMutationId, batchId, farmId, ...expenseData } = parsed.data
     const accessResult = await requireOrganizationModuleContext(organizationId, "FINANCES")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
@@ -357,6 +360,16 @@ export async function createExpense(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+
+    if (clientMutationId) {
+      const existingExpense = await prisma.expense.findFirst({
+        where: { organizationId, clientMutationId },
+        select: expenseDetailSelect,
+      })
+      if (existingExpense) {
+        return { success: true, data: existingExpense }
+      }
+    }
 
     // Valider la chaîne d'appartenance selon le rattachement choisi
     if (batchId) {
@@ -376,6 +389,7 @@ export async function createExpense(
     const expense = await prisma.expense.create({
       data: {
         organizationId,
+        clientMutationId: clientMutationId ?? null,
         batchId:     batchId ?? null,
         farmId:      farmId  ?? null,
         createdById: actorId,
@@ -390,7 +404,7 @@ export async function createExpense(
       action:         AuditAction.CREATE,
       resourceType:   "EXPENSE",
       resourceId:     expense.id,
-      after:          { batchId, farmId, ...expenseData },
+      after:          { clientMutationId, batchId, farmId, ...expenseData },
     })
 
     return { success: true, data: expense }

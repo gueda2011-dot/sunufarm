@@ -81,6 +81,8 @@ import {
 // Schémas Zod — Plans vaccinaux
 // ---------------------------------------------------------------------------
 
+const clientMutationIdSchema = z.string().trim().min(1).max(100)
+
 /**
  * Item d'un plan vaccinal : une étape à un âge donné.
  * Partagé entre createVaccinationPlanSchema et updateVaccinationPlanSchema.
@@ -144,6 +146,7 @@ const getVaccinationSchema = z.object({
 const createVaccinationSchema = z.object({
   organizationId:  requiredIdSchema,
   batchId:         requiredIdSchema,
+  clientMutationId: clientMutationIdSchema.optional(),
   date:            dateSchema,
   // batchAgeDay : calculé côté serveur depuis batch.entryDate et batch.entryAgeDay
   vaccineName:     z.string().min(1).max(150),
@@ -195,6 +198,7 @@ const createTreatmentSchema = z
   .object({
     organizationId:  requiredIdSchema,
     batchId:         requiredIdSchema,
+    clientMutationId: clientMutationIdSchema.optional(),
     startDate:       dateSchema,
     endDate:         optionalDateSchema,
     medicineName:    z.string().min(1).max(150),
@@ -964,6 +968,7 @@ export async function createVaccination(
     const {
       organizationId,
       batchId,
+      clientMutationId,
       date,
       vaccineName,
       route,
@@ -992,6 +997,16 @@ export async function createVaccination(
 
     if (!canAccessFarm(role, farmPermissions, batch.building.farmId, "canWrite")) {
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
+    }
+
+    if (clientMutationId) {
+      const existingVaccination = await prisma.vaccinationRecord.findFirst({
+        where: { organizationId, clientMutationId },
+        select: vaccinationSelect,
+      })
+      if (existingVaccination) {
+        return { success: true, data: existingVaccination }
+      }
     }
 
     // Vérifier le statut du lot (ACTIVE requis, sauf MANAGER+)
@@ -1049,6 +1064,7 @@ export async function createVaccination(
           data: {
             organizationId,
             batchId,
+            clientMutationId: clientMutationId ?? null,
             date,
             batchAgeDay:     ageResult.ageDay,
             vaccineName,
@@ -1089,7 +1105,7 @@ export async function createVaccination(
       action:         AuditAction.CREATE,
       resourceType:   "VACCINATION_RECORD",
       resourceId:     vaccination.id,
-      after:          { batchId, date, vaccineName, countVaccinated, medicineStockId, medicineQuantity, batchAgeDay: ageResult.ageDay },
+      after:          { clientMutationId, batchId, date, vaccineName, countVaccinated, medicineStockId, medicineQuantity, batchAgeDay: ageResult.ageDay },
     })
 
     return { success: true, data: vaccination }
@@ -1391,6 +1407,7 @@ export async function createTreatment(
     const {
       organizationId,
       batchId,
+      clientMutationId,
       startDate,
       endDate,
       medicineName,
@@ -1420,6 +1437,16 @@ export async function createTreatment(
 
     if (!canAccessFarm(role, farmPermissions, batch.building.farmId, "canWrite")) {
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
+    }
+
+    if (clientMutationId) {
+      const existingTreatment = await prisma.treatmentRecord.findFirst({
+        where: { organizationId, clientMutationId },
+        select: treatmentSelect,
+      })
+      if (existingTreatment) {
+        return { success: true, data: existingTreatment }
+      }
     }
 
     if (
@@ -1475,6 +1502,7 @@ export async function createTreatment(
           data: {
             organizationId,
             batchId,
+            clientMutationId: clientMutationId ?? null,
             startDate,
             endDate:         endDate ?? null,
             medicineName,
@@ -1516,7 +1544,7 @@ export async function createTreatment(
       action:         AuditAction.CREATE,
       resourceType:   "TREATMENT_RECORD",
       resourceId:     treatment.id,
-      after:          { batchId, startDate, medicineName, countTreated, medicineStockId, medicineQuantity },
+      after:          { clientMutationId, batchId, startDate, medicineName, countTreated, medicineStockId, medicineQuantity },
     })
 
     return { success: true, data: treatment }

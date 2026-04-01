@@ -17,7 +17,10 @@ import {
   getFormDraft,
   saveFormDraft,
 } from "@/src/actions/form-drafts"
-import { enqueueOfflineDailyRecord } from "@/src/lib/offline-daily-queue"
+import {
+  createClientMutationId,
+  enqueueOfflineDailyRecord,
+} from "@/src/lib/offline-mutation-outbox"
 import { cn } from "@/src/lib/utils"
 
 function emptyToUndefined(val: unknown): unknown {
@@ -221,7 +224,9 @@ export function DailyForm({
   }
 
   const queueCurrentEntry = async (data: ParsedValues) => {
+    const clientMutationId = createClientMutationId("daily")
     await enqueueOfflineDailyRecord({
+      clientMutationId,
       organizationId,
       batchId,
       dateIso: new Date(`${selectedDate}T00:00:00Z`).toISOString(),
@@ -270,6 +275,7 @@ export function DailyForm({
       }
 
       const result = await createDailyRecord({
+        clientMutationId: createClientMutationId("daily"),
         organizationId,
         batchId,
         date: new Date(`${selectedDate}T00:00:00Z`),

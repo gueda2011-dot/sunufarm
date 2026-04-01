@@ -20,6 +20,7 @@ import { auth }        from "@/src/auth"
 import { Sidebar }     from "@/src/components/layout/Sidebar"
 import { Header }      from "@/src/components/layout/Header"
 import { BottomNav }   from "@/src/components/layout/BottomNav"
+import { GlobalSyncBanner } from "@/src/components/layout/GlobalSyncBanner"
 import { ConnectionBanner } from "@/src/components/pwa/ConnectionBanner"
 import { InstallPrompt } from "@/src/components/pwa/InstallPrompt"
 import { PushNotificationsPrompt } from "@/src/components/pwa/PushNotificationsPrompt"
@@ -121,6 +122,7 @@ export default async function DashboardLayout({
 
         <div className="px-4 pt-4 sm:px-6 lg:px-8">
           <div className="space-y-3">
+            <GlobalSyncBanner />
             <ConnectionBanner />
             <InstallPrompt />
             <PushNotificationsPrompt

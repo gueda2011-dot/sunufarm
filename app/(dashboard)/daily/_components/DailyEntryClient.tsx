@@ -15,7 +15,7 @@ import {
   readOfflineDailySyncMeta,
   retryOfflineDailyQueueItem,
   subscribeToOfflineDailyQueue,
-} from "@/src/lib/offline-daily-queue"
+} from "@/src/lib/offline-mutation-outbox"
 
 function todayStr(): string {
   const now = new Date()

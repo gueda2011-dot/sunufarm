@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-01 (Session 58)
+> Derniere mise a jour : 2026-04-01 (Session 59)
 
 ---
 
@@ -25,7 +25,8 @@
 
 - Le projet n'est plus au stade "schema + maquettes" : le coeur applicatif fonctionne deja sur les domaines principaux
 - Les modules terrain critiques sont presents : `lots`, `saisie journaliere`, `stock`, `sante`, `achats`, `depenses`, `ventes`, `dashboard`
-- Une V1 hors ligne existe maintenant pour `saisie journaliere`, `vaccinations`, `traitements`, `depenses` et `ventes`
+- Une V1 hors ligne existe maintenant pour `saisie journaliere`, `vaccinations`, `traitements`, `depenses`, `ventes` et les mouvements `stock`
+- Les flux offline prioritaires commencent a etre durcis cote serveur avec idempotence sur rejeu
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
@@ -91,7 +92,7 @@
 
 - Ajout de notifications admin evenementielles pour les paiements et abonnements avec push `SUPER_ADMIN`
 - Correction des erreurs lint restantes sur les composants PWA
-- Mise en place d'une file locale navigateur pour les mutations offline dans `src/lib/offline-daily-queue.ts`
+- Mise en place d'une file locale navigateur pour les mutations offline dans `src/lib/offline-mutation-outbox.ts`
 - Ajout d'une V1 hors ligne + resynchronisation pour :
   - `Saisie journaliere`
   - `Vaccinations`
@@ -122,7 +123,7 @@
 - Branchement du formulaire `CreateSaleForm` sur l'enregistrement hors ligne et la resynchronisation automatique
 - Ajout d'actions explicites `Retenter` et `Supprimer` sur les elements en erreur ou en attente dans le panneau de synchro
 - Rebranchement de ces actions fines sur `saisie journaliere`, `depenses` et `sante`
-- Ajout de tests cibles sur `tests/offline-daily-queue.test.ts` pour couvrir stockage local, rejeu cible et deduplication de saisie journaliere
+- Ajout de tests cibles sur `tests/offline-mutation-outbox.test.ts` pour couvrir stockage local, rejeu cible et deduplication de saisie journaliere
 
 ### Resultat
 
@@ -135,6 +136,54 @@
 - Etendre la meme logique hors ligne aux mouvements `stock` si le besoin terrain est confirme
 - Introduire une vraie strategie d'idempotence serveur pour les mutations offline les plus sensibles
 - Ajouter une vue transversale de synchronisation globale, pas seulement par module
+
+---
+
+## Session 59 - 2026-04-01
+
+### Travail effectue
+
+- Ajout d'une `clientMutationId` persistante sur `DailyRecord`, `Expense`, `VaccinationRecord`, `TreatmentRecord` et `Sale`
+- Ajout de la migration Prisma `20260401143000_add_client_mutation_ids_for_offline_sync`
+- Durcissement des actions `createDailyRecord`, `createExpense`, `createVaccination`, `createTreatment` et `createSale` pour retourner l'enregistrement existant si la mutation a deja ete traitee
+- Branchement des formulaires offline pour reutiliser la meme identite de mutation entre soumission immediate et rejeu via la file locale
+- Regeneration du client Prisma et mise a jour de la documentation d'etat
+
+### Resultat
+
+- Le mode hors ligne est plus robuste face aux doublons lies aux coupures reseau ou aux rejeux apres reconnexion
+- La synchro terrain ne depend plus uniquement de la deduplication cote navigateur
+- Le projet entre dans une vraie phase de durcissement offline, pas seulement d'extension fonctionnelle
+
+### Prochaine session recommandee
+
+- Continuer a factoriser la couche offline maintenant qu'elle est transversale
+- Durcir l'UX de supervision cross-module et les details de reprise
+- Etendre ensuite le meme niveau de robustesse aux autres flux terrain critiques
+
+---
+
+## Session 60 - 2026-04-01
+
+### Travail effectue
+
+- Renommage de la couche offline centrale vers `src/lib/offline-mutation-outbox.ts`
+- Ajout d'une vue globale de synchronisation cross-module dans le layout dashboard via `GlobalSyncBanner`
+- Extension de l'idempotence serveur aux mouvements `FeedMovement` et `MedicineMovement`
+- Ajout d'une saisie de mouvements de stock dans le module `Stock`, avec file offline, rejeu automatique et reprise manuelle
+- Affichage des derniers mouvements de medicaments dans la page stock
+
+### Resultat
+
+- Le nom de la couche offline reflete maintenant son vrai perimetre transverse
+- Un utilisateur ou superviseur voit l'etat global de synchronisation sans devoir ouvrir chaque module
+- Le module `stock` rejoint les flux critiques capables de resister a une coupure reseau temporaire
+
+### Prochaine session recommandee
+
+- Factoriser les hooks repetes de synchro offline entre modules
+- Ajouter plus de validations UX sur les formulaires de mouvements stock
+- Renforcer les tests de l'outbox sur les nouveaux flux `stock`
 
 ---
 

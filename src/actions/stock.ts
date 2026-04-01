@@ -103,6 +103,8 @@ const movementDateSchema = z.coerce.date().refine(
   { message: "La date du mouvement ne peut pas être dans le futur" },
 )
 
+const clientMutationIdSchema = z.string().trim().min(1).max(100)
+
 // ---------------------------------------------------------------------------
 // Schémas Zod — Stock aliment
 // ---------------------------------------------------------------------------
@@ -160,6 +162,7 @@ const deleteFeedStockSchema = z.object({
 
 const createFeedMovementSchema = z.object({
   organizationId: requiredIdSchema,
+  clientMutationId: clientMutationIdSchema.optional(),
   feedStockId:    requiredIdSchema,
   type:           z.nativeEnum(FeedMovementType),
   /**
@@ -240,6 +243,7 @@ const deleteMedicineStockSchema = z.object({
 
 const createMedicineMovementSchema = z.object({
   organizationId:  requiredIdSchema,
+  clientMutationId: clientMutationIdSchema.optional(),
   medicineStockId: requiredIdSchema,
   type:            z.nativeEnum(MedicineMovementType),
   /**
@@ -908,6 +912,7 @@ export async function createFeedMovement(
 
     const {
       organizationId,
+      clientMutationId,
       feedStockId,
       type,
       quantityKg,
@@ -927,6 +932,16 @@ export async function createFeedMovement(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+
+    if (clientMutationId) {
+      const existingMovement = await prisma.feedMovement.findFirst({
+        where: { organizationId, clientMutationId },
+        select: feedMovementSelect,
+      })
+      if (existingMovement) {
+        return { success: true, data: existingMovement }
+      }
+    }
 
     // Charger le stock pour obtenir farmId, feedTypeId et quantityKg courante
     const feedStock = await prisma.feedStock.findFirst({
@@ -981,6 +996,7 @@ export async function createFeedMovement(
         return tx.feedMovement.create({
           data: {
             organizationId,
+            clientMutationId: clientMutationId ?? null,
             feedStockId,
             feedTypeId:   feedStock.feedTypeId,
             type,
@@ -1009,7 +1025,7 @@ export async function createFeedMovement(
       action:         AuditAction.CREATE,
       resourceType:   "FEED_MOVEMENT",
       resourceId:     createdMovement.id,
-      after:          { feedStockId, type, quantityKg, unitPriceFcfa, batchId, date },
+      after:          { clientMutationId, feedStockId, type, quantityKg, unitPriceFcfa, batchId, date },
     })
 
     return { success: true, data: createdMovement }
@@ -1436,6 +1452,7 @@ export async function createMedicineMovement(
 
     const {
       organizationId,
+      clientMutationId,
       medicineStockId,
       type,
       quantity,
@@ -1455,6 +1472,16 @@ export async function createMedicineMovement(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+
+    if (clientMutationId) {
+      const existingMovement = await prisma.medicineMovement.findFirst({
+        where: { organizationId, clientMutationId },
+        select: medicineMovementSelect,
+      })
+      if (existingMovement) {
+        return { success: true, data: existingMovement }
+      }
+    }
 
     const medStock = await prisma.medicineStock.findFirst({
       where:  { id: medicineStockId, organizationId },
@@ -1505,6 +1532,7 @@ export async function createMedicineMovement(
         return tx.medicineMovement.create({
           data: {
             organizationId,
+            clientMutationId: clientMutationId ?? null,
             medicineStockId,
             type,
             quantity,
@@ -1532,7 +1560,7 @@ export async function createMedicineMovement(
       action:         AuditAction.CREATE,
       resourceType:   "MEDICINE_MOVEMENT",
       resourceId:     createdMovement.id,
-      after:          { medicineStockId, type, quantity, unitPriceFcfa, batchId, date },
+      after:          { clientMutationId, medicineStockId, type, quantity, unitPriceFcfa, batchId, date },
     })
 
     return { success: true, data: createdMovement }

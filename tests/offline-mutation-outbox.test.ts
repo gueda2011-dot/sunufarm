@@ -40,7 +40,7 @@ import {
   listPendingOfflineQueueItemsByScope,
   readOfflineDailySyncMeta,
   retryOfflineDailyQueueItem,
-} from "@/src/lib/offline-daily-queue"
+} from "@/src/lib/offline-mutation-outbox"
 
 class FakeRequest<T> {
   onsuccess: ((event: Event) => void) | null = null
@@ -229,6 +229,7 @@ describe("offline daily queue", () => {
 
   it("range une vente hors ligne dans le scope sales", async () => {
     await enqueueOfflineSale({
+      clientMutationId: "sale:1",
       organizationId: "org-1",
       saleDate: "2026-04-01",
       productType: "OEUF",
@@ -265,6 +266,7 @@ describe("offline daily queue", () => {
     })
 
     const queued = await enqueueOfflineExpense({
+      clientMutationId: "expense:1",
       organizationId: "org-1",
       description: "Carburant",
       amountFcfa: 20000,
@@ -296,6 +298,7 @@ describe("offline daily queue", () => {
     })
 
     await enqueueOfflineDailyRecord({
+      clientMutationId: "daily:1",
       organizationId: "org-1",
       batchId: "batch-1",
       dateIso: "2026-04-01T00:00:00.000Z",

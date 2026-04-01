@@ -616,6 +616,7 @@ model DailyRecord {
   id             String   @id @default(cuid())
   organizationId String
   batchId        String
+  clientMutationId String?
   date           DateTime @db.Date
 
   // Champs principaux — obligatoires pour la saisie rapide terrain
@@ -642,6 +643,7 @@ model DailyRecord {
 
   // Contrainte métier : 1 seule saisie par lot et par jour
   @@unique([batchId, date])
+  @@unique([organizationId, clientMutationId])
   @@index([batchId])
   @@index([organizationId])
   @@index([date])
@@ -762,6 +764,7 @@ model VaccinationRecord {
   id              String   @id @default(cuid())
   organizationId  String
   batchId         String
+  clientMutationId String?
   date            DateTime @db.Date
   batchAgeDay     Int // âge du lot en jours à la date de vaccination
   vaccineName     String
@@ -779,6 +782,7 @@ model VaccinationRecord {
 
   @@index([batchId])
   @@index([organizationId])
+  @@unique([organizationId, clientMutationId])
 }
 
 // Traitement médicamenteux administré à un lot
@@ -786,6 +790,7 @@ model TreatmentRecord {
   id              String    @id @default(cuid())
   organizationId  String
   batchId         String
+  clientMutationId String?
   startDate       DateTime  @db.Date
   endDate         DateTime? @db.Date
   medicineName    String
@@ -804,6 +809,7 @@ model TreatmentRecord {
 
   @@index([batchId])
   @@index([organizationId])
+  @@unique([organizationId, clientMutationId])
 }
 
 // =============================================================================
@@ -834,6 +840,7 @@ model FeedStock {
 model FeedMovement {
   id             String           @id @default(cuid())
   organizationId String
+  clientMutationId String?
   feedStockId    String
   feedTypeId     String
   type           FeedMovementType
@@ -854,6 +861,7 @@ model FeedMovement {
   @@index([feedStockId])
   @@index([organizationId])
   @@index([date])
+  @@unique([organizationId, clientMutationId])
 }
 
 // =============================================================================
@@ -887,6 +895,7 @@ model MedicineStock {
 model MedicineMovement {
   id              String               @id @default(cuid())
   organizationId  String
+  clientMutationId String?
   medicineStockId String
   type            MedicineMovementType
   quantity        Float
@@ -904,6 +913,7 @@ model MedicineMovement {
 
   @@index([medicineStockId])
   @@index([organizationId])
+  @@unique([organizationId, clientMutationId])
 }
 
 // =============================================================================
@@ -955,6 +965,7 @@ model Supplier {
 model Sale {
   id             String          @id @default(cuid())
   organizationId String
+  clientMutationId String?
   customerId     String?
   invoiceId      String?         @unique
   saleDate       DateTime        @db.Date
@@ -977,6 +988,7 @@ model Sale {
   @@index([saleDate])
   @@index([organizationId, saleDate])
   @@index([organizationId, customerId, saleDate])
+  @@unique([organizationId, clientMutationId])
 }
 
 model SaleItem {
@@ -1069,6 +1081,7 @@ model ExpenseCategory {
 model Expense {
   id             String   @id @default(cuid())
   organizationId String
+  clientMutationId String?
   batchId        String? // charge directe liée à un lot (mortalité, aliment, médic...)
   farmId         String? // charge indirecte liée à une ferme (loyer, énergie...)
   categoryId     String?
@@ -1094,6 +1107,7 @@ model Expense {
   @@index([organizationId, batchId, date])
   @@index([organizationId, farmId, date])
   @@index([organizationId, categoryId, date])
+  @@unique([organizationId, clientMutationId])
 }
 
 // =============================================================================

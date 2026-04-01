@@ -54,6 +54,8 @@ import { SaleProductType, UserRole } from "@/src/generated/prisma/client"
 // Constantes
 // ---------------------------------------------------------------------------
 
+const clientMutationIdSchema = z.string().trim().min(1).max(100)
+
 /** Unités de vente supportées au MVP */
 const SALE_UNITS = ["KG", "PIECE", "PLATEAU", "CAISSE"] as const
 
@@ -94,6 +96,7 @@ const getSaleSchema = z.object({
 
 const createSaleSchema = z.object({
   organizationId: requiredIdSchema,
+  clientMutationId: clientMutationIdSchema.optional(),
   customerId:     optionalIdSchema,
   saleDate:       dateSchema,
   productType:    z.nativeEnum(SaleProductType),
@@ -392,7 +395,7 @@ export async function createSale(
       return { success: false, error: "Données invalides" }
     }
 
-    const { organizationId, customerId, items, ...saleData } = parsed.data
+    const { organizationId, clientMutationId, customerId, items, ...saleData } = parsed.data
     const accessResult = await requireOrganizationModuleContext(organizationId, "SALES")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
@@ -402,6 +405,16 @@ export async function createSale(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+
+    if (clientMutationId) {
+      const existingSale = await prisma.sale.findFirst({
+        where: { organizationId, clientMutationId },
+        select: saleDetailSelect,
+      })
+      if (existingSale) {
+        return { success: true, data: existingSale }
+      }
+    }
 
     // Valider le client si fourni
     if (customerId) {
@@ -428,6 +441,7 @@ export async function createSale(
       const created = await tx.sale.create({
         data: {
           organizationId,
+          clientMutationId: clientMutationId ?? null,
           customerId:  customerId ?? null,
           totalFcfa,
           createdById: actorId,
@@ -454,7 +468,7 @@ export async function createSale(
       action:         AuditAction.CREATE,
       resourceType:   "SALE",
       resourceId:     sale.id,
-      after:          { customerId, totalFcfa, itemCount: items.length, ...saleData },
+      after:          { clientMutationId, customerId, totalFcfa, itemCount: items.length, ...saleData },
     })
 
     return { success: true, data: sale }

@@ -17,6 +17,7 @@ import { createVaccination, createTreatment } from "@/src/actions/health"
 import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 import {
+  createClientMutationId,
   deleteOfflineDailyQueueItem,
   enqueueOfflineTreatment,
   enqueueOfflineVaccination,
@@ -25,7 +26,7 @@ import {
   readOfflineDailySyncMeta,
   retryOfflineDailyQueueItem,
   subscribeToOfflineDailyQueue,
-} from "@/src/lib/offline-daily-queue"
+} from "@/src/lib/offline-mutation-outbox"
 import type {
   VaccinationSummary,
   TreatmentSummary,
@@ -167,7 +168,9 @@ export function HealthSection({
     const fd = new FormData(e.currentTarget)
 
     startTransition(async () => {
+      const clientMutationId = createClientMutationId("vaccination")
       const payload = {
+        clientMutationId,
         organizationId,
         batchId,
         date: fd.get("date") as string,
@@ -246,7 +249,9 @@ export function HealthSection({
     const countRaw    = fd.get("countTreated")  as string
 
     startTransition(async () => {
+      const clientMutationId = createClientMutationId("treatment")
       const payload = {
+        clientMutationId,
         organizationId,
         batchId,
         startDate: fd.get("startDate") as string,

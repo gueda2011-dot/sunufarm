@@ -4,6 +4,7 @@ import { createDailyRecord } from "@/src/actions/daily-records"
 import { createExpense } from "@/src/actions/expenses"
 import { createTreatment, createVaccination } from "@/src/actions/health"
 import { createSale } from "@/src/actions/sales"
+import { createFeedMovement, createMedicineMovement } from "@/src/actions/stock"
 
 const DB_NAME = "sunufarm-offline"
 const DB_VERSION = 1
@@ -12,6 +13,7 @@ const SYNC_META_KEY = "sunufarm:offline-sync-meta"
 const QUEUE_EVENT = "sunufarm:offline-outbox-changed"
 
 export interface OfflineDailyQueuePayload {
+  clientMutationId: string
   organizationId: string
   batchId: string
   dateIso: string
@@ -24,6 +26,7 @@ export interface OfflineDailyQueuePayload {
 }
 
 export interface OfflineExpenseQueuePayload {
+  clientMutationId: string
   organizationId: string
   date: string
   description: string
@@ -33,6 +36,7 @@ export interface OfflineExpenseQueuePayload {
 }
 
 export interface OfflineVaccinationQueuePayload {
+  clientMutationId: string
   organizationId: string
   batchId: string
   date: string
@@ -46,6 +50,7 @@ export interface OfflineVaccinationQueuePayload {
 }
 
 export interface OfflineTreatmentQueuePayload {
+  clientMutationId: string
   organizationId: string
   batchId: string
   startDate: string
@@ -68,6 +73,7 @@ export interface OfflineSaleQueueItemPayload {
 }
 
 export interface OfflineSaleQueuePayload {
+  clientMutationId: string
   organizationId: string
   customerId?: string
   saleDate: string
@@ -76,12 +82,40 @@ export interface OfflineSaleQueuePayload {
   items: OfflineSaleQueueItemPayload[]
 }
 
+export interface OfflineFeedMovementQueuePayload {
+  clientMutationId: string
+  organizationId: string
+  feedStockId: string
+  type: "ENTREE" | "SORTIE" | "INVENTAIRE" | "AJUSTEMENT"
+  quantityKg: number
+  unitPriceFcfa?: number
+  batchId?: string
+  reference?: string
+  notes?: string
+  date: string
+}
+
+export interface OfflineMedicineMovementQueuePayload {
+  clientMutationId: string
+  organizationId: string
+  medicineStockId: string
+  type: "ENTREE" | "SORTIE" | "PEREMPTION" | "INVENTAIRE"
+  quantity: number
+  unitPriceFcfa?: number
+  batchId?: string
+  reference?: string
+  notes?: string
+  date: string
+}
+
 type OfflineQueuePayload =
   | OfflineDailyQueuePayload
   | OfflineExpenseQueuePayload
   | OfflineVaccinationQueuePayload
   | OfflineTreatmentQueuePayload
   | OfflineSaleQueuePayload
+  | OfflineFeedMovementQueuePayload
+  | OfflineMedicineMovementQueuePayload
 
 export type OfflineQueueItemType =
   | "CREATE_DAILY_RECORD"
@@ -89,6 +123,8 @@ export type OfflineQueueItemType =
   | "CREATE_VACCINATION"
   | "CREATE_TREATMENT"
   | "CREATE_SALE"
+  | "CREATE_FEED_MOVEMENT"
+  | "CREATE_MEDICINE_MOVEMENT"
 
 export interface OfflineQueueItem {
   id: string
@@ -111,6 +147,8 @@ export interface OfflineDailySyncMeta {
   lastSyncedAt: string | null
   lastError: string | null
 }
+
+export type OfflineSyncMeta = OfflineDailySyncMeta
 
 function emitQueueChanged() {
   if (typeof window === "undefined") return
@@ -192,7 +230,7 @@ function createQueueKey(parts: string[]) {
   return parts.join(":")
 }
 
-function createRandomQueueKey(prefix: string) {
+export function createClientMutationId(prefix: string) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${prefix}:${crypto.randomUUID()}`
   }
@@ -225,6 +263,14 @@ function buildQueueLabel(item: {
       const payload = item.payload as OfflineSaleQueuePayload
       return `Vente ${payload.productType} - ${payload.saleDate}`
     }
+    case "CREATE_FEED_MOVEMENT": {
+      const payload = item.payload as OfflineFeedMovementQueuePayload
+      return `Mouvement aliment ${payload.type} - ${payload.date}`
+    }
+    case "CREATE_MEDICINE_MOVEMENT": {
+      const payload = item.payload as OfflineMedicineMovementQueuePayload
+      return `Mouvement medicament ${payload.type} - ${payload.date}`
+    }
   }
 }
 
@@ -242,6 +288,9 @@ function buildQueueScope(item: {
       return "health"
     case "CREATE_SALE":
       return "sales"
+    case "CREATE_FEED_MOVEMENT":
+    case "CREATE_MEDICINE_MOVEMENT":
+      return "stock"
   }
 }
 
@@ -279,6 +328,8 @@ export async function listPendingOfflineDailyQueueItems(): Promise<OfflineQueueI
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
 
+export const listPendingOfflineQueueItems = listPendingOfflineDailyQueueItems
+
 export async function listPendingOfflineQueueItemsByScope(scope: string) {
   const items = await listPendingOfflineDailyQueueItems()
   return items.filter((item) => item.scope === scope)
@@ -301,6 +352,8 @@ export async function deleteOfflineDailyQueueItem(id: string) {
   emitQueueChanged()
 }
 
+export const deleteOfflineQueueItem = deleteOfflineDailyQueueItem
+
 export async function retryOfflineDailyQueueItem(id: string) {
   const item = await getOfflineQueueItem(id)
   if (!item) return null
@@ -315,6 +368,8 @@ export async function retryOfflineDailyQueueItem(id: string) {
   await putQueueItem(nextItem)
   return nextItem
 }
+
+export const retryOfflineQueueItem = retryOfflineDailyQueueItem
 
 async function enqueueOfflineItem(
   type: OfflineQueueItemType,
@@ -375,7 +430,23 @@ export async function enqueueOfflineSale(payload: OfflineSaleQueuePayload) {
   return enqueueOfflineItem(
     "CREATE_SALE",
     payload,
-    createRandomQueueKey("sale"),
+    payload.clientMutationId,
+  )
+}
+
+export async function enqueueOfflineFeedMovement(payload: OfflineFeedMovementQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_FEED_MOVEMENT",
+    payload,
+    payload.clientMutationId,
+  )
+}
+
+export async function enqueueOfflineMedicineMovement(payload: OfflineMedicineMovementQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_MEDICINE_MOVEMENT",
+    payload,
+    payload.clientMutationId,
   )
 }
 
@@ -384,6 +455,7 @@ async function replayQueueItem(item: OfflineQueueItem) {
     case "CREATE_DAILY_RECORD": {
       const payload = item.payload as OfflineDailyQueuePayload
       return createDailyRecord({
+        clientMutationId: payload.clientMutationId,
         organizationId: payload.organizationId,
         batchId: payload.batchId,
         date: new Date(payload.dateIso),
@@ -398,6 +470,7 @@ async function replayQueueItem(item: OfflineQueueItem) {
     case "CREATE_EXPENSE": {
       const payload = item.payload as OfflineExpenseQueuePayload
       return createExpense({
+        clientMutationId: payload.clientMutationId,
         organizationId: payload.organizationId,
         description: payload.description,
         amountFcfa: payload.amountFcfa,
@@ -409,6 +482,7 @@ async function replayQueueItem(item: OfflineQueueItem) {
     case "CREATE_VACCINATION": {
       const payload = item.payload as OfflineVaccinationQueuePayload
       return createVaccination({
+        clientMutationId: payload.clientMutationId,
         organizationId: payload.organizationId,
         batchId: payload.batchId,
         date: new Date(payload.date),
@@ -424,6 +498,7 @@ async function replayQueueItem(item: OfflineQueueItem) {
     case "CREATE_TREATMENT": {
       const payload = item.payload as OfflineTreatmentQueuePayload
       return createTreatment({
+        clientMutationId: payload.clientMutationId,
         organizationId: payload.organizationId,
         batchId: payload.batchId,
         startDate: new Date(payload.startDate),
@@ -440,12 +515,43 @@ async function replayQueueItem(item: OfflineQueueItem) {
     case "CREATE_SALE": {
       const payload = item.payload as OfflineSaleQueuePayload
       return createSale({
+        clientMutationId: payload.clientMutationId,
         organizationId: payload.organizationId,
         customerId: payload.customerId,
         saleDate: payload.saleDate,
         productType: payload.productType,
         notes: payload.notes,
         items: payload.items,
+      })
+    }
+    case "CREATE_FEED_MOVEMENT": {
+      const payload = item.payload as OfflineFeedMovementQueuePayload
+      return createFeedMovement({
+        clientMutationId: payload.clientMutationId,
+        organizationId: payload.organizationId,
+        feedStockId: payload.feedStockId,
+        type: payload.type,
+        quantityKg: payload.quantityKg,
+        unitPriceFcfa: payload.unitPriceFcfa,
+        batchId: payload.batchId,
+        reference: payload.reference,
+        notes: payload.notes,
+        date: new Date(payload.date),
+      })
+    }
+    case "CREATE_MEDICINE_MOVEMENT": {
+      const payload = item.payload as OfflineMedicineMovementQueuePayload
+      return createMedicineMovement({
+        clientMutationId: payload.clientMutationId,
+        organizationId: payload.organizationId,
+        medicineStockId: payload.medicineStockId,
+        type: payload.type,
+        quantity: payload.quantity,
+        unitPriceFcfa: payload.unitPriceFcfa,
+        batchId: payload.batchId,
+        reference: payload.reference,
+        notes: payload.notes,
+        date: new Date(payload.date),
       })
     }
   }
@@ -515,6 +621,8 @@ export async function flushOfflineDailyQueue(options?: { itemId?: string }) {
   }
 }
 
+export const flushOfflineMutationOutbox = flushOfflineDailyQueue
+
 export function subscribeToOfflineDailyQueue(callback: () => void) {
   if (typeof window === "undefined") {
     return () => {}
@@ -527,3 +635,6 @@ export function subscribeToOfflineDailyQueue(callback: () => void) {
     window.removeEventListener(QUEUE_EVENT, handler)
   }
 }
+
+export const subscribeToOfflineMutationOutbox = subscribeToOfflineDailyQueue
+export const readOfflineSyncMeta = readOfflineDailySyncMeta
