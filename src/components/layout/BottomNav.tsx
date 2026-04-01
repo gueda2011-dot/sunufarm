@@ -12,6 +12,7 @@ import {
   Bird,
   Warehouse,
   BarChart3,
+  Building2,
   Menu,
   Egg,
   Package,
@@ -38,6 +39,7 @@ const tabs = [
 const moreLinks = [
   { href: "/eggs", label: "Production oeufs", icon: Egg, module: "EGGS" as const },
   { href: "/reports", label: "Rapports", icon: BarChart3, module: "REPORTS" as const, feature: "REPORTS" as const },
+  { href: "/business", label: "Business", icon: Building2, module: "DASHBOARD" as const, feature: "GLOBAL_ANALYTICS" as const },
   { href: "/stock", label: "Stock", icon: Package, module: "STOCK" as const },
   { href: "/sales", label: "Ventes", icon: ShoppingCart, module: "SALES" as const },
   { href: "/customers", label: "Clients", icon: Users, module: "CUSTOMERS" as const },
@@ -66,8 +68,8 @@ export function BottomNav({ plan, role, modulePermissions }: BottomNavProps) {
       return false
     }
 
-    if ("feature" in item && item.feature === "REPORTS") {
-      return hasPlanFeature(plan, "REPORTS")
+    if ("feature" in item && item.feature) {
+      return hasPlanFeature(plan, item.feature)
     }
 
     return true

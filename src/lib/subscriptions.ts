@@ -24,6 +24,7 @@ export type SubscriptionFeature =
   | "PROFITABILITY"
   | "ALERTS"
   | "ADVANCED_HEALTH"
+  | "GLOBAL_ANALYTICS"
   | "PREDICTIVE_HEALTH_ALERTS"
   | "PREDICTIVE_MARGIN_ALERTS"
   | "MULTI_FARM"
@@ -64,6 +65,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       PROFITABILITY: false,
       ALERTS: false,
       ADVANCED_HEALTH: false,
+      GLOBAL_ANALYTICS: false,
       PREDICTIVE_HEALTH_ALERTS: false,
       PREDICTIVE_MARGIN_ALERTS: false,
       MULTI_FARM: false,
@@ -92,6 +94,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       PROFITABILITY: true,
       ALERTS: true,
       ADVANCED_HEALTH: true,
+      GLOBAL_ANALYTICS: false,
       PREDICTIVE_HEALTH_ALERTS: true,
       PREDICTIVE_MARGIN_ALERTS: true,
       MULTI_FARM: false,
@@ -119,6 +122,7 @@ export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
       PROFITABILITY: true,
       ALERTS: true,
       ADVANCED_HEALTH: true,
+      GLOBAL_ANALYTICS: true,
       PREDICTIVE_HEALTH_ALERTS: true,
       PREDICTIVE_MARGIN_ALERTS: true,
       MULTI_FARM: true,
@@ -183,6 +187,8 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
       return "Les alertes intelligentes sont disponibles a partir du plan Pro."
     case "ADVANCED_HEALTH":
       return "La surveillance sanitaire avancee est disponible a partir du plan Pro."
+    case "GLOBAL_ANALYTICS":
+      return "La vue Business transverse est reservee au plan Business."
     case "PREDICTIVE_HEALTH_ALERTS":
       return "Les alertes predictives de mortalite sont disponibles a partir du plan Pro."
     case "PREDICTIVE_MARGIN_ALERTS":

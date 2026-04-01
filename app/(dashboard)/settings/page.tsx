@@ -44,6 +44,7 @@ const FEATURE_LABELS = [
   { key: "REPORTS", label: "Rapports mensuels" },
   { key: "PROFITABILITY", label: "Rentabilite par lot" },
   { key: "AI_BATCH_ANALYSIS", label: "Analyse AI des lots" },
+  { key: "GLOBAL_ANALYTICS", label: "Vue Business transverse" },
   { key: "PREDICTIVE_STOCK_ALERTS", label: "Prediction de rupture stock" },
   { key: "PREDICTIVE_HEALTH_ALERTS", label: "Prediction risque mortalite" },
   { key: "PREDICTIVE_MARGIN_ALERTS", label: "Projection marge finale" },

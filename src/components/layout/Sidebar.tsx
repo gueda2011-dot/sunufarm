@@ -16,6 +16,7 @@ import {
   ShoppingCart,
   ShoppingBag,
   Syringe,
+  Building2,
   DollarSign,
   BarChart3,
   Users,
@@ -40,6 +41,7 @@ const navItems = [
   { href: "/health", label: "Sante animale", icon: Syringe, module: "HEALTH" as const },
   { href: "/finances", label: "Depenses", icon: DollarSign, module: "FINANCES" as const },
   { href: "/reports", label: "Rapports", icon: BarChart3, module: "REPORTS" as const },
+  { href: "/business", label: "Business", icon: Building2, module: "DASHBOARD" as const, feature: "GLOBAL_ANALYTICS" as const },
 ] as const
 
 const bottomNavItems = [
@@ -63,6 +65,10 @@ export function Sidebar({ orgName, plan, role, modulePermissions }: SidebarProps
 
     if (item.href === "/reports") {
       return hasPlanFeature(plan, "REPORTS")
+    }
+
+    if ("feature" in item && item.feature) {
+      return hasPlanFeature(plan, item.feature)
     }
 
     return true
