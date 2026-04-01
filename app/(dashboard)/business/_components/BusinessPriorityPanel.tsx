@@ -22,15 +22,23 @@ export function BusinessPriorityPanel({
   criticalStockItems: BusinessCriticalStockItem[]
 }) {
   return (
-    <section className="grid gap-4 xl:grid-cols-3">
-      <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900">Signaux prioritaires</h2>
+        <p className="mt-1 text-sm text-gray-500">
+          Ce qu&apos;il faut traiter en premier pour proteger la marge, la sante et la continuité terrain.
+        </p>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="rounded-3xl border border-red-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="rounded-2xl bg-red-50 p-2 text-red-600">
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Lots a surveiller</h2>
-            <p className="text-sm text-gray-500">Projection de marge negative en priorite.</p>
+            <p className="text-sm text-gray-500">Les dossiers qui menacent directement la rentabilite.</p>
           </div>
         </div>
 
@@ -60,14 +68,14 @@ export function BusinessPriorityPanel({
         </div>
       </div>
 
-      <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="rounded-3xl border border-orange-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="rounded-2xl bg-orange-50 p-2 text-orange-600">
             <Bird className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Risque sanitaire</h2>
-            <p className="text-sm text-gray-500">Lots avec mortalite a surveiller ou critique.</p>
+            <h2 className="text-lg font-semibold text-gray-900">Sante a surveiller</h2>
+            <p className="text-sm text-gray-500">Les lots dont le risque mortalite demande une attention rapide.</p>
           </div>
         </div>
 
@@ -97,14 +105,14 @@ export function BusinessPriorityPanel({
         </div>
       </div>
 
-      <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="rounded-3xl border border-amber-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="rounded-2xl bg-amber-50 p-2 text-amber-700">
             <Package2 className="h-5 w-5" />
           </div>
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Stocks critiques</h2>
-            <p className="text-sm text-gray-500">Articles a reapprovisionner sans attendre.</p>
+            <p className="text-sm text-gray-500">Les reapprovisionnements a traiter avant qu&apos;ils bloquent l&apos;exploitation.</p>
           </div>
         </div>
 
@@ -138,6 +146,7 @@ export function BusinessPriorityPanel({
             ))
           )}
         </div>
+      </div>
       </div>
     </section>
   )

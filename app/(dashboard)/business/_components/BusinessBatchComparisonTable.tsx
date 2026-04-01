@@ -17,9 +17,9 @@ export function BusinessBatchComparisonTable({
     <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Comparaison des lots actifs</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Vue comparative des lots</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Une lecture simple pour arbitrer rapidement entre marge, sante et priorite terrain.
+            Une lecture de decision pour voir quels lots tirent l&apos;exploitation vers le haut ou vers le risque.
           </p>
         </div>
       </div>

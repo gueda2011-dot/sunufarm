@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import type { Metadata } from "next"
-import { Crown, LineChart, ShieldAlert } from "lucide-react"
+import Link from "next/link"
+import { Crown, Download, LineChart, ShieldAlert } from "lucide-react"
 import { auth } from "@/src/auth"
 import { getBusinessDashboardOverview } from "@/src/actions/business"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
@@ -31,14 +32,14 @@ export default async function BusinessPage() {
       <div className="mx-auto max-w-5xl space-y-6">
         <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-green-800 px-6 py-8 text-white shadow-lg">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-green-200">
-            Pilotage Business
+            Vue exploitation Business
           </p>
           <h1 className="mt-2 text-3xl font-bold">
-            Une vue transverse pour diriger l&apos;exploitation
+            Un resume dirigeant pour piloter l&apos;exploitation
           </h1>
           <p className="mt-3 max-w-2xl text-sm text-slate-100 sm:text-base">
-            Cette page regroupe les risques, la marge projetee et les priorites critiques
-            dans une seule vue dirigeant. Elle est reservee au plan Business.
+            Cette page rassemble les signaux critiques, les comparaisons de lots et les
+            decisions a prendre dans une seule lecture premium. Elle est reservee au plan Business.
           </p>
         </section>
 
@@ -59,10 +60,10 @@ export default async function BusinessPage() {
       <div className="mx-auto max-w-5xl space-y-6">
         <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-green-800 px-6 py-8 text-white shadow-lg">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-green-200">
-            Pilotage Business
+            Vue exploitation Business
           </p>
           <h1 className="mt-2 text-3xl font-bold">
-            Vue transverse de l&apos;exploitation
+            Resume dirigeant indisponible
           </h1>
         </section>
 
@@ -81,46 +82,66 @@ export default async function BusinessPage() {
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-green-200">
-              Pilotage Business
+              Vue exploitation Business
             </p>
             <h1 className="mt-2 text-3xl font-bold">
-              Une lecture dirigeant de l&apos;exploitation
+              Resume dirigeant de l&apos;exploitation
             </h1>
             <p className="mt-3 text-sm text-slate-100 sm:text-base">
-              Ici, l&apos;objectif n&apos;est plus de regarder un lot isole mais de prioriser
-              les vrais sujets qui peuvent faire bouger la performance globale.
+              Ici, on ne regarde plus un lot isole. On priorise les sujets qui peuvent
+              deplacer la rentabilite, la sante et la continuite d&apos;approvisionnement.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl bg-white/10 px-4 py-4 backdrop-blur-sm">
+          <div className="grid gap-3 sm:grid-cols-3 lg:max-w-xl">
+            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
               <div className="flex items-center gap-2 text-green-100">
                 <Crown className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-wide">Vue globale</span>
+                <span className="text-xs uppercase tracking-wide">Resume dirigeant</span>
               </div>
               <p className="mt-2 text-sm text-white">
-                Consolidation exploitation a partir des lots actifs et des signaux predictifs.
+                Une lecture exploitation consolidee pour arbitrer plus vite.
               </p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-4 backdrop-blur-sm">
+            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
               <div className="flex items-center gap-2 text-green-100">
                 <ShieldAlert className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-wide">Priorites</span>
+                <span className="text-xs uppercase tracking-wide">Signaux prioritaires</span>
               </div>
               <p className="mt-2 text-sm text-white">
-                Lots en risque, marges negatives et ruptures critiques au meme endroit.
+                Les risques critiques et modérés sont regroupes au meme endroit.
               </p>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-4 backdrop-blur-sm">
+            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
               <div className="flex items-center gap-2 text-green-100">
                 <LineChart className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-wide">Decision</span>
+                <span className="text-xs uppercase tracking-wide">Decisions a prendre</span>
               </div>
               <p className="mt-2 text-sm text-white">
-                Recommandations deterministes pour arbitrer vite et agir sans bruit.
+                Des recommandations simples pour agir sans perdre de temps.
               </p>
             </div>
           </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link
+            href="/api/reports/business?format=xlsx"
+            className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition-colors hover:bg-green-50"
+          >
+            <Download className="h-4 w-4" />
+            Export Business Excel
+          </Link>
+          <Link
+            href="/api/reports/business?format=csv"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/15"
+          >
+            <Download className="h-4 w-4" />
+            CSV consolide
+          </Link>
+          <p className="self-center text-xs text-green-100">
+            Export V1 : synthese, lots a risque, stocks critiques et recommandations.
+          </p>
         </div>
       </section>
 

@@ -50,6 +50,14 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - consolidation des donnees de performance
 - indicateurs utiles pour mieux lire le rendement
 
+### Vue Business
+
+- vue transverse de pilotage global reservee au plan `Business`
+- KPI consolides exploitation : chiffre d'affaires, couts, marge, mortalite globale, lots a risque, stocks critiques
+- priorisation des signaux existants pour aider a decider plus vite
+- comparaison des lots actifs avec statut global de pilotage
+- recommandations deterministes construites a partir des risques deja calcules
+
 ### Stock et ventes
 
 - suivi du stock d'aliments et de medicaments
@@ -140,6 +148,7 @@ Pour les structures plus avancees qui ont besoin d'un pilotage plus complet et d
 
 Inclut aussi :
 
+- vue Business transverse de pilotage exploitation
 - prediction de rupture stock
 - prediction risque mortalite
 - projection marge finale
@@ -262,6 +271,13 @@ Projection marge finale V1 :
 - affiche une carte predictive avec statut `Favorable / Fragile / Negatif`, explications principales et tendance simple de marge
 - persiste ses snapshots quotidiens dans `PredictiveSnapshot` pour suivre les derives de rentabilite
 - remonte uniquement les cas critiques dans les notifications serveur pour signaler les lots qui se dirigent vers une marge negative
+
+Vue Business V1 :
+
+- disponible sur la page `/business` pour le plan `Business`
+- consolide les signaux existants de stock, mortalite et marge au niveau de l'organisation active
+- affiche une lecture dirigeant avec KPI exploitation, risques prioritaires, comparaison des lots actifs et recommandations metier deterministes
+- reutilise les predictions et tendances deja calculees sans dupliquer la logique metier des modules existants
 
 Scripts utiles :
 

@@ -19,9 +19,9 @@ export function BusinessRecommendationsPanel({
           <Lightbulb className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Recommandations Business</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Decisions a prendre</h2>
           <p className="text-sm text-gray-500">
-            Regles simples pour transformer les signaux en decisions de pilotage.
+            Une synthese simple et actionnable construite a partir des signaux deja disponibles.
           </p>
         </div>
       </div>

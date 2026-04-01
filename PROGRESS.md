@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-01 (Session 63)
+> Derniere mise a jour : 2026-04-01 (Session 64)
 
 ---
 
@@ -30,6 +30,7 @@
 - Une V1 predictive `rupture stock` existe maintenant sur `stock`, avec gating abonnement `PRO / BUSINESS`, snapshots et tendances
 - Une V1 predictive `risque mortalite 7 jours` existe maintenant sur les lots actifs, avec snapshots, tendance et notifications critiques
 - Une V1 predictive `projection marge finale lot` existe maintenant sur les lots actifs, avec benchmark interne, snapshots, tendance et alertes critiques
+- Une V1 `Business` existe maintenant pour le pilotage global exploitation, reservee au plan `BUSINESS`
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
@@ -43,6 +44,7 @@
 | Prediction stock | V1 fonctionnelle, avec seuils, tendances, snapshots et vue admin |
 | Prediction mortalite | V1 fonctionnelle, avec score 7 jours, snapshots, tendance et alertes critiques |
 | Prediction marge | V1 fonctionnelle, avec projection finale, tendance, benchmark interne et alertes critiques |
+| Business dashboard | V1 fonctionnelle, avec KPI exploitation, priorisation des risques et recommandations |
 | Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
 | Depenses / finances | Fonctionnel, avec creation offline V1 |
 | Ventes | Fonctionnel, avec creation offline V1 |
@@ -299,6 +301,38 @@
 - Construire un dashboard predictif transverse pour remonter les lots et stocks les plus a risque
 - Ajouter une vue admin globale des lots en marge negative projetee
 - Enrichir ensuite les recommandations prescriptives a partir des trois briques predictives disponibles
+
+---
+
+## Session 64 - 2026-04-01
+
+### Travail effectue
+
+- Ajout d'une couche `Business` transverse avec page dediee `app/(dashboard)/business/page.tsx`
+- Ajout d'une action serveur `src/actions/business.ts` pour agreger les KPI exploitation et les signaux prioritaires
+- Ajout d'un view model dedie `src/lib/business-dashboard.ts` pour consolider les donnees sans dupliquer la logique predictive existante
+- Reutilisation des predictions et tendances `stock`, `mortalite` et `marge` deja disponibles dans `src/actions/predictive.ts`
+- Ajout de composants Business dedies :
+  - `BusinessKpiGrid`
+  - `BusinessPriorityPanel`
+  - `BusinessBatchComparisonTable`
+  - `BusinessRecommendationsPanel`
+- Ajout d'une nouvelle feature abonnement `GLOBAL_ANALYTICS` dans `src/lib/subscriptions.ts`
+- Branchement de la navigation desktop/mobile et de la page `settings` pour exposer cette nouvelle valeur du plan Business
+- Ajout d'un test unitaire sur la couche d'agregation `src/lib/business-dashboard.test.ts`
+
+### Resultat
+
+- `PRO` reste une lecture lot par lot enrichie
+- `BUSINESS` devient une vraie couche de pilotage global exploitation
+- La valeur du plan Business devient lisible dans l'application avec une vue dirigeant reservee a ce niveau
+- Validation complete connue : `31` fichiers de test, `123` tests, `npm run lint`, `npm test` et `npm run build` passent
+
+### Prochaine session recommandee
+
+- Etendre cette vue Business avec des comparaisons temporelles mensuelles et hebdomadaires
+- Ajouter une vue admin transverse des organisations Business les plus a risque
+- Brancher ensuite des recommandations plus prescriptives sur les regroupements de signaux deja disponibles
 
 ---
 

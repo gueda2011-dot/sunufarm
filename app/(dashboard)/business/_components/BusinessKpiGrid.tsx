@@ -30,9 +30,14 @@ function KpiCard({
     tone === "orange" ? "text-orange-600" :
     tone === "red" ? "text-red-600" :
     "text-gray-900"
+  const cardClass =
+    tone === "green" ? "border-green-200 bg-green-50/60" :
+    tone === "orange" ? "border-orange-200 bg-orange-50/60" :
+    tone === "red" ? "border-red-200 bg-red-50/60" :
+    "border-gray-200 bg-white"
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className={`rounded-2xl border p-4 shadow-sm ${cardClass}`}>
       <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
         {label}
       </p>
@@ -54,7 +59,17 @@ export function BusinessKpiGrid({
   criticalStockCount,
 }: BusinessKpiGridProps) {
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <section className="space-y-3">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Resume dirigeant</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Les indicateurs qui aident a lire vite la sante economique et operationnelle.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <KpiCard
         label="Chiffre d'affaires"
         value={formatMoneyFCFACompact(totalRevenueFcfa)}
@@ -88,7 +103,7 @@ export function BusinessKpiGrid({
         label="Lots a risque"
         value={formatNumber(atRiskBatchCount)}
         detail="Marge fragile ou risque mortalite"
-        tone={atRiskBatchCount > 0 ? "orange" : "green"}
+        tone={atRiskBatchCount > 2 ? "red" : atRiskBatchCount > 0 ? "orange" : "green"}
       />
       <KpiCard
         label="Stocks critiques"
@@ -96,6 +111,7 @@ export function BusinessKpiGrid({
         detail="Articles en rupture critique"
         tone={criticalStockCount > 0 ? "red" : "green"}
       />
-    </div>
+      </div>
+    </section>
   )
 }
