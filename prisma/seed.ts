@@ -19,6 +19,9 @@ import {
   FeedMovementType,
   MedicineMovementType,
   SaleProductType,
+  PaymentMethod,
+  NotificationStatus,
+  NotificationType,
   UserRole,
   SubscriptionPlan,
   SubscriptionStatus,
@@ -193,7 +196,7 @@ async function main() {
   const catAliment = await prisma.expenseCategory.create({
     data: { name: "Aliment",                   code: "ALIMENT",     isSystem: true },
   })
-  await Promise.all([
+  const [catMedicaments, catMainOeuvre, catEnergie] = await Promise.all([
     prisma.expenseCategory.create({ data: { name: "Médicaments / Vaccins",        code: "MEDICAMENT",  isSystem: true } }),
     prisma.expenseCategory.create({ data: { name: "Main d'oeuvre",               code: "MAIN_OEUVRE", isSystem: true } }),
     prisma.expenseCategory.create({ data: { name: "Energie (electricite, eau)",  code: "ENERGIE",     isSystem: true } }),
@@ -211,12 +214,12 @@ async function main() {
 
   // Utilisateurs org 1
   const [superAdmin, owner1, manager1, tech1, saisie1, comptable1] = await Promise.all([
-    prisma.user.create({ data: { email: "admin@sunufarm.sn",         name: "SunuFarm Admin", passwordHash } }),
-    prisma.user.create({ data: { email: "ousmane.diallo@sunufarm.sn",  name: "Ousmane Diallo",  passwordHash } }),
-    prisma.user.create({ data: { email: "mamadou.fall@sunufarm.sn",    name: "Mamadou Fall",    passwordHash } }),
-    prisma.user.create({ data: { email: "fatou.sow@sunufarm.sn",       name: "Fatou Sow",       passwordHash } }),
-    prisma.user.create({ data: { email: "ibrahima.ba@sunufarm.sn",     name: "Ibrahima Ba",     passwordHash } }),
-    prisma.user.create({ data: { email: "aminata.diop@sunufarm.sn",    name: "Aminata Diop",    passwordHash } }),
+    prisma.user.create({ data: { email: "admin@sunufarm.sn",         name: "SunuFarm Admin", passwordHash, phone: "+221700000001" } }),
+    prisma.user.create({ data: { email: "ousmane.diallo@sunufarm.sn",  name: "Ousmane Diallo",  passwordHash, phone: "+221701000001" } }),
+    prisma.user.create({ data: { email: "mamadou.fall@sunufarm.sn",    name: "Mamadou Fall",    passwordHash, phone: "+221701000002" } }),
+    prisma.user.create({ data: { email: "fatou.sow@sunufarm.sn",       name: "Fatou Sow",       passwordHash, phone: "+221701000003" } }),
+    prisma.user.create({ data: { email: "ibrahima.ba@sunufarm.sn",     name: "Ibrahima Ba",     passwordHash, phone: "+221701000004" } }),
+    prisma.user.create({ data: { email: "aminata.diop@sunufarm.sn",    name: "Aminata Diop",    passwordHash, phone: "+221701000005" } }),
   ])
 
   const platformOrg = await prisma.organization.create({
@@ -280,7 +283,7 @@ async function main() {
   })
 
   // Fournisseurs org 1
-  const [supplierPoussins, supplierAliment1] = await Promise.all([
+  const [supplierPoussins, supplierAliment1, supplierMed1] = await Promise.all([
     prisma.supplier.create({ data: {
       organizationId: org1.id,
       name:    "AVISEN Sénégal",
@@ -295,10 +298,18 @@ async function main() {
       type:    "ALIMENT",
       address: "Pikine, Dakar",
     }}),
+    prisma.supplier.create({ data: {
+      organizationId: org1.id,
+      name:    "SENPHAR Veto",
+      phone:   "+221 33 823 10 10",
+      email:   "commande@senphar.sn",
+      type:    "MEDICAMENT",
+      address: "Hann Bel-Air, Dakar",
+    }}),
   ])
 
   // Clients org 1
-  const [clientSandaga] = await Promise.all([
+  const [clientSandaga, clientBaobab] = await Promise.all([
     prisma.customer.create({ data: {
       organizationId: org1.id,
       name:    "Marché Sandaga",
@@ -310,6 +321,7 @@ async function main() {
       organizationId: org1.id,
       name:  "Restaurant Le Baobab",
       phone: "+221 77 345 67 89",
+      email: "achats@lebaobab.sn",
       type:  "PROFESSIONNEL",
     }}),
     prisma.customer.create({ data: {
@@ -480,6 +492,19 @@ async function main() {
     },
   })
 
+  await prisma.medicineMovement.create({
+    data: {
+      organizationId:  org1.id,
+      medicineStockId: medStock1.id,
+      type:            MedicineMovementType.SORTIE,
+      quantity:        1988,
+      totalFcfa:       89_460,
+      notes:           "Vaccination Newcastle lot SF-2026-001",
+      date:            dt(addDays(today, -24)),
+      recordedById:    tech1.id,
+    },
+  })
+
   // ── LOT 1 — SF-2026-001 : Poulet de chair actif (Cobb 500, 30 jours) ──────
 
   const entryDate1 = addDays(today, -30)
@@ -533,6 +558,68 @@ async function main() {
     })
   }
 
+  await Promise.all([
+    prisma.weightRecord.create({
+      data: {
+        organizationId: org1.id,
+        batchId:        batch1.id,
+        date:           dt(addDays(entryDate1, 13)),
+        batchAgeDay:    14,
+        sampleCount:    60,
+        avgWeightG:     445,
+        minWeightG:     360,
+        maxWeightG:     525,
+        notes:          "Poids homogÃ¨ne, bonne rÃ©ponse aliment dÃ©marrage",
+        recordedById:   tech1.id,
+      },
+    }),
+    prisma.weightRecord.create({
+      data: {
+        organizationId: org1.id,
+        batchId:        batch1.id,
+        date:           dt(addDays(entryDate1, 27)),
+        batchAgeDay:    28,
+        sampleCount:    60,
+        avgWeightG:     1410,
+        minWeightG:     1260,
+        maxWeightG:     1580,
+        notes:          "Lot proche de l'objectif commercial J42",
+        recordedById:   tech1.id,
+      },
+    }),
+    prisma.vaccinationRecord.create({
+      data: {
+        organizationId:  org1.id,
+        batchId:         batch1.id,
+        date:            dt(addDays(entryDate1, 6)),
+        batchAgeDay:     7,
+        vaccineName:     "Newcastle HB1",
+        route:           "Oculaire",
+        dose:            "1 goutte/sujet",
+        countVaccinated: 1988,
+        medicineStockId: medStock1.id,
+        notes:           "Campagne faite tÃ´t le matin, bonne prise",
+        recordedById:    tech1.id,
+      },
+    }),
+    prisma.treatmentRecord.create({
+      data: {
+        organizationId:  org1.id,
+        batchId:         batch1.id,
+        startDate:       dt(addDays(today, -9)),
+        endDate:         dt(addDays(today, -6)),
+        medicineName:    "Amoxicilline 10% â€” poudre",
+        dose:            "1 g / 2 L eau",
+        durationDays:    4,
+        countTreated:    600,
+        medicineStockId: medStock2.id,
+        indication:      "Toux lÃ©gÃ¨re sur une zone du bÃ¢timent A",
+        notes:           "Evolution favorable aprÃ¨s 48h",
+        recordedById:    tech1.id,
+      },
+    }),
+  ])
+
   // Dépense aliment lot 1
   await prisma.expense.create({
     data: {
@@ -548,6 +635,45 @@ async function main() {
       createdById:    manager1.id,
     },
   })
+
+  await Promise.all([
+    prisma.expense.create({
+      data: {
+        organizationId: org1.id,
+        farmId:         farm1.id,
+        categoryId:     catEnergie.id,
+        date:           dt(addDays(today, -7)),
+        description:    "ElectricitÃ© et eau forage â€” semaine 13",
+        amountFcfa:     185_000,
+        reference:      "SENELEC-2026-13",
+        createdById:    comptable1.id,
+      },
+    }),
+    prisma.expense.create({
+      data: {
+        organizationId: org1.id,
+        farmId:         farm1.id,
+        categoryId:     catMainOeuvre.id,
+        date:           dt(addDays(today, -5)),
+        description:    "Avance salaires Ã©quipe ferme de Diamniadio",
+        amountFcfa:     300_000,
+        createdById:    comptable1.id,
+      },
+    }),
+    prisma.expense.create({
+      data: {
+        organizationId: org1.id,
+        batchId:        batch1.id,
+        farmId:         farm1.id,
+        categoryId:     catMedicaments.id,
+        date:           dt(addDays(today, -9)),
+        description:    "Traitement respiratoire ciblÃ© lot SF-2026-001",
+        amountFcfa:     48_000,
+        supplierId:     supplierMed1.id,
+        createdById:    comptable1.id,
+      },
+    }),
+  ])
 
   // Dépense achat poussins lot 1
   await prisma.expense.create({
@@ -705,6 +831,33 @@ async function main() {
     },
   })
 
+  const eggSaleTotal = 240 * 2_750
+
+  const saleEggs = await prisma.sale.create({
+    data: {
+      organizationId: org1.id,
+      customerId:     clientBaobab.id,
+      saleDate:       dt(addDays(today, -1)),
+      productType:    SaleProductType.OEUF,
+      totalFcfa:      eggSaleTotal,
+      paidFcfa:       eggSaleTotal,
+      notes:          "Livraison petit-dÃ©jeuner hÃ´tel / restauration",
+      createdById:    comptable1.id,
+    },
+  })
+
+  await prisma.saleItem.create({
+    data: {
+      saleId:        saleEggs.id,
+      batchId:       undefined,
+      description:   "Oeufs frais calibrÃ©s â€” 240 plateaux",
+      quantity:      240,
+      unit:          "PLATEAU",
+      unitPriceFcfa: 2_750,
+      totalFcfa:     eggSaleTotal,
+    },
+  })
+
   // ── LOT 3 — SF-2026-002 : Pondeuse active (ISA Brown, 45 jours) ──────────
 
   const entryDate3 = addDays(today, -45)
@@ -773,15 +926,123 @@ async function main() {
     }
   }
 
+  await Promise.all([
+    prisma.weightRecord.create({
+      data: {
+        organizationId: org1.id,
+        batchId:        batch3.id,
+        date:           dt(addDays(entryDate3, 20)),
+        batchAgeDay:    38,
+        sampleCount:    40,
+        avgWeightG:     1735,
+        minWeightG:     1620,
+        maxWeightG:     1860,
+        notes:          "Croissance conforme avant pic de ponte",
+        recordedById:   tech1.id,
+      },
+    }),
+    prisma.vaccinationRecord.create({
+      data: {
+        organizationId:  org1.id,
+        batchId:         batch3.id,
+        date:            dt(addDays(entryDate3, 10)),
+        batchAgeDay:     28,
+        vaccineName:     "Gumboro D78",
+        route:           "Eau de boisson",
+        dose:            "1 dose/sujet",
+        countVaccinated: 792,
+        notes:           "Rappel effectuÃ© avant transfert final",
+        recordedById:    tech1.id,
+      },
+    }),
+  ])
+
+  const purchase1 = await prisma.purchase.create({
+    data: {
+      organizationId: org1.id,
+      supplierId:     supplierAliment1.id,
+      purchaseDate:   dt(addDays(today, -14)),
+      reference:      "FAC-AVI-2026-041",
+      totalFcfa:      1_087_500,
+      paidFcfa:       700_000,
+      notes:          "Approvisionnement ponte + croissance, rÃ¨glement partiel",
+      createdById:    comptable1.id,
+    },
+  })
+
+  await Promise.all([
+    prisma.purchaseItem.create({
+      data: {
+        purchaseId:    purchase1.id,
+        description:   "Aliment croissance Avicoop NÂ°2",
+        quantity:      1500,
+        unit:          "KG",
+        unitPriceFcfa: 425,
+        totalFcfa:     637_500,
+      },
+    }),
+    prisma.purchaseItem.create({
+      data: {
+        purchaseId:    purchase1.id,
+        description:   "Aliment ponte premium",
+        quantity:      900,
+        unit:          "KG",
+        unitPriceFcfa: 500,
+        totalFcfa:     450_000,
+      },
+    }),
+    prisma.payment.create({
+      data: {
+        organizationId: org1.id,
+        purchaseId:     purchase1.id,
+        amountFcfa:     700_000,
+        paymentDate:    dt(addDays(today, -12)),
+        method:         PaymentMethod.VIREMENT,
+        reference:      "VIR-BOA-2026-119",
+        notes:          "Premier rÃ¨glement fournisseur Avicoop",
+        createdById:    comptable1.id,
+      },
+    }),
+    prisma.notification.create({
+      data: {
+        organizationId: org1.id,
+        userId:         owner1.id,
+        type:           NotificationType.STOCK_ALIMENT_CRITIQUE,
+        status:         NotificationStatus.NON_LU,
+        title:          "Stock aliment Ã  surveiller",
+        message:        "Le prochain rÃ©assort Avicoop doit Ãªtre anticipÃ© avant la fin de semaine.",
+        resourceType:   "FEED_STOCK",
+        resourceId:     feedStock1.id,
+      },
+    }),
+    prisma.notification.create({
+      data: {
+        organizationId: org1.id,
+        userId:         manager1.id,
+        type:           NotificationType.CREANCE_EN_RETARD,
+        status:         NotificationStatus.NON_LU,
+        title:          "Acompte client Ã  relancer",
+        message:        "La commande partielle du MarchÃ© Sandaga reste encaissÃ©e Ã  50 %.",
+        resourceType:   "SALE",
+        resourceId:     sale2.id,
+      },
+    }),
+  ])
+
   // =========================================================================
   // ORGANISATION 2 — Avicole Thiès SARL
   // Données minimales pour tester l'isolation multi-tenant
   // =========================================================================
   console.log("🏢 Organisation 2 : Avicole Thiès SARL (test isolation multi-tenant)...")
 
-  const owner2 = await prisma.user.create({
-    data: { email: "cheikh.ndiaye@sunufarm.sn", name: "Cheikh Ndiaye", passwordHash },
-  })
+  const [owner2, manager2] = await Promise.all([
+    prisma.user.create({
+      data: { email: "cheikh.ndiaye@sunufarm.sn", name: "Cheikh Ndiaye", passwordHash, phone: "+221702000001" },
+    }),
+    prisma.user.create({
+      data: { email: "aissatou.gueye@sunufarm.sn", name: "Aissatou Gueye", passwordHash, phone: "+221702000002" },
+    }),
+  ])
 
   const org2 = await prisma.organization.create({
     data: {
@@ -795,9 +1056,14 @@ async function main() {
     },
   })
 
-  await prisma.userOrganization.create({
-    data: { userId: owner2.id, organizationId: org2.id, role: UserRole.OWNER },
-  })
+  await Promise.all([
+    prisma.userOrganization.create({
+      data: { userId: owner2.id, organizationId: org2.id, role: UserRole.OWNER },
+    }),
+    prisma.userOrganization.create({
+      data: { userId: manager2.id, organizationId: org2.id, role: UserRole.MANAGER },
+    }),
+  ])
 
   // org2 est en essai gratuit de 7 jours (3 crédits IA) — pour tester le système trial
   await prisma.subscription.create({
@@ -837,6 +1103,27 @@ async function main() {
       ventilationType: "Naturelle",
     },
   })
+
+  const [supplierAliment2, clientHotelMbour] = await Promise.all([
+    prisma.supplier.create({
+      data: {
+        organizationId: org2.id,
+        name:           "NMA Sanders ThiÃ¨s",
+        phone:          "+221 33 951 88 10",
+        type:           "ALIMENT",
+        address:        "ThiÃ¨s Ouest",
+      },
+    }),
+    prisma.customer.create({
+      data: {
+        organizationId: org2.id,
+        name:           "HÃ´tel Keur Mbour",
+        phone:          "+221 33 957 22 11",
+        type:           "PROFESSIONNEL",
+        address:        "Corniche de Mbour",
+      },
+    }),
+  ])
 
   // Lot pondeuses org 2 — même numéro SF-2026-001 (unique par org, pas globalement)
   const entryDate4 = addDays(today, -60)
@@ -899,6 +1186,82 @@ async function main() {
       },
     })
   }
+
+  const purchase2 = await prisma.purchase.create({
+    data: {
+      organizationId: org2.id,
+      supplierId:     supplierAliment2.id,
+      purchaseDate:   dt(addDays(today, -9)),
+      reference:      "NMA-2026-118",
+      totalFcfa:      540_000,
+      paidFcfa:       540_000,
+      notes:          "Recharge aliment ponte pour dÃ©mo essai gratuit",
+      createdById:    manager2.id,
+    },
+  })
+
+  await Promise.all([
+    prisma.purchaseItem.create({
+      data: {
+        purchaseId:    purchase2.id,
+        description:   "Aliment ponte standard",
+        quantity:      1200,
+        unit:          "KG",
+        unitPriceFcfa: 450,
+        totalFcfa:     540_000,
+      },
+    }),
+    prisma.payment.create({
+      data: {
+        organizationId: org2.id,
+        purchaseId:     purchase2.id,
+        amountFcfa:     540_000,
+        paymentDate:    dt(addDays(today, -8)),
+        method:         PaymentMethod.MOBILE_MONEY,
+        reference:      "WAVE-THIS-8891",
+        createdById:    owner2.id,
+      },
+    }),
+  ])
+
+  const sale3 = await prisma.sale.create({
+    data: {
+      organizationId: org2.id,
+      customerId:     clientHotelMbour.id,
+      saleDate:       dt(addDays(today, -2)),
+      productType:    SaleProductType.OEUF,
+      totalFcfa:      440_000,
+      paidFcfa:       300_000,
+      notes:          "Livraison hebdo hÃ´tel - reste Ã  encaisser en fin de semaine",
+      createdById:    manager2.id,
+    },
+  })
+
+  await Promise.all([
+    prisma.saleItem.create({
+      data: {
+        saleId:        sale3.id,
+        batchId:       batch4.id,
+        description:   "Oeufs de consommation - 160 plateaux",
+        quantity:      160,
+        unit:          "PLATEAU",
+        unitPriceFcfa: 2_750,
+        totalFcfa:     440_000,
+      },
+    }),
+    prisma.notification.create({
+      data: {
+        organizationId: org2.id,
+        userId:         owner2.id,
+        type:           NotificationType.CREANCE_EN_RETARD,
+        status:         NotificationStatus.NON_LU,
+        title:          "Solde client Ã  suivre",
+        message:        "L'HÃ´tel Keur Mbour n'a pas encore rÃ©glÃ© l'intÃ©gralitÃ© de la derniÃ¨re livraison d'oeufs.",
+        resourceType:   "SALE",
+        resourceId:     sale3.id,
+      },
+    }),
+  ])
 
   // =========================================================================
   // Résumé
