@@ -1,87 +1,39 @@
-/**
- * SunuFarm — Seeds de démonstration
- * Données sénégalaises réalistes pour le développement et les tests
- *
- * 2 organisations isolées pour valider le multi-tenant
- * Mot de passe de tous les comptes de test : Sunufarm2025!
- *
- * Usage : npx prisma db seed
- *
- * Note : Prisma CLI charge .env automatiquement avant d'exécuter le seed.
- * SUNUFARM_DATABASE_URL doit être défini dans .env ou dans l'environnement.
- */
-
-import {
-  PrismaClient,
-  BatchType,
-  BatchStatus,
-  BuildingType,
-  FeedMovementType,
-  MedicineMovementType,
-  SaleProductType,
-  PaymentMethod,
-  NotificationStatus,
-  NotificationType,
-  UserRole,
-  SubscriptionPlan,
-  SubscriptionStatus,
-} from "../src/generated/prisma"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 
-// PrismaPg accepte un PoolConfig directement — évite le conflit @types/pg
-const adapter = new PrismaPg({ connectionString: process.env.SUNUFARM_DATABASE_URL })
+import {
+  BatchStatus,
+  BatchType,
+  BuildingType,
+  FeedMovementType,
+  NotificationStatus,
+  NotificationType,
+  PrismaClient,
+  SaleProductType,
+  SubscriptionPlan,
+  SubscriptionStatus,
+  UserRole,
+} from "../src/generated/prisma"
+
+const adapter = new PrismaPg({
+  connectionString: process.env.SUNUFARM_DATABASE_URL,
+})
+
 const prisma = new PrismaClient({ adapter })
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function addDays(date: Date, days: number): Date {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d
+  const next = new Date(date)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
 }
 
-/** Date minuit UTC — pour les champs @db.Date */
-function dt(date: Date): Date {
-  return new Date(date.toISOString().split("T")[0] + "T00:00:00.000Z")
+function dateOnly(date: Date): Date {
+  return new Date(date.toISOString().slice(0, 10) + "T00:00:00.000Z")
 }
-
-function deterministicMortality(dayIndex: number, phase: "starter" | "grower" | "layer") {
-  if (phase === "starter") {
-    if (dayIndex < 7) return dayIndex % 3 === 0 ? 2 : 1
-    if (dayIndex < 21) return dayIndex % 6 === 0 ? 1 : 0
-    return dayIndex % 9 === 0 ? 1 : 0
-  }
-
-  if (phase === "grower") {
-    if (dayIndex < 7) return dayIndex % 4 === 0 ? 2 : 1
-    if (dayIndex < 30) return dayIndex % 8 === 0 ? 1 : 0
-    return dayIndex % 11 === 0 ? 1 : 0
-  }
-
-  return dayIndex % 14 === 0 ? 1 : 0
-}
-
-function deterministicTemperatureMin(dayIndex: number) {
-  return 28 + (dayIndex % 5) * 0.6
-}
-
-function deterministicTemperatureMax(dayIndex: number) {
-  return 33 + (dayIndex % 4) * 0.7
-}
-
-function deterministicHumidity(dayIndex: number) {
-  return 60 + (dayIndex % 6) * 2.5
-}
-
-// ---------------------------------------------------------------------------
-// Suppression dans l'ordre inverse des dépendances
-// ---------------------------------------------------------------------------
 
 async function clearAll() {
-  console.log("  Nettoyage des données existantes...")
+  console.log("Cleaning existing data...")
+
   await prisma.auditLog.deleteMany()
   await prisma.notification.deleteMany()
   await prisma.payment.deleteMany()
@@ -122,1174 +74,556 @@ async function clearAll() {
   await prisma.feedType.deleteMany()
   await prisma.breed.deleteMany()
   await prisma.species.deleteMany()
-  console.log("  OK\n")
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-async function main() {
-  console.log("🌱 SunuFarm — Initialisation des données de démonstration\n")
-  await clearAll()
-
-  const passwordHash = await bcrypt.hash("Sunufarm2025!", 10)
-  const today = dt(new Date())
-
-  // =========================================================================
-  // RÉFÉRENTIELS GLOBAUX (partagés entre toutes les organisations)
-  // =========================================================================
-  console.log("📚 Référentiels globaux...")
-
-  // Espèces
-  const [poulet, pondeuse, pintade] = await Promise.all([
-    prisma.species.create({ data: { name: "Poulet", code: "POULET" } }),
-    prisma.species.create({ data: { name: "Pondeuse", code: "PONDEUSE" } }),
-    prisma.species.create({ data: { name: "Pintade", code: "PINTADE" } }),
-  ])
-  void pintade
-
-  // Races / souches courantes au Senegal
-  const createdBreeds = await Promise.all([
-    prisma.breed.create({ data: { name: "Cobb 500", code: "COBB500", speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "Hubbard", code: "HUBBARD", speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "Ross 208", code: "ROSS208", speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "Ross 308", code: "ROSS308", speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "Vedette", code: "VEDETTE", speciesId: poulet.id } }),
-    prisma.breed.create({ data: { name: "ISA Brown", code: "ISA_BROWN", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Lohmann Brown", code: "LOHMANN_BROWN", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Lohmann Blanche", code: "LOHMANN_BLANCHE", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Lohmann Rouge", code: "LOHMANN_ROUGE", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Hy-Line Blanche", code: "HY_LINE_BLANCHE", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Hy-Line Rouge", code: "HY_LINE_ROUGE", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Harco", code: "HARCO", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Gold Line", code: "GOLD_LINE", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Shaver", code: "SHAVER", speciesId: pondeuse.id } }),
-    prisma.breed.create({ data: { name: "Star Cross", code: "STAR_CROSS", speciesId: pondeuse.id } }),
-  ])
-  const cobb500 = createdBreeds.find((breed) => breed.code === "COBB500")!
-  const ross308 = createdBreeds.find((breed) => breed.code === "ROSS308")!
-  const isaBrown = createdBreeds.find((breed) => breed.code === "ISA_BROWN")!
-  const lohmann = createdBreeds.find((breed) => breed.code === "LOHMANN_BROWN")!
-
-  // Types d'aliment
-  const [feedPreDemarrage, feedDemarrage, feedCroissance, feedFinition] = await Promise.all([
-    prisma.feedType.create({ data: { name: "Pré-démarrage", code: "PREDEMARRAGE" } }),
-    prisma.feedType.create({ data: { name: "Démarrage",     code: "DEMARRAGE"    } }),
-    prisma.feedType.create({ data: { name: "Croissance",    code: "CROISSANCE"   } }),
-    prisma.feedType.create({ data: { name: "Finition",      code: "FINITION"     } }),
-  ])
-  const feedPonteType = await prisma.feedType.create({ data: { name: "Ponte", code: "PONTE" } })
-  void [feedPreDemarrage, feedDemarrage, feedFinition, feedPonteType]
-
-  // Motifs de mortalité globaux
-  await Promise.all([
-    prisma.mortalityReason.create({ data: { name: "Maladie respiratoire", code: "MALADIE_RESP",      isDefault: false } }),
-    prisma.mortalityReason.create({ data: { name: "Maladie digestive",    code: "MALADIE_DIG",       isDefault: false } }),
-    prisma.mortalityReason.create({ data: { name: "Accident / blessure",  code: "ACCIDENT",          isDefault: false } }),
-    prisma.mortalityReason.create({ data: { name: "Prédation",            code: "PREDATION",         isDefault: false } }),
-    prisma.mortalityReason.create({ data: { name: "Stress thermique",     code: "STRESS_THERMIQUE",  isDefault: false } }),
-    prisma.mortalityReason.create({ data: { name: "Non précisé",          code: "NON_PRECISE",       isDefault: true  } }),
-  ])
-
-  // Catégories de dépenses système
-  const catAliment = await prisma.expenseCategory.create({
-    data: { name: "Aliment",                   code: "ALIMENT",     isSystem: true },
-  })
-  const [catMedicaments, catMainOeuvre, catEnergie] = await Promise.all([
-    prisma.expenseCategory.create({ data: { name: "Médicaments / Vaccins",        code: "MEDICAMENT",  isSystem: true } }),
-    prisma.expenseCategory.create({ data: { name: "Main d'oeuvre",               code: "MAIN_OEUVRE", isSystem: true } }),
-    prisma.expenseCategory.create({ data: { name: "Energie (electricite, eau)",  code: "ENERGIE",     isSystem: true } }),
-    prisma.expenseCategory.create({ data: { name: "Transport",                    code: "TRANSPORT",   isSystem: true } }),
-    prisma.expenseCategory.create({ data: { name: "Materiel et equipements",      code: "MATERIEL",    isSystem: true } }),
-    prisma.expenseCategory.create({ data: { name: "Loyer / foncier",              code: "LOYER",       isSystem: true } }),
-    prisma.expenseCategory.create({ data: { name: "Autres charges",               code: "AUTRE",       isSystem: true } }),
-  ])
-
-  // =========================================================================
-  // ORGANISATION 1 — Ferme Diallo et Fils (Dakar)
-  // Compte principal de démonstration — données complètes
-  // =========================================================================
-  console.log("🏢 Organisation 1 : Ferme Diallo et Fils (Dakar)...")
-
-  // Utilisateurs org 1
-  const [superAdmin, owner1, manager1, tech1, saisie1, comptable1] = await Promise.all([
-    prisma.user.create({ data: { email: "admin@sunufarm.sn",         name: "SunuFarm Admin", passwordHash, phone: "+221700000001" } }),
-    prisma.user.create({ data: { email: "ousmane.diallo@sunufarm.sn",  name: "Ousmane Diallo",  passwordHash, phone: "+221701000001" } }),
-    prisma.user.create({ data: { email: "mamadou.fall@sunufarm.sn",    name: "Mamadou Fall",    passwordHash, phone: "+221701000002" } }),
-    prisma.user.create({ data: { email: "fatou.sow@sunufarm.sn",       name: "Fatou Sow",       passwordHash, phone: "+221701000003" } }),
-    prisma.user.create({ data: { email: "ibrahima.ba@sunufarm.sn",     name: "Ibrahima Ba",     passwordHash, phone: "+221701000004" } }),
-    prisma.user.create({ data: { email: "aminata.diop@sunufarm.sn",    name: "Aminata Diop",    passwordHash, phone: "+221701000005" } }),
-  ])
-
-  const platformOrg = await prisma.organization.create({
+async function createReferenceData() {
+  const species = await prisma.species.create({
     data: {
-      name: "SunuFarm Platform",
-      slug: "sunufarm-platform",
+      name: "Poulet",
+      code: "POULET",
+    },
+  })
+
+  const breed = await prisma.breed.create({
+    data: {
+      name: "Cobb 500",
+      code: "COBB500",
+      speciesId: species.id,
+    },
+  })
+
+  const [feedGrowth, feedFinish] = await Promise.all([
+    prisma.feedType.create({
+      data: {
+        name: "Croissance",
+        code: "CROISSANCE",
+      },
+    }),
+    prisma.feedType.create({
+      data: {
+        name: "Finition",
+        code: "FINITION",
+      },
+    }),
+  ])
+
+  const [catChicks, catFeed, catVaccines, catMisc] = await Promise.all([
+    prisma.expenseCategory.create({
+      data: {
+        name: "Achat poussins",
+        code: "POUSSINS",
+        isSystem: true,
+      },
+    }),
+    prisma.expenseCategory.create({
+      data: {
+        name: "Aliment",
+        code: "ALIMENT",
+        isSystem: true,
+      },
+    }),
+    prisma.expenseCategory.create({
+      data: {
+        name: "Vaccins",
+        code: "MEDICAMENT",
+        isSystem: true,
+      },
+    }),
+    prisma.expenseCategory.create({
+      data: {
+        name: "Divers",
+        code: "AUTRE",
+        isSystem: true,
+      },
+    }),
+  ])
+
+  return {
+    species,
+    breed,
+    feedGrowth,
+    feedFinish,
+    catChicks,
+    catFeed,
+    catVaccines,
+    catMisc,
+  }
+}
+
+async function createDemoWorkspace(passwordHash: string) {
+  const today = dateOnly(new Date())
+  const started30DaysAgo = dateOnly(addDays(today, -30))
+  const started35DaysAgo = dateOnly(addDays(today, -35))
+
+  const user = await prisma.user.create({
+    data: {
+      email: "demo@sunufarm.com",
+      name: "Compte Demo",
+      passwordHash,
+    },
+  })
+
+  const organization = await prisma.organization.create({
+    data: {
+      name: "SunuFarm Demo",
+      slug: "sunufarm-demo",
       currency: "XOF",
       locale: "fr-SN",
       timezone: "Africa/Dakar",
+      phone: "+221 77 000 00 00",
+      address: "Diamniadio, Senegal",
     },
   })
 
   await prisma.userOrganization.create({
     data: {
-      userId: superAdmin.id,
-      organizationId: platformOrg.id,
-      role: UserRole.SUPER_ADMIN,
+      userId: user.id,
+      organizationId: organization.id,
+      role: UserRole.OWNER,
     },
   })
 
   await prisma.subscription.create({
     data: {
-      organizationId: platformOrg.id,
-      plan: SubscriptionPlan.BUSINESS,
-      status: SubscriptionStatus.ACTIVE,
-      amountFcfa: 25_000,
-      currentPeriodStart: today,
-      currentPeriodEnd: dt(addDays(today, 365)),
-    },
-  })
-
-  const org1 = await prisma.organization.create({
-    data: {
-      name:     "Ferme Diallo et Fils",
-      slug:     "ferme-diallo",
-      currency: "XOF",
-      locale:   "fr-SN",
-      timezone: "Africa/Dakar",
-      phone:    "+221 77 123 45 67",
-      address:  "Route de Diamniadio km 35, Dakar, Sénégal",
-    },
-  })
-
-  await Promise.all([
-    prisma.userOrganization.create({ data: { userId: owner1.id,    organizationId: org1.id, role: UserRole.OWNER     } }),
-    prisma.userOrganization.create({ data: { userId: manager1.id,  organizationId: org1.id, role: UserRole.MANAGER   } }),
-    prisma.userOrganization.create({ data: { userId: tech1.id,     organizationId: org1.id, role: UserRole.TECHNICIAN } }),
-    prisma.userOrganization.create({ data: { userId: saisie1.id,   organizationId: org1.id, role: UserRole.DATA_ENTRY } }),
-    prisma.userOrganization.create({ data: { userId: comptable1.id, organizationId: org1.id, role: UserRole.ACCOUNTANT } }),
-  ])
-
-  await prisma.subscription.create({
-    data: {
-      organizationId: org1.id,
+      organizationId: organization.id,
       plan: SubscriptionPlan.PRO,
       status: SubscriptionStatus.ACTIVE,
       amountFcfa: 10_000,
       currentPeriodStart: today,
-      currentPeriodEnd: dt(addDays(today, 30)),
+      currentPeriodEnd: dateOnly(addDays(today, 30)),
     },
   })
 
-  // Fournisseurs org 1
-  const [supplierPoussins, supplierAliment1, supplierMed1] = await Promise.all([
-    prisma.supplier.create({ data: {
-      organizationId: org1.id,
-      name:    "AVISEN Sénégal",
-      phone:   "+221 33 869 12 00",
-      type:    "POUSSIN",
-      address: "Zone industrielle de Dakar",
-    }}),
-    prisma.supplier.create({ data: {
-      organizationId: org1.id,
-      name:    "Avicoop",
-      phone:   "+221 33 832 45 78",
-      type:    "ALIMENT",
-      address: "Pikine, Dakar",
-    }}),
-    prisma.supplier.create({ data: {
-      organizationId: org1.id,
-      name:    "SENPHAR Veto",
-      phone:   "+221 33 823 10 10",
-      email:   "commande@senphar.sn",
-      type:    "MEDICAMENT",
-      address: "Hann Bel-Air, Dakar",
-    }}),
-  ])
-
-  // Clients org 1
-  const [clientSandaga, clientBaobab] = await Promise.all([
-    prisma.customer.create({ data: {
-      organizationId: org1.id,
-      name:    "Marché Sandaga",
-      phone:   "+221 77 234 56 78",
-      type:    "REVENDEUR",
-      address: "Marché Sandaga, Dakar",
-    }}),
-    prisma.customer.create({ data: {
-      organizationId: org1.id,
-      name:  "Restaurant Le Baobab",
-      phone: "+221 77 345 67 89",
-      email: "achats@lebaobab.sn",
-      type:  "PROFESSIONNEL",
-    }}),
-    prisma.customer.create({ data: {
-      organizationId: org1.id,
-      name:  "Mbaye Diop",
-      phone: "+221 77 456 78 90",
-      type:  "PARTICULIER",
-    }}),
-  ])
-
-  // Ferme 1 — Diamniadio
-  const farm1 = await prisma.farm.create({
+  const farm = await prisma.farm.create({
     data: {
-      organizationId: org1.id,
-      name:          "Ferme de Diamniadio",
-      code:          "DKR-01",
-      address:       "Route de Diamniadio km 35, Sénégal",
-      latitude:      14.7285,
-      longitude:     -17.1637,
-      totalCapacity: 10_000,
+      organizationId: organization.id,
+      name: "Ferme Demo Diamniadio",
+      code: "DEMO-01",
+      address: "Zone avicole de Diamniadio",
+      totalCapacity: 1500,
     },
   })
 
-  const [bat1A, bat1B, bat1C] = await Promise.all([
-    prisma.building.create({ data: {
-      organizationId: org1.id,
-      farmId:         farm1.id,
-      name:           "Poulailler A",
-      code:           "BAT-A",
-      type:           BuildingType.POULAILLER_FERME,
-      capacity:       4000,
-      surfaceM2:      400,
-      ventilationType: "Tunnel",
-    }}),
-    prisma.building.create({ data: {
-      organizationId: org1.id,
-      farmId:         farm1.id,
-      name:           "Poulailler B",
-      code:           "BAT-B",
-      type:           BuildingType.POULAILLER_SEMI_FERME,
-      capacity:       3000,
-      surfaceM2:      300,
-      ventilationType: "Naturelle",
-    }}),
-    prisma.building.create({ data: {
-      organizationId: org1.id,
-      farmId:         farm1.id,
-      name:           "Poulailler C",
-      code:           "BAT-C",
-      type:           BuildingType.POULAILLER_FERME,
-      capacity:       3000,
-      surfaceM2:      300,
-      ventilationType: "Forcée",
-    }}),
-  ])
-
-  // Employés ferme 1
-  await Promise.all([
-    prisma.employee.create({ data: {
-      organizationId:    org1.id,
-      farmId:            farm1.id,
-      firstName:         "Lamine",
-      lastName:          "Seck",
-      role:              "Technicien d'élevage",
-      phone:             "+221 77 567 89 01",
-      hireDate:          dt(addDays(today, -365)),
-      monthlySalaryFcfa: 180_000,
-    }}),
-    prisma.employee.create({ data: {
-      organizationId:    org1.id,
-      farmId:            farm1.id,
-      firstName:         "Mariama",
-      lastName:          "Diallo",
-      role:              "Agent de saisie",
-      phone:             "+221 77 678 90 12",
-      hireDate:          dt(addDays(today, -180)),
-      monthlySalaryFcfa: 120_000,
-    }}),
-  ])
-
-  // Stock aliment ferme 1
-  const feedStock1 = await prisma.feedStock.create({
-    data: {
-      organizationId:   org1.id,
-      farmId:           farm1.id,
-      feedTypeId:       feedCroissance.id,
-      name:             "Aliment Croissance Avicoop N°2",
-      supplierName:     "Avicoop",
-      quantityKg:       2800,
-      unitPriceFcfa:    425,
-      alertThresholdKg: 500,
-    },
-  })
-
-  // Entrée de stock initiale
-  await prisma.feedMovement.create({
-    data: {
-      organizationId: org1.id,
-      feedStockId:    feedStock1.id,
-      feedTypeId:     feedCroissance.id,
-      type:           FeedMovementType.ENTREE,
-      quantityKg:     4000,
-      unitPriceFcfa:  425,
-      totalFcfa:      1_700_000,
-      reference:      "BL-2026-089",
-      date:           dt(addDays(today, -32)),
-      recordedById:   manager1.id,
-    },
-  })
-
-  // Stock médicaments ferme 1
-  const medStock1 = await prisma.medicineStock.create({
-    data: {
-      organizationId:  org1.id,
-      farmId:          farm1.id,
-      name:            "Vaccin Newcastle HB1",
-      category:        "Vaccin",
-      unit:            "dose",
-      quantityOnHand:  5000,
-      alertThreshold:  1000,
-      unitPriceFcfa:   45,
-      expiryDate:      dt(addDays(today, 180)),
-      notes:           "Conserver entre 2°C et 8°C",
-    },
-  })
-
-  const medStock2 = await prisma.medicineStock.create({
-    data: {
-      organizationId:  org1.id,
-      farmId:          farm1.id,
-      name:            "Amoxicilline 10% — poudre",
-      category:        "Antibiotique",
-      unit:            "g",
-      quantityOnHand:  800,
-      alertThreshold:  200,
-      unitPriceFcfa:   1_200,
-      expiryDate:      dt(addDays(today, 90)),
-    },
-  })
-  void medStock2
-
-  await prisma.medicineStock.create({
-    data: {
-      organizationId:  org1.id,
-      farmId:          farm1.id,
-      name:            "Vitamine E + Sélénium",
-      category:        "Complément",
-      unit:            "ml",
-      quantityOnHand:  150,
-      alertThreshold:  300,   // en dessous du seuil → alerte
-      unitPriceFcfa:   3_500,
-      expiryDate:      dt(addDays(today, 45)),   // péremption proche → double alerte
-    },
-  })
-
-  // Entrée stock Newcastle (mouvement)
-  await prisma.medicineMovement.create({
-    data: {
-      organizationId: org1.id,
-      medicineStockId: medStock1.id,
-      type:            MedicineMovementType.ENTREE,
-      quantity:        5000,
-      unitPriceFcfa:   45,
-      totalFcfa:       225_000,
-      date:            dt(addDays(today, -20)),
-      reference:       "VACC-2026-012",
-      recordedById:    manager1.id,
-    },
-  })
-
-  await prisma.medicineMovement.create({
-    data: {
-      organizationId:  org1.id,
-      medicineStockId: medStock1.id,
-      type:            MedicineMovementType.SORTIE,
-      quantity:        1988,
-      totalFcfa:       89_460,
-      notes:           "Vaccination Newcastle lot SF-2026-001",
-      date:            dt(addDays(today, -24)),
-      recordedById:    tech1.id,
-    },
-  })
-
-  // ── LOT 1 — SF-2026-001 : Poulet de chair actif (Cobb 500, 30 jours) ──────
-
-  const entryDate1 = addDays(today, -30)
-
-  const batch1 = await prisma.batch.create({
-    data: {
-      organizationId: org1.id,
-      buildingId:     bat1A.id,
-      number:         "SF-2026-001",
-      type:           BatchType.CHAIR,
-      status:         BatchStatus.ACTIVE,
-      speciesId:      poulet.id,
-      breedId:        cobb500.id,
-      entryDate:      dt(entryDate1),
-      entryCount:     2000,
-      entryAgeDay:    1,
-      entryWeightG:   42,
-      supplierId:     supplierPoussins.id,
-      unitCostFcfa:   750,
-      totalCostFcfa:  1_500_000,
-      notes:          "1ère bande 2026 — objectif 2 kg à J42",
-    },
-  })
-
-  // 30 saisies journalières lot 1
-  let mortCumul1 = 0
-  for (let j = 0; j < 30; j++) {
-    const ageDay  = j + 1
-    const dateJ   = dt(addDays(entryDate1, j))
-    const mort    = deterministicMortality(j, "starter")
-    mortCumul1   += mort
-    const effectif = 2000 - mortCumul1
-
-    // Consommation aliment : courbe croissante avec l'âge
-    const gPerBird = ageDay < 8 ? 30 : ageDay < 15 ? 65 : ageDay < 22 ? 105 : 150
-    const feedKg   = Math.round((effectif * gPerBird) / 1000 * 10) / 10
-
-    await prisma.dailyRecord.create({
+  const [buildingLoss, buildingProfit] = await Promise.all([
+    prisma.building.create({
       data: {
-        organizationId: org1.id,
-        batchId:        batch1.id,
-        date:           dateJ,
-        mortality:      mort,
-        feedKg,
-        waterLiters:    Math.round(feedKg * 2 * 10) / 10,
-        temperatureMin: deterministicTemperatureMin(j),
-        temperatureMax: deterministicTemperatureMax(j),
-        humidity:       deterministicHumidity(j),
-        recordedById:   j % 3 === 0 ? tech1.id : saisie1.id,
-      },
-    })
-  }
-
-  await Promise.all([
-    prisma.weightRecord.create({
-      data: {
-        organizationId: org1.id,
-        batchId:        batch1.id,
-        date:           dt(addDays(entryDate1, 13)),
-        batchAgeDay:    14,
-        sampleCount:    60,
-        avgWeightG:     445,
-        minWeightG:     360,
-        maxWeightG:     525,
-        notes:          "Poids homogÃ¨ne, bonne rÃ©ponse aliment dÃ©marrage",
-        recordedById:   tech1.id,
+        organizationId: organization.id,
+        farmId: farm.id,
+        name: "Poulailler Perte",
+        code: "LOSS-01",
+        type: BuildingType.POULAILLER_FERME,
+        capacity: 700,
+        surfaceM2: 140,
+        ventilationType: "Naturelle",
       },
     }),
-    prisma.weightRecord.create({
+    prisma.building.create({
       data: {
-        organizationId: org1.id,
-        batchId:        batch1.id,
-        date:           dt(addDays(entryDate1, 27)),
-        batchAgeDay:    28,
-        sampleCount:    60,
-        avgWeightG:     1410,
-        minWeightG:     1260,
-        maxWeightG:     1580,
-        notes:          "Lot proche de l'objectif commercial J42",
-        recordedById:   tech1.id,
-      },
-    }),
-    prisma.vaccinationRecord.create({
-      data: {
-        organizationId:  org1.id,
-        batchId:         batch1.id,
-        date:            dt(addDays(entryDate1, 6)),
-        batchAgeDay:     7,
-        vaccineName:     "Newcastle HB1",
-        route:           "Oculaire",
-        dose:            "1 goutte/sujet",
-        countVaccinated: 1988,
-        medicineStockId: medStock1.id,
-        notes:           "Campagne faite tÃ´t le matin, bonne prise",
-        recordedById:    tech1.id,
-      },
-    }),
-    prisma.treatmentRecord.create({
-      data: {
-        organizationId:  org1.id,
-        batchId:         batch1.id,
-        startDate:       dt(addDays(today, -9)),
-        endDate:         dt(addDays(today, -6)),
-        medicineName:    "Amoxicilline 10% â€” poudre",
-        dose:            "1 g / 2 L eau",
-        durationDays:    4,
-        countTreated:    600,
-        medicineStockId: medStock2.id,
-        indication:      "Toux lÃ©gÃ¨re sur une zone du bÃ¢timent A",
-        notes:           "Evolution favorable aprÃ¨s 48h",
-        recordedById:    tech1.id,
+        organizationId: organization.id,
+        farmId: farm.id,
+        name: "Poulailler Profit",
+        code: "PROFIT-01",
+        type: BuildingType.POULAILLER_FERME,
+        capacity: 700,
+        surfaceM2: 140,
+        ventilationType: "Tunnel",
       },
     }),
   ])
 
-  // Dépense aliment lot 1
-  await prisma.expense.create({
-    data: {
-      organizationId: org1.id,
-      batchId:        batch1.id,
-      farmId:         farm1.id,
-      categoryId:     catAliment.id,
-      date:           dt(addDays(today, -32)),
-      description:    "Achat aliment croissance Avicoop N°2 — 4 tonnes",
-      amountFcfa:     1_700_000,
-      supplierId:     supplierAliment1.id,
-      reference:      "BL-2026-089",
-      createdById:    manager1.id,
-    },
-  })
-
-  await Promise.all([
-    prisma.expense.create({
-      data: {
-        organizationId: org1.id,
-        farmId:         farm1.id,
-        categoryId:     catEnergie.id,
-        date:           dt(addDays(today, -7)),
-        description:    "ElectricitÃ© et eau forage â€” semaine 13",
-        amountFcfa:     185_000,
-        reference:      "SENELEC-2026-13",
-        createdById:    comptable1.id,
-      },
-    }),
-    prisma.expense.create({
-      data: {
-        organizationId: org1.id,
-        farmId:         farm1.id,
-        categoryId:     catMainOeuvre.id,
-        date:           dt(addDays(today, -5)),
-        description:    "Avance salaires Ã©quipe ferme de Diamniadio",
-        amountFcfa:     300_000,
-        createdById:    comptable1.id,
-      },
-    }),
-    prisma.expense.create({
-      data: {
-        organizationId: org1.id,
-        batchId:        batch1.id,
-        farmId:         farm1.id,
-        categoryId:     catMedicaments.id,
-        date:           dt(addDays(today, -9)),
-        description:    "Traitement respiratoire ciblÃ© lot SF-2026-001",
-        amountFcfa:     48_000,
-        supplierId:     supplierMed1.id,
-        createdById:    comptable1.id,
-      },
-    }),
-  ])
-
-  // Dépense achat poussins lot 1
-  await prisma.expense.create({
-    data: {
-      organizationId: org1.id,
-      batchId:        batch1.id,
-      farmId:         farm1.id,
-      date:           dt(entryDate1),
-      description:    "Achat 2000 poussins Cobb 500 — AVISEN",
-      amountFcfa:     1_500_000,
-      supplierId:     supplierPoussins.id,
-      createdById:    manager1.id,
-    },
-  })
-
-  // ── LOT 2 — SF-2025-018 : Cycle clôturé (vendu) ─────────────────────────
-
-  const entryDate2 = addDays(today, -85)
-  const closeDate2 = dt(addDays(today, -40))
-
-  const batch2 = await prisma.batch.create({
-    data: {
-      organizationId: org1.id,
-      buildingId:     bat1B.id,
-      number:         "SF-2025-018",
-      type:           BatchType.CHAIR,
-      status:         BatchStatus.SOLD,
-      speciesId:      poulet.id,
-      breedId:        ross308.id,
-      entryDate:      dt(entryDate2),
-      entryCount:     1500,
-      entryAgeDay:    1,
-      entryWeightG:   44,
-      supplierId:     supplierPoussins.id,
-      unitCostFcfa:   720,
-      totalCostFcfa:  1_080_000,
-      closedAt:       closeDate2,
-      closeReason:    "Vente intégrale au marché Sandaga à J45",
-    },
-  })
-
-  // 45 saisies lot 2
-  let mortCumul2 = 0
-  for (let j = 0; j < 45; j++) {
-    const ageDay   = j + 1
-    const dateJ    = dt(addDays(entryDate2, j))
-    const mort     = deterministicMortality(j, "grower")
-    mortCumul2    += mort
-    const effectif = 1500 - mortCumul2
-    const gPerBird = ageDay < 8 ? 30 : ageDay < 15 ? 65 : ageDay < 22 ? 105 : ageDay < 35 ? 150 : 175
-    const feedKg   = Math.round((effectif * gPerBird) / 1000 * 10) / 10
-
-    await prisma.dailyRecord.create({
-      data: {
-        organizationId: org1.id,
-        batchId:        batch2.id,
-        date:           dateJ,
-        mortality:      mort,
-        feedKg,
-        waterLiters:    Math.round(feedKg * 1.9 * 10) / 10,
-        recordedById:   saisie1.id,
-      },
-    })
-  }
-
-  // Dépenses lot 2 (nécessaires pour calculer la rentabilité)
-  await Promise.all([
-    prisma.expense.create({ data: {
-      organizationId: org1.id,
-      batchId:        batch2.id,
-      farmId:         farm1.id,
-      date:           dt(entryDate2),
-      description:    "Achat 1500 poussins Ross 308 — AVISEN",
-      amountFcfa:     1_080_000,
-      supplierId:     supplierPoussins.id,
-      createdById:    manager1.id,
-    }}),
-    prisma.expense.create({ data: {
-      organizationId: org1.id,
-      batchId:        batch2.id,
-      farmId:         farm1.id,
-      date:           dt(addDays(entryDate2, -2)),
-      description:    "Aliment démarrage + croissance — lot Ross 308",
-      amountFcfa:     950_000,
-      supplierId:     supplierAliment1.id,
-      reference:      "BL-2025-147",
-      createdById:    manager1.id,
-    }}),
-    prisma.expense.create({ data: {
-      organizationId: org1.id,
-      batchId:        batch2.id,
-      farmId:         farm1.id,
-      date:           dt(addDays(entryDate2, 5)),
-      description:    "Vaccins + médicaments lot Ross 308",
-      amountFcfa:     85_000,
-      createdById:    manager1.id,
-    }}),
-  ])
-
-  // Vente lot 2 — totalFcfa = SUM des SaleItems (calculé depuis les lignes)
-  // 1440 sujets × 1.55 kg moyen = 2232 kg × 1480 FCFA/kg = 3 303 360 FCFA
-  const saleItemTotal2 = Math.round(2232 * 1480)   // 3 303 360
-
-  const sale1 = await prisma.sale.create({
-    data: {
-      organizationId: org1.id,
-      customerId:     clientSandaga.id,
-      saleDate:       closeDate2,
-      productType:    SaleProductType.POULET_VIF,
-      totalFcfa:      saleItemTotal2,
-      paidFcfa:       saleItemTotal2,
-      notes:          "1440 sujets × 1.55 kg moyen × 1480 FCFA/kg",
-      createdById:    manager1.id,
-    },
-  })
-
-  await prisma.saleItem.create({
-    data: {
-      saleId:        sale1.id,
-      batchId:       batch2.id,
-      description:   "Poulets vifs Ross 308 — 1440 sujets × 1.55 kg",
-      quantity:      2232,
-      unit:          "KG",
-      unitPriceFcfa: 1480,
-      totalFcfa:     saleItemTotal2,
-    },
-  })
-
-  // Vente partiellement payée — pour tester "Reste à encaisser" dans SalesPage
-  // Lot 1 (actif) : acompte reçu sur une commande en cours
-  const saleItemPartial = Math.round(500 * 1550)   // 500 sujets × 1550 FCFA
-
-  const sale2 = await prisma.sale.create({
-    data: {
-      organizationId: org1.id,
-      customerId:     clientSandaga.id,
-      saleDate:       dt(addDays(today, -3)),
-      productType:    SaleProductType.POULET_VIF,
-      totalFcfa:      saleItemPartial,
-      paidFcfa:       Math.round(saleItemPartial / 2),   // 50 % versé
-      notes:          "Commande en cours — acompte 50% reçu",
-      createdById:    manager1.id,
-    },
-  })
-
-  await prisma.saleItem.create({
-    data: {
-      saleId:        sale2.id,
-      batchId:       batch1.id,
-      description:   "Poulets vifs Cobb 500 — 500 sujets (commande à venir)",
-      quantity:      500,
-      unit:          "PIECE",
-      unitPriceFcfa: 1550,
-      totalFcfa:     saleItemPartial,
-    },
-  })
-
-  const eggSaleTotal = 240 * 2_750
-
-  const saleEggs = await prisma.sale.create({
-    data: {
-      organizationId: org1.id,
-      customerId:     clientBaobab.id,
-      saleDate:       dt(addDays(today, -1)),
-      productType:    SaleProductType.OEUF,
-      totalFcfa:      eggSaleTotal,
-      paidFcfa:       eggSaleTotal,
-      notes:          "Livraison petit-dÃ©jeuner hÃ´tel / restauration",
-      createdById:    comptable1.id,
-    },
-  })
-
-  await prisma.saleItem.create({
-    data: {
-      saleId:        saleEggs.id,
-      batchId:       undefined,
-      description:   "Oeufs frais calibrÃ©s â€” 240 plateaux",
-      quantity:      240,
-      unit:          "PLATEAU",
-      unitPriceFcfa: 2_750,
-      totalFcfa:     eggSaleTotal,
-    },
-  })
-
-  // ── LOT 3 — SF-2026-002 : Pondeuse active (ISA Brown, 45 jours) ──────────
-
-  const entryDate3 = addDays(today, -45)
-
-  const batch3 = await prisma.batch.create({
-    data: {
-      organizationId: org1.id,
-      buildingId:     bat1C.id,
-      number:         "SF-2026-002",
-      type:           BatchType.PONDEUSE,
-      status:         BatchStatus.ACTIVE,
-      speciesId:      pondeuse.id,
-      breedId:        isaBrown.id,
-      entryDate:      dt(entryDate3),
-      entryCount:     800,
-      entryAgeDay:    18,
-      entryWeightG:   1_650,
-      unitCostFcfa:   2_800,
-      totalCostFcfa:  2_240_000,
-      notes:          "Bande pondeuses — démarrage ponte prévu J140",
-    },
-  })
-
-  // Saisies + production œufs lot 3 (15 derniers jours — ponte démarrée)
-  let mortCumul3 = 0
-  for (let j = 0; j < 45; j++) {
-    const dateJ    = dt(addDays(entryDate3, j))
-    const mort     = deterministicMortality(j, "layer")
-    mortCumul3    += mort
-    const effectif = 800 - mortCumul3
-    const feedKg   = Math.round((effectif * 115) / 1000 * 10) / 10
-
-    await prisma.dailyRecord.create({
-      data: {
-        organizationId: org1.id,
-        batchId:        batch3.id,
-        date:           dateJ,
-        mortality:      mort,
-        feedKg,
-        waterLiters:    Math.round(feedKg * 2.1 * 10) / 10,
-        recordedById:   tech1.id,
-      },
-    })
-
-    // Ponte démarrée à partir de J30 (âge 18+30 = 48 semaines ≈ démarrage)
-    if (j >= 30) {
-      const tauxPonte  = 0.72 + (j - 30) * 0.005 // montée en production
-      const totalEggs  = Math.round(effectif * tauxPonte)
-      const broken     = Math.round(totalEggs * 0.018)
-      const dirty      = Math.round(totalEggs * 0.01)
-
-      await prisma.eggProductionRecord.create({
-        data: {
-          organizationId: org1.id,
-          batchId:        batch3.id,
-          date:           dateJ,
-          totalEggs,
-          sellableEggs:   totalEggs - broken - dirty,
-          brokenEggs:     broken,
-          dirtyEggs:      dirty,
-          smallEggs:      0,
-          passageCount:   2,
-          recordedById:   tech1.id,
-        },
-      })
-    }
-  }
-
-  await Promise.all([
-    prisma.weightRecord.create({
-      data: {
-        organizationId: org1.id,
-        batchId:        batch3.id,
-        date:           dt(addDays(entryDate3, 20)),
-        batchAgeDay:    38,
-        sampleCount:    40,
-        avgWeightG:     1735,
-        minWeightG:     1620,
-        maxWeightG:     1860,
-        notes:          "Croissance conforme avant pic de ponte",
-        recordedById:   tech1.id,
-      },
-    }),
-    prisma.vaccinationRecord.create({
-      data: {
-        organizationId:  org1.id,
-        batchId:         batch3.id,
-        date:            dt(addDays(entryDate3, 10)),
-        batchAgeDay:     28,
-        vaccineName:     "Gumboro D78",
-        route:           "Eau de boisson",
-        dose:            "1 dose/sujet",
-        countVaccinated: 792,
-        notes:           "Rappel effectuÃ© avant transfert final",
-        recordedById:    tech1.id,
-      },
-    }),
-  ])
-
-  const purchase1 = await prisma.purchase.create({
-    data: {
-      organizationId: org1.id,
-      supplierId:     supplierAliment1.id,
-      purchaseDate:   dt(addDays(today, -14)),
-      reference:      "FAC-AVI-2026-041",
-      totalFcfa:      1_087_500,
-      paidFcfa:       700_000,
-      notes:          "Approvisionnement ponte + croissance, rÃ¨glement partiel",
-      createdById:    comptable1.id,
-    },
-  })
-
-  await Promise.all([
-    prisma.purchaseItem.create({
-      data: {
-        purchaseId:    purchase1.id,
-        description:   "Aliment croissance Avicoop NÂ°2",
-        quantity:      1500,
-        unit:          "KG",
-        unitPriceFcfa: 425,
-        totalFcfa:     637_500,
-      },
-    }),
-    prisma.purchaseItem.create({
-      data: {
-        purchaseId:    purchase1.id,
-        description:   "Aliment ponte premium",
-        quantity:      900,
-        unit:          "KG",
-        unitPriceFcfa: 500,
-        totalFcfa:     450_000,
-      },
-    }),
-    prisma.payment.create({
-      data: {
-        organizationId: org1.id,
-        purchaseId:     purchase1.id,
-        amountFcfa:     700_000,
-        paymentDate:    dt(addDays(today, -12)),
-        method:         PaymentMethod.VIREMENT,
-        reference:      "VIR-BOA-2026-119",
-        notes:          "Premier rÃ¨glement fournisseur Avicoop",
-        createdById:    comptable1.id,
-      },
-    }),
-    prisma.notification.create({
-      data: {
-        organizationId: org1.id,
-        userId:         owner1.id,
-        type:           NotificationType.STOCK_ALIMENT_CRITIQUE,
-        status:         NotificationStatus.NON_LU,
-        title:          "Stock aliment Ã  surveiller",
-        message:        "Le prochain rÃ©assort Avicoop doit Ãªtre anticipÃ© avant la fin de semaine.",
-        resourceType:   "FEED_STOCK",
-        resourceId:     feedStock1.id,
-      },
-    }),
-    prisma.notification.create({
-      data: {
-        organizationId: org1.id,
-        userId:         manager1.id,
-        type:           NotificationType.CREANCE_EN_RETARD,
-        status:         NotificationStatus.NON_LU,
-        title:          "Acompte client Ã  relancer",
-        message:        "La commande partielle du MarchÃ© Sandaga reste encaissÃ©e Ã  50 %.",
-        resourceType:   "SALE",
-        resourceId:     sale2.id,
-      },
-    }),
-  ])
-
-  // =========================================================================
-  // ORGANISATION 2 — Avicole Thiès SARL
-  // Données minimales pour tester l'isolation multi-tenant
-  // =========================================================================
-  console.log("🏢 Organisation 2 : Avicole Thiès SARL (test isolation multi-tenant)...")
-
-  const [owner2, manager2] = await Promise.all([
-    prisma.user.create({
-      data: { email: "cheikh.ndiaye@sunufarm.sn", name: "Cheikh Ndiaye", passwordHash, phone: "+221702000001" },
-    }),
-    prisma.user.create({
-      data: { email: "aissatou.gueye@sunufarm.sn", name: "Aissatou Gueye", passwordHash, phone: "+221702000002" },
-    }),
-  ])
-
-  const org2 = await prisma.organization.create({
-    data: {
-      name:     "Avicole Thiès SARL",
-      slug:     "avicole-thies",
-      currency: "XOF",
-      locale:   "fr-SN",
-      timezone: "Africa/Dakar",
-      phone:    "+221 33 951 23 45",
-      address:  "Zone agropastorale, Thiès, Sénégal",
-    },
-  })
-
-  await Promise.all([
-    prisma.userOrganization.create({
-      data: { userId: owner2.id, organizationId: org2.id, role: UserRole.OWNER },
-    }),
-    prisma.userOrganization.create({
-      data: { userId: manager2.id, organizationId: org2.id, role: UserRole.MANAGER },
-    }),
-  ])
-
-  // org2 est en essai gratuit de 7 jours (3 crédits IA) — pour tester le système trial
-  await prisma.subscription.create({
-    data: {
-      organizationId:  org2.id,
-      plan:            SubscriptionPlan.BASIC,
-      status:          SubscriptionStatus.TRIAL,
-      amountFcfa:      0,
-      startedAt:       today,
-      trialEndsAt:     dt(addDays(today, 5)),   // 5 jours restants (sur 7)
-      aiCreditsTotal:  3,
-      aiCreditsUsed:   1,                        // 1 analyse déjà consommée
-    },
-  })
-
-  const farm2 = await prisma.farm.create({
-    data: {
-      organizationId: org2.id,
-      name:           "Ferme de Mbour",
-      code:           "THIS-01",
-      address:        "Route de Mbour, Thiès",
-      latitude:       14.7886,
-      longitude:      -16.9260,
-      totalCapacity:  5_000,
-    },
-  })
-
-  const bat2A = await prisma.building.create({
-    data: {
-      organizationId: org2.id,
-      farmId:         farm2.id,
-      name:           "Bâtiment Principal",
-      code:           "BP-01",
-      type:           BuildingType.POULAILLER_FERME,
-      capacity:       3_000,
-      surfaceM2:      300,
-      ventilationType: "Naturelle",
-    },
-  })
-
-  const [supplierAliment2, clientHotelMbour] = await Promise.all([
+  const [supplierChicks, supplierFeed, customerMarket] = await Promise.all([
     prisma.supplier.create({
       data: {
-        organizationId: org2.id,
-        name:           "NMA Sanders ThiÃ¨s",
-        phone:          "+221 33 951 88 10",
-        type:           "ALIMENT",
-        address:        "ThiÃ¨s Ouest",
+        organizationId: organization.id,
+        name: "Avisen Demo",
+        type: "POUSSIN",
+        phone: "+221 33 800 00 01",
+      },
+    }),
+    prisma.supplier.create({
+      data: {
+        organizationId: organization.id,
+        name: "Avicoop Demo",
+        type: "ALIMENT",
+        phone: "+221 33 800 00 02",
       },
     }),
     prisma.customer.create({
       data: {
-        organizationId: org2.id,
-        name:           "HÃ´tel Keur Mbour",
-        phone:          "+221 33 957 22 11",
-        type:           "PROFESSIONNEL",
-        address:        "Corniche de Mbour",
+        organizationId: organization.id,
+        name: "Marche Central Demo",
+        type: "REVENDEUR",
+        phone: "+221 77 900 00 00",
       },
     }),
   ])
 
-  // Lot pondeuses org 2 — même numéro SF-2026-001 (unique par org, pas globalement)
-  const entryDate4 = addDays(today, -60)
+  const refs = await createReferenceData()
 
-  const batch4 = await prisma.batch.create({
+  const batchLoss = await prisma.batch.create({
     data: {
-      organizationId: org2.id,
-      buildingId:     bat2A.id,
-      number:         "SF-2026-001",   // volontairement identique à org 1 — test isolation
-      type:           BatchType.PONDEUSE,
-      status:         BatchStatus.ACTIVE,
-      speciesId:      pondeuse.id,
-      breedId:        lohmann.id,
-      entryDate:      dt(entryDate4),
-      entryCount:     1200,
-      entryAgeDay:    20,
-      entryWeightG:   1_700,
-      unitCostFcfa:   2_900,
-      totalCostFcfa:  3_480_000,
+      organizationId: organization.id,
+      buildingId: buildingLoss.id,
+      number: "BANDE-DEMO-LOSS",
+      type: BatchType.CHAIR,
+      status: BatchStatus.ACTIVE,
+      speciesId: refs.species.id,
+      breedId: refs.breed.id,
+      entryDate: started30DaysAgo,
+      entryCount: 500,
+      entryAgeDay: 1,
+      entryWeightG: 42,
+      supplierId: supplierChicks.id,
+      unitCostFcfa: 600,
+      totalCostFcfa: 300_000,
+      notes: [
+        "Bande Demo - scenario perte",
+        "Cout total: 1 200 000 FCFA",
+        "Cout par poulet: 2 400 FCFA",
+        "Prix marche: 2 200 FCFA",
+        "Marge projetee: -200 FCFA/poulet",
+      ].join(" | "),
     },
   })
 
-  // 30 derniers jours de saisies + ponte pour org 2
-  let mortCumul4 = 0
-  for (let j = 0; j < 30; j++) {
-    const dateJ    = dt(addDays(today, -30 + j))
-    const mort     = deterministicMortality(j, "layer")
-    mortCumul4    += mort
-    const effectif = 1200 - mortCumul4
-    const feedKg   = Math.round((effectif * 118) / 1000 * 10) / 10
+  const batchProfit = await prisma.batch.create({
+    data: {
+      organizationId: organization.id,
+      buildingId: buildingProfit.id,
+      number: "BANDE-DEMO-PROFIT",
+      type: BatchType.CHAIR,
+      status: BatchStatus.SOLD,
+      speciesId: refs.species.id,
+      breedId: refs.breed.id,
+      entryDate: started35DaysAgo,
+      entryCount: 500,
+      entryAgeDay: 1,
+      entryWeightG: 43,
+      supplierId: supplierChicks.id,
+      unitCostFcfa: 600,
+      totalCostFcfa: 300_000,
+      closedAt: today,
+      closeReason: "Vente complete a 3 000 FCFA par poulet",
+      notes: [
+        "Bande Demo - scenario profit",
+        "Prix de vente moyen: 3 000 FCFA",
+        "Cout par poulet: 2 400 FCFA",
+        "Marge reelle: 600 FCFA/poulet",
+        "Marge totale: 300 000 FCFA",
+      ].join(" | "),
+    },
+  })
 
-    await prisma.dailyRecord.create({
-      data: {
-        organizationId: org2.id,
-        batchId:        batch4.id,
-        date:           dateJ,
-        mortality:      mort,
-        feedKg,
-        waterLiters:    Math.round(feedKg * 2.0 * 10) / 10,
-        recordedById:   owner2.id,
-      },
+  await prisma.feedStock.create({
+    data: {
+      organizationId: organization.id,
+      farmId: farm.id,
+      feedTypeId: refs.feedGrowth.id,
+      name: "Aliment croissance demo",
+      supplierName: supplierFeed.name,
+      quantityKg: 400,
+      unitPriceFcfa: 500,
+      alertThresholdKg: 450,
+    },
+  }).then(async (feedStock) => {
+    await prisma.feedMovement.createMany({
+      data: [
+        {
+          organizationId: organization.id,
+          feedStockId: feedStock.id,
+          feedTypeId: refs.feedGrowth.id,
+          type: FeedMovementType.ENTREE,
+          quantityKg: 2000,
+          unitPriceFcfa: 500,
+          totalFcfa: 1_000_000,
+          reference: "DEMO-FEED-IN",
+          recordedById: user.id,
+          date: started30DaysAgo,
+        },
+        {
+          organizationId: organization.id,
+          feedStockId: feedStock.id,
+          feedTypeId: refs.feedGrowth.id,
+          type: FeedMovementType.SORTIE,
+          quantityKg: 80,
+          batchId: batchLoss.id,
+          notes: "Consommation journaliere type - 5 jours restants",
+          recordedById: user.id,
+          date: dateOnly(addDays(today, -5)),
+        },
+        {
+          organizationId: organization.id,
+          feedStockId: feedStock.id,
+          feedTypeId: refs.feedGrowth.id,
+          type: FeedMovementType.SORTIE,
+          quantityKg: 80,
+          batchId: batchLoss.id,
+          recordedById: user.id,
+          date: dateOnly(addDays(today, -4)),
+        },
+        {
+          organizationId: organization.id,
+          feedStockId: feedStock.id,
+          feedTypeId: refs.feedGrowth.id,
+          type: FeedMovementType.SORTIE,
+          quantityKg: 80,
+          batchId: batchLoss.id,
+          recordedById: user.id,
+          date: dateOnly(addDays(today, -3)),
+        },
+        {
+          organizationId: organization.id,
+          feedStockId: feedStock.id,
+          feedTypeId: refs.feedGrowth.id,
+          type: FeedMovementType.SORTIE,
+          quantityKg: 80,
+          batchId: batchLoss.id,
+          recordedById: user.id,
+          date: dateOnly(addDays(today, -2)),
+        },
+        {
+          organizationId: organization.id,
+          feedStockId: feedStock.id,
+          feedTypeId: refs.feedGrowth.id,
+          type: FeedMovementType.SORTIE,
+          quantityKg: 80,
+          batchId: batchLoss.id,
+          recordedById: user.id,
+          date: dateOnly(addDays(today, -1)),
+        },
+      ],
     })
+  })
 
-    const totalEggs = Math.round(effectif * 0.78)
-    const broken    = Math.round(totalEggs * 0.02)
-    const dirty     = Math.round(totalEggs * 0.01)
-
-    await prisma.eggProductionRecord.create({
-      data: {
-        organizationId: org2.id,
-        batchId:        batch4.id,
-        date:           dateJ,
-        totalEggs,
-        sellableEggs:   totalEggs - broken - dirty,
-        brokenEggs:     broken,
-        dirtyEggs:      dirty,
-        smallEggs:      0,
-        passageCount:   2,
-        recordedById:   owner2.id,
+  await prisma.expense.createMany({
+    data: [
+      {
+        organizationId: organization.id,
+        batchId: batchLoss.id,
+        farmId: farm.id,
+        categoryId: refs.catChicks.id,
+        date: started30DaysAgo,
+        description: "Achat poussins - Bande Demo",
+        amountFcfa: 300_000,
+        supplierId: supplierChicks.id,
+        createdById: user.id,
       },
-    })
-  }
+      {
+        organizationId: organization.id,
+        batchId: batchLoss.id,
+        farmId: farm.id,
+        categoryId: refs.catFeed.id,
+        date: dateOnly(addDays(started30DaysAgo, 3)),
+        description: "Aliment - Bande Demo",
+        amountFcfa: 800_000,
+        supplierId: supplierFeed.id,
+        createdById: user.id,
+      },
+      {
+        organizationId: organization.id,
+        batchId: batchLoss.id,
+        farmId: farm.id,
+        categoryId: refs.catVaccines.id,
+        date: dateOnly(addDays(started30DaysAgo, 7)),
+        description: "Vaccins - Bande Demo",
+        amountFcfa: 50_000,
+        createdById: user.id,
+      },
+      {
+        organizationId: organization.id,
+        batchId: batchLoss.id,
+        farmId: farm.id,
+        categoryId: refs.catMisc.id,
+        date: dateOnly(addDays(started30DaysAgo, 15)),
+        description: "Divers - Bande Demo",
+        amountFcfa: 50_000,
+        createdById: user.id,
+      },
+      {
+        organizationId: organization.id,
+        batchId: batchProfit.id,
+        farmId: farm.id,
+        categoryId: refs.catChicks.id,
+        date: started35DaysAgo,
+        description: "Achat poussins - Bande Profit",
+        amountFcfa: 300_000,
+        supplierId: supplierChicks.id,
+        createdById: user.id,
+      },
+      {
+        organizationId: organization.id,
+        batchId: batchProfit.id,
+        farmId: farm.id,
+        categoryId: refs.catFeed.id,
+        date: dateOnly(addDays(started35DaysAgo, 3)),
+        description: "Aliment - Bande Profit",
+        amountFcfa: 800_000,
+        supplierId: supplierFeed.id,
+        createdById: user.id,
+      },
+      {
+        organizationId: organization.id,
+        batchId: batchProfit.id,
+        farmId: farm.id,
+        categoryId: refs.catVaccines.id,
+        date: dateOnly(addDays(started35DaysAgo, 6)),
+        description: "Vaccins - Bande Profit",
+        amountFcfa: 50_000,
+        createdById: user.id,
+      },
+      {
+        organizationId: organization.id,
+        batchId: batchProfit.id,
+        farmId: farm.id,
+        categoryId: refs.catMisc.id,
+        date: dateOnly(addDays(started35DaysAgo, 12)),
+        description: "Divers - Bande Profit",
+        amountFcfa: 50_000,
+        createdById: user.id,
+      },
+    ],
+  })
 
-  const purchase2 = await prisma.purchase.create({
+  const lossDailyData = [
+    { dayOffset: -9, mortality: 4, feedKg: 75, waterLiters: 150, min: 28.8, max: 34.6, humidity: 70, weight: 1280, note: "Premiers signes de stress thermique" },
+    { dayOffset: -8, mortality: 3, feedKg: 77, waterLiters: 154, min: 29.1, max: 34.9, humidity: 71, weight: 1310, note: "Consommation stable" },
+    { dayOffset: -7, mortality: 5, feedKg: 79, waterLiters: 158, min: 29.4, max: 35.2, humidity: 73, weight: 1335, note: "Mortalite en hausse" },
+    { dayOffset: -6, mortality: 4, feedKg: 80, waterLiters: 160, min: 29.2, max: 35.0, humidity: 72, weight: 1360, note: "Ventilation a renforcer" },
+    { dayOffset: -5, mortality: 6, feedKg: 80, waterLiters: 161, min: 29.6, max: 35.5, humidity: 74, weight: 1380, note: "Lot sous pression" },
+    { dayOffset: -4, mortality: 5, feedKg: 81, waterLiters: 162, min: 29.7, max: 35.4, humidity: 75, weight: 1400, note: "Stock aliment a 5 jours" },
+    { dayOffset: -3, mortality: 4, feedKg: 82, waterLiters: 164, min: 29.3, max: 35.1, humidity: 73, weight: 1420, note: "Prix mini > prix marche" },
+    { dayOffset: -2, mortality: 3, feedKg: 81, waterLiters: 162, min: 29.0, max: 34.8, humidity: 72, weight: 1450, note: "Suivi renforce" },
+    { dayOffset: -1, mortality: 4, feedKg: 80, waterLiters: 160, min: 28.9, max: 34.7, humidity: 71, weight: 1475, note: "Marge toujours negative" },
+    { dayOffset: 0, mortality: 2, feedKg: 79, waterLiters: 158, min: 28.7, max: 34.5, humidity: 70, weight: 1500, note: "Fin de demo - scenario perte" },
+  ]
+
+  await prisma.dailyRecord.createMany({
+    data: lossDailyData.map((item) => ({
+      organizationId: organization.id,
+      batchId: batchLoss.id,
+      date: dateOnly(addDays(today, item.dayOffset)),
+      mortality: item.mortality,
+      feedKg: item.feedKg,
+      waterLiters: item.waterLiters,
+      temperatureMin: item.min,
+      temperatureMax: item.max,
+      humidity: item.humidity,
+      avgWeightG: item.weight,
+      observations: item.note,
+      recordedById: user.id,
+    })),
+  })
+
+  const profitDailyData = [
+    { dayOffset: -6, mortality: 1, feedKg: 72, waterLiters: 144, min: 28.2, max: 33.2, humidity: 66, weight: 1700 },
+    { dayOffset: -5, mortality: 0, feedKg: 73, waterLiters: 146, min: 28.0, max: 33.0, humidity: 65, weight: 1760 },
+    { dayOffset: -4, mortality: 1, feedKg: 74, waterLiters: 148, min: 28.1, max: 33.1, humidity: 65, weight: 1820 },
+    { dayOffset: -3, mortality: 0, feedKg: 74, waterLiters: 149, min: 28.0, max: 33.0, humidity: 64, weight: 1880 },
+    { dayOffset: -2, mortality: 1, feedKg: 75, waterLiters: 150, min: 27.9, max: 32.9, humidity: 64, weight: 1940 },
+    { dayOffset: -1, mortality: 0, feedKg: 75, waterLiters: 150, min: 27.8, max: 32.8, humidity: 63, weight: 2000 },
+    { dayOffset: 0, mortality: 0, feedKg: 76, waterLiters: 152, min: 27.8, max: 32.7, humidity: 63, weight: 2050 },
+  ]
+
+  await prisma.dailyRecord.createMany({
+    data: profitDailyData.map((item) => ({
+      organizationId: organization.id,
+      batchId: batchProfit.id,
+      date: dateOnly(addDays(today, item.dayOffset)),
+      mortality: item.mortality,
+      feedKg: item.feedKg,
+      waterLiters: item.waterLiters,
+      temperatureMin: item.min,
+      temperatureMax: item.max,
+      humidity: item.humidity,
+      avgWeightG: item.weight,
+      observations: "Scenario rentable pour comparaison commerciale",
+      recordedById: user.id,
+    })),
+  })
+
+  const saleTotalProfit = 500 * 3_000
+  const marginPerChicken = 3_000 - 2_400
+
+  const sale = await prisma.sale.create({
     data: {
-      organizationId: org2.id,
-      supplierId:     supplierAliment2.id,
-      purchaseDate:   dt(addDays(today, -9)),
-      reference:      "NMA-2026-118",
-      totalFcfa:      540_000,
-      paidFcfa:       540_000,
-      notes:          "Recharge aliment ponte pour dÃ©mo essai gratuit",
-      createdById:    manager2.id,
+      organizationId: organization.id,
+      customerId: customerMarket.id,
+      saleDate: today,
+      productType: SaleProductType.POULET_VIF,
+      totalFcfa: saleTotalProfit,
+      paidFcfa: saleTotalProfit,
+      notes: `Prix moyen: 3 000 FCFA | Cout/poulet: 2 400 FCFA | Marge/poulet: ${marginPerChicken} FCFA`,
+      createdById: user.id,
     },
   })
 
-  await Promise.all([
-    prisma.purchaseItem.create({
-      data: {
-        purchaseId:    purchase2.id,
-        description:   "Aliment ponte standard",
-        quantity:      1200,
-        unit:          "KG",
-        unitPriceFcfa: 450,
-        totalFcfa:     540_000,
-      },
-    }),
-    prisma.payment.create({
-      data: {
-        organizationId: org2.id,
-        purchaseId:     purchase2.id,
-        amountFcfa:     540_000,
-        paymentDate:    dt(addDays(today, -8)),
-        method:         PaymentMethod.MOBILE_MONEY,
-        reference:      "WAVE-THIS-8891",
-        createdById:    owner2.id,
-      },
-    }),
-  ])
-
-  const sale3 = await prisma.sale.create({
+  await prisma.saleItem.create({
     data: {
-      organizationId: org2.id,
-      customerId:     clientHotelMbour.id,
-      saleDate:       dt(addDays(today, -2)),
-      productType:    SaleProductType.OEUF,
-      totalFcfa:      440_000,
-      paidFcfa:       300_000,
-      notes:          "Livraison hebdo hÃ´tel - reste Ã  encaisser en fin de semaine",
-      createdById:    manager2.id,
+      saleId: sale.id,
+      batchId: batchProfit.id,
+      description: "500 poulets vendus a 3 000 FCFA",
+      quantity: 500,
+      unit: "PIECE",
+      unitPriceFcfa: 3_000,
+      totalFcfa: saleTotalProfit,
     },
   })
 
-  await Promise.all([
-    prisma.saleItem.create({
-      data: {
-        saleId:        sale3.id,
-        batchId:       batch4.id,
-        description:   "Oeufs de consommation - 160 plateaux",
-        quantity:      160,
-        unit:          "PLATEAU",
-        unitPriceFcfa: 2_750,
-        totalFcfa:     440_000,
+  await prisma.notification.createMany({
+    data: [
+      {
+        organizationId: organization.id,
+        userId: user.id,
+        type: NotificationType.MORTALITE_ELEVEE,
+        status: NotificationStatus.NON_LU,
+        title: "Risque mortalite eleve",
+        message: "La Bande Demo Perte cumule une mortalite anormale sur les 10 derniers jours.",
+        resourceType: "BATCH",
+        resourceId: batchLoss.id,
       },
-    }),
-    prisma.notification.create({
-      data: {
-        organizationId: org2.id,
-        userId:         owner2.id,
-        type:           NotificationType.CREANCE_EN_RETARD,
-        status:         NotificationStatus.NON_LU,
-        title:          "Solde client Ã  suivre",
-        message:        "L'HÃ´tel Keur Mbour n'a pas encore rÃ©glÃ© l'intÃ©gralitÃ© de la derniÃ¨re livraison d'oeufs.",
-        resourceType:   "SALE",
-        resourceId:     sale3.id,
+      {
+        organizationId: organization.id,
+        userId: user.id,
+        type: NotificationType.STOCK_ALIMENT_CRITIQUE,
+        status: NotificationStatus.NON_LU,
+        title: "Stock aliment critique",
+        message: "Il reste environ 5 jours d'aliment sur la ferme demo.",
+        resourceType: "BATCH",
+        resourceId: batchLoss.id,
       },
-    }),
-  ])
+    ],
+  })
 
-  // =========================================================================
-  // Résumé
-  // =========================================================================
-  console.log("\n✅ Données de démonstration créées avec succès !")
-  console.log("\n📋 Comptes de test (mot de passe : Sunufarm2025!) :")
-  console.log("   Plateforme SunuFarm :")
-  console.log("   → admin@sunufarm.sn             (SUPER_ADMIN)")
-  console.log("   Organisation 1 — Ferme Diallo et Fils (Dakar) :")
-  console.log("   → ousmane.diallo@sunufarm.sn   (OWNER)")
-  console.log("   → mamadou.fall@sunufarm.sn      (MANAGER)")
-  console.log("   → fatou.sow@sunufarm.sn          (TECHNICIAN)")
-  console.log("   → ibrahima.ba@sunufarm.sn        (DATA_ENTRY)")
-  console.log("   → aminata.diop@sunufarm.sn       (ACCOUNTANT)")
-  console.log("\n   Organisation 2 — Avicole Thiès SARL :")
-  console.log("   → cheikh.ndiaye@sunufarm.sn     (OWNER)")
-  console.log("\n📦 Données créées (org 1) :")
-  console.log("   → 3 lots (SF-2026-001 actif J30, SF-2025-018 vendu, SF-2026-002 pondeuses)")
-  console.log("   → 2 ventes (intégrale + acompte partiel pour tester 'Reste à encaisser')")
-  console.log("   → 3 stocks médicaments (dont 1 stock bas + péremption proche)")
-  console.log("   → Rentabilité lot SF-2025-018 : ~3.3M FCFA revenus / ~2.1M FCFA coûts")
-  console.log("\n🔒 Test isolation multi-tenant : connectez-vous avec cheikh.ndiaye")
-  console.log("   Il ne voit PAS les données de l'organisation Diallo.")
+  console.log("")
+  console.log("Demo account created successfully.")
+  console.log("Email: demo@sunufarm.com")
+  console.log("Password: demo123")
+  console.log("")
+  console.log("Scenario 1 - Bande Demo Perte")
+  console.log("  Total costs: 1 200 000 FCFA")
+  console.log("  Cost per chicken: 2 400 FCFA")
+  console.log("  Market price: 2 200 FCFA")
+  console.log("  Margin per chicken: -200 FCFA")
+  console.log("")
+  console.log("Scenario 2 - Bande Demo Profit")
+  console.log("  Sale price: 3 000 FCFA")
+  console.log("  Cost per chicken: 2 400 FCFA")
+  console.log("  Real margin per chicken: 600 FCFA")
+  console.log("  Total profit: 300 000 FCFA")
+}
+
+async function main() {
+  console.log("Initializing SunuFarm demo seed...")
+
+  await clearAll()
+
+  const passwordHash = await bcrypt.hash("demo123", 10)
+  await createDemoWorkspace(passwordHash)
 }
 
 main()
-  .catch((e) => {
-    console.error("❌ Erreur lors du seed :", e)
+  .catch((error) => {
+    console.error("Seed failed:", error)
     process.exit(1)
   })
   .finally(async () => {
