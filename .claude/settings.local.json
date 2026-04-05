@@ -38,7 +38,11 @@
       "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(auth\\\\\\)/)",
       "Bash(ls c:/Users/pcpro/sunufarm/app/\\\\\\(auth\\\\\\)/login/)",
       "Bash(npx next:*)",
-      "Bash(node -e \"const d=require\\(''./package.json''\\); [''recharts'',''@react-pdf/renderer'',''resend''].forEach\\(k=>console.log\\(k+'': ''+\\(d.dependencies[k]||''MANQUANT''\\)\\)\\)\")"
+      "Bash(node -e \"const d=require\\(''./package.json''\\); [''recharts'',''@react-pdf/renderer'',''resend''].forEach\\(k=>console.log\\(k+'': ''+\\(d.dependencies[k]||''MANQUANT''\\)\\)\\)\")",
+      "Bash(npm run:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npm test:*)",
+      "Bash(cat \"c:/Users/pcpro/sunufarm/app/\\(dashboard\\)/stock/page.tsx\")"
     ]
   }
 }

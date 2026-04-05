@@ -11,6 +11,8 @@ describe("batch-profitability", () => {
         revenueFcfa: 320000,
         saleItemsCount: 3,
         totalMortality: 4,
+        totalEggsProduced: 0,
+        totalSellableEggs: 0,
       }),
     ).toEqual({
       entryCount: 100,
@@ -19,11 +21,18 @@ describe("batch-profitability", () => {
       revenueFcfa: 320000,
       saleItemsCount: 3,
       totalMortality: 4,
+      totalEggsProduced: 0,
+      totalSellableEggs: 0,
       totalCostFcfa: 250000,
       profitFcfa: 70000,
       marginRate: 28,
       costPerBird: 2500,
       breakEvenSalePricePerLiveBirdFcfa: 2605,
+      costPerEggProducedFcfa: null,
+      costPerSellableEggFcfa: null,
+      breakEvenEggSalePriceFcfa: null,
+      breakEvenTraySalePriceFcfa: null,
+      sellableEggRatePct: null,
       mortalityRatePct: 4,
       liveCount: 96,
     })
@@ -37,12 +46,39 @@ describe("batch-profitability", () => {
       revenueFcfa: 90000,
       saleItemsCount: 1,
       totalMortality: 2,
+      totalEggsProduced: 0,
+      totalSellableEggs: 0,
     })
 
     expect(result.profitFcfa).toBe(-40000)
     expect(result.marginRate).toBeCloseTo(-30.77, 2)
     expect(result.liveCount).toBe(48)
     expect(result.breakEvenSalePricePerLiveBirdFcfa).toBe(2709)
+  })
+
+  it("calcule une lecture economique par oeuf", () => {
+    expect(
+      computeBatchProfitability({
+        entryCount: 200,
+        purchaseCostFcfa: 600000,
+        operationalCostFcfa: 300000,
+        revenueFcfa: 1200000,
+        saleItemsCount: 4,
+        totalMortality: 10,
+        totalEggsProduced: 4500,
+        totalSellableEggs: 4200,
+      }),
+    ).toMatchObject({
+      totalCostFcfa: 900000,
+      costPerBird: 4500,
+      breakEvenSalePricePerLiveBirdFcfa: 4737,
+      costPerEggProducedFcfa: 200,
+      costPerSellableEggFcfa: 215,
+      breakEvenEggSalePriceFcfa: 215,
+      breakEvenTraySalePriceFcfa: 6429,
+      sellableEggRatePct: 93.33,
+      liveCount: 190,
+    })
   })
 
   it("renvoie des ratios nuls quand il n y a pas assez de base de calcul", () => {
@@ -54,6 +90,8 @@ describe("batch-profitability", () => {
         revenueFcfa: 0,
         saleItemsCount: 0,
         totalMortality: 0,
+        totalEggsProduced: 0,
+        totalSellableEggs: 0,
       }),
     ).toMatchObject({
       totalCostFcfa: 0,
@@ -61,6 +99,11 @@ describe("batch-profitability", () => {
       marginRate: null,
       costPerBird: null,
       breakEvenSalePricePerLiveBirdFcfa: null,
+      costPerEggProducedFcfa: null,
+      costPerSellableEggFcfa: null,
+      breakEvenEggSalePriceFcfa: null,
+      breakEvenTraySalePriceFcfa: null,
+      sellableEggRatePct: null,
       mortalityRatePct: null,
       liveCount: 0,
     })

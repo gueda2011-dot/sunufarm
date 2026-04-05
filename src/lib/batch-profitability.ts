@@ -7,6 +7,8 @@ export interface BatchProfitabilitySnapshot {
   revenueFcfa: number
   saleItemsCount: number
   totalMortality: number
+  totalEggsProduced?: number
+  totalSellableEggs?: number
 }
 
 export interface ComputedBatchProfitability extends BatchProfitabilitySnapshot {
@@ -15,6 +17,11 @@ export interface ComputedBatchProfitability extends BatchProfitabilitySnapshot {
   marginRate: number | null
   costPerBird: number | null
   breakEvenSalePricePerLiveBirdFcfa: number | null
+  costPerEggProducedFcfa: number | null
+  costPerSellableEggFcfa: number | null
+  breakEvenEggSalePriceFcfa: number | null
+  breakEvenTraySalePriceFcfa: number | null
+  sellableEggRatePct: number | null
   mortalityRatePct: number | null
   liveCount: number
 }
@@ -26,9 +33,13 @@ export function computeBatchProfitability(
   const margin = netMargin(snapshot.revenueFcfa, totalCostFcfa)
   const liveCountValue = livingCount(snapshot.entryCount, snapshot.totalMortality)
   const mortalityRatePct = mortalityRate(snapshot.totalMortality, snapshot.entryCount)
+  const totalEggsProduced = snapshot.totalEggsProduced ?? 0
+  const totalSellableEggs = snapshot.totalSellableEggs ?? 0
 
   return {
     ...snapshot,
+    totalEggsProduced,
+    totalSellableEggs,
     totalCostFcfa,
     profitFcfa: margin.amount,
     marginRate: margin.rate,
@@ -39,6 +50,26 @@ export function computeBatchProfitability(
     breakEvenSalePricePerLiveBirdFcfa:
       totalCostFcfa > 0 && liveCountValue > 0
         ? Math.ceil(totalCostFcfa / liveCountValue)
+        : null,
+    costPerEggProducedFcfa:
+      totalCostFcfa > 0 && totalEggsProduced > 0
+        ? Math.ceil(totalCostFcfa / totalEggsProduced)
+        : null,
+    costPerSellableEggFcfa:
+      totalCostFcfa > 0 && totalSellableEggs > 0
+        ? Math.ceil(totalCostFcfa / totalSellableEggs)
+        : null,
+    breakEvenEggSalePriceFcfa:
+      totalCostFcfa > 0 && totalSellableEggs > 0
+        ? Math.ceil(totalCostFcfa / totalSellableEggs)
+        : null,
+    breakEvenTraySalePriceFcfa:
+      totalCostFcfa > 0 && totalSellableEggs > 0
+        ? Math.ceil((totalCostFcfa / totalSellableEggs) * 30)
+        : null,
+    sellableEggRatePct:
+      totalEggsProduced > 0
+        ? Math.round((totalSellableEggs / totalEggsProduced) * 10000) / 100
         : null,
     mortalityRatePct,
     liveCount: liveCountValue,
