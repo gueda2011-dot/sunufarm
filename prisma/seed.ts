@@ -159,6 +159,7 @@ async function createDemoWorkspace(passwordHash: string) {
     data: {
       email: "demo@sunufarm.com",
       name: "Compte Demo",
+      emailVerified: new Date(),
       passwordHash,
     },
   })
