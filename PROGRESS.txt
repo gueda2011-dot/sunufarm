@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-08 (Session 67)
+> Derniere mise a jour : 2026-04-08 (Session 68)
 
 ---
 
@@ -20,6 +20,7 @@
 | Donnees demo | Seed / demo stable pour onboarding et validations manuelles | En place |
 | Observabilite / securite | Health admin, logs critiques, backup / restore, incident response, rate limiting | En place |
 | Hors ligne / resilience terrain | File locale navigateur + resynchronisation V1 sur flux critiques | En place |
+| Intelligence Collective | Pool de snapshots anonymises, benchmark collectif, boucle de feedback, cron backfill | Phase A livree |
 | Chantiers ouverts | Durcissement webhooks Wave, outillage admin V2, extension offline restante | En cours |
 
 ### Lecture rapide
@@ -34,6 +35,7 @@
 - Une V1 `prix minimum de vente` existe maintenant sur la rentabilite lot pour les plans `PRO / BUSINESS`
 - Une V1 `Business` existe maintenant pour le pilotage global exploitation, reservee au plan `BUSINESS`
 - La couche `Business` a deja une phase de polissage produit et de differenciation conversion, sans changer son architecture
+- La Phase A de l'Intelligence Collective est livree : snapshots anonymises auto-generes a chaque cloture de lot, pool cross-organisations query-able avec fallback progressif (precis / etudie / global), benchmark collectif injecte dans les analyses IA, cron de backfill pour les lots deja fermes
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
@@ -49,6 +51,7 @@
 | Prediction marge | V1 fonctionnelle, avec projection finale, tendance, benchmark interne et alertes critiques |
 | Prix minimum de vente | V1 fonctionnelle sur la rentabilite lot, reservee a `PRO / BUSINESS` |
 | Business dashboard | V1 fonctionnelle, avec KPI exploitation, priorisation des risques, recommandations et mise en scene produit |
+| Intelligence Collective | Phase A livree : snapshots anonymises, benchmark collectif cross-orgs, boucle feedback, cron backfill |
 | Achats fournisseur | Fonctionnel, avec paiements et envoi au stock |
 | Depenses / finances | Fonctionnel, avec creation offline V1 |
 | Ventes | Fonctionnel, avec creation offline V1 |
@@ -97,6 +100,62 @@
 | Types de ventes MVP | Poulets vifs, oeufs, fientes uniquement | Decision produit validee |
 
 ---
+
+---
+
+## Session 68 - 2026-04-08
+
+### Travail effectue
+
+**Intelligence Collective — Phase A** : Mise en place des fondations du systeme d'intelligence collective qui transforme SunuFarm d'un simple agregateur de donnees en un systeme qui apprend de l'ensemble des exploitations pour ameliorer ses recommendations.
+
+- **3 nouveaux modeles Prisma** :
+  - `BatchOutcomeSnapshot` — snapshot anonymise d'un lot ferme (PAS d'organizationId, ni de batchId), contient mortalite finale, FCR, marge, profil meteo, signaux sanitaires
+  - `LearnedPattern` — patterns detectes depuis le pool avec confidence adaptive selon les feedbacks terrain
+  - `RecommendationFeedback` — boucle de feedback : chaque conseil suivi ou ignore permet d'ajuster la confiance du pattern
+- **Migration SQL creee et appliquee** : `20260408190000_add_collective_intelligence_models`
+- **`src/lib/collective-intelligence.ts`** — engine de generation des snapshots :
+  - collecte 10 sources de donnees en parallele (mortalite, aliment, meteo, traitements, vaccins, ventes, depenses, poids)
+  - calcule FCR, taux de mortalite, marge, stress thermique, retards vaccinaux, et derive de region depuis l'adresse de la ferme
+  - expose `generateBatchOutcomeSnapshot()` (never-throws, fire-and-forget) et `backfillBatchOutcomeSnapshots()`
+- **`src/lib/collective-benchmark.ts`** — benchmark engine avec strategie de fallback progressive :
+  - Niveau 1 : précis (meme race + region + saison), minimum 10 snapshots
+  - Niveau 2 : elargi (meme race), minimum 5 snapshots
+  - Niveau 3 : global (meme type de lot)
+  - null si le pool est trop petit — gere cote appelant
+  - `formatCollectiveBenchmarkInsight()` : formate un message d'insight compare pour l'UI
+- **Hook `closeBatch`** : un appel fire-and-forget est ajoute a la fin de `closeBatch()` dans `src/actions/batches.ts`
+  - Ne bloque jamais la cloture — les erreurs sont loguees en silence
+- **Enrichissement `buildBatchAnalysisInput`** dans `src/lib/ai.ts` :
+  - race et adresse ajoutees au select Prisma
+  - `collectiveBenchmark` injecte dans l'input donne au LLM (mediane mortalite, FCR, marge, prix de vente, stress thermique, scope utilise)
+  - Quand assez de donnees existent dans le pool, l'IA compare automatiquement le lot aux lots reels de tout le reseau
+- **Cron `app/api/cron/collective-intelligence/route.ts`** :
+  - Backfill 30 lots/execution pour les lots anciens sans snapshot
+  - Log les stats du pool (total, par type, par region, dernier snapshot)
+  - Securise par `CRON_SECRET`, planifie a 3h du matin dans `vercel.json`
+- **8 tests unitaires** sur les fonctions pures du benchmark (insight formatting, structure, valeurs limites)
+- **Build + lint verts** — aucune regression
+
+### Garanties d'anonymisation
+
+- `BatchOutcomeSnapshot` ne contient aucun `organizationId`, `farmId`, `userId` ou `batchId`
+- Les queries de benchmark retournent uniquement des agregats statistiques (percentiles)
+- Le pool ne permet pas de retrouver l'identite d'une ferme depuis un snapshot
+
+### Resultat
+
+- Chaque nouvelle cloture de lot enrichit automatiquement le pool collectif
+- Des que ~30-50 lots sont dans le pool, le benchmark collectif s'active sur les analyses IA
+- L'IA peut desormais dire "votre mortalite est de 5.2% vs mediane collective de 3.5% sur 47 lots similaires" a la place de seuils codes en dur
+- Les seuils adaptatifs (`kpi-thresholds.ts`) seront remplaces par des percentiles collectifs en Phase B
+
+### Prochaine session recommandee (Phase B)
+
+- Remplacer les seuils statiques de `kpi-thresholds.ts` par des seuils adaptatifs calcules depuis le pool
+- Ajouter une carte UI `BenchmarkCard` sur la page detail du lot pour afficher graphiquement la position du lot dans la distribution collective
+- Implementer la detection automatique de patterns (`WEATHER_MORTALITY`, `FCR_BENCHMARK`) via le cron et les persister dans `LearnedPattern`
+- Ajouter le formulaire de feedback terrain sur les recommandations IA
 
 ---
 

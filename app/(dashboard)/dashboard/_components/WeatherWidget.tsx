@@ -43,7 +43,7 @@ export function WeatherWidget() {
           } else {
             setError("Donnees meteo indisponibles")
           }
-        } catch (err) {
+        } catch {
           setError("Erreur reseau")
         } finally {
           setLoading(false)
@@ -109,7 +109,7 @@ export function WeatherWidget() {
                   <div className="text-3xl font-bold text-orange-950">
                     {Math.round((weather.temperatureMax + weather.temperatureMin) / 2)}°C
                   </div>
-                  <p className="text-xs font-medium text-orange-700">Aujourd'hui</p>
+                  <p className="text-xs font-medium text-orange-700">Aujourd&apos;hui</p>
                 </div>
               </div>
 

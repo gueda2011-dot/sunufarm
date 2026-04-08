@@ -49,6 +49,7 @@ import {
 } from "@/src/lib/validators"
 import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { generateBatchOutcomeSnapshot } from "@/src/lib/collective-intelligence"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -612,6 +613,10 @@ export async function closeBatch(
       before:         { status: BatchStatus.ACTIVE },
       after:          { status: closeStatus, closeReason },
     })
+
+    // Génération asynchrone du snapshot anonymisé pour l'intelligence collective.
+    // Fire-and-forget : ne bloque jamais la clôture du lot.
+    void generateBatchOutcomeSnapshot(batchId, organizationId)
 
     return { success: true, data: batch }
   } catch {
