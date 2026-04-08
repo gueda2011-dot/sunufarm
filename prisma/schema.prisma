@@ -116,6 +116,7 @@ enum NotificationType {
   RETARD_VACCINATION
   CREANCE_EN_RETARD
   MOTIF_MORTALITE_MANQUANT
+  ALERTE_METEO
   AUTRE
 }
 
@@ -631,6 +632,7 @@ model DailyRecord {
   avgWeightG     Int? // poids moyen échantillon en grammes
 
   observations String?
+  audioRecordUrl String?
 
   recordedById String? // userId de la personne qui a saisi
   lockedAt     DateTime? // verrouillé automatiquement après J+1 minuit

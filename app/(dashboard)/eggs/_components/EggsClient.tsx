@@ -5,23 +5,20 @@ import { useForm, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Plus, Egg, Trash2, TrendingUp } from "lucide-react"
+import { Egg, Plus, Target, Trash2, TrendingUp } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
 import { Label } from "@/src/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
 import {
-  getEggRecords,
   createEggRecord,
   deleteEggRecord,
+  getEggRecords,
   type EggRecordSummary,
 } from "@/src/actions/eggs"
 import type { BatchSummary } from "@/src/actions/batches"
 import { formatDate, formatNumber, formatPercent } from "@/src/lib/formatters"
-
-// ---------------------------------------------------------------------------
-// Schéma
-// ---------------------------------------------------------------------------
+import { layingRate as calculateLayingRate } from "@/src/lib/kpi"
 
 const schema = z.object({
   batchId: z.string().min(1, "Lot requis"),
@@ -38,36 +35,65 @@ const schema = z.object({
 type FormValues = z.input<typeof schema>
 type SubmitValues = z.output<typeof schema>
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
+export interface LayerBatchMetric {
+  batchId: string
+  entryCount: number
+  liveHensToday: number
+  mortalityCheckpoints: Array<{
+    date: string
+    cumulativeMortality: number
+  }>
+}
 
 interface Props {
   organizationId: string
   userRole: string
   pondeuseBatches: BatchSummary[]
   initialRecords: EggRecordSummary[]
+  layerBatchMetrics: LayerBatchMetric[]
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function layingRate(totalEggs: number, batchEntryCount: number): number {
-  if (batchEntryCount <= 0) return 0
-  return (totalEggs / batchEntryCount) * 100
+function toDateKey(date: Date | string): string {
+  return new Date(date).toISOString().slice(0, 10)
 }
 
-// ---------------------------------------------------------------------------
-// Composant
-// ---------------------------------------------------------------------------
+function getLiveHensForDate(
+  batchId: string,
+  dateKey: string,
+  metricsByBatchId: Map<string, LayerBatchMetric>,
+): number | null {
+  const metrics = metricsByBatchId.get(batchId)
+  if (!metrics) return null
 
-export function EggsClient({ organizationId, userRole, pondeuseBatches, initialRecords }: Props) {
+  let cumulativeMortality = 0
+  for (const checkpoint of metrics.mortalityCheckpoints) {
+    if (checkpoint.date > dateKey) break
+    cumulativeMortality = checkpoint.cumulativeMortality
+  }
+
+  return Math.max(0, metrics.entryCount - cumulativeMortality)
+}
+
+function getRecentDateThreshold(days: number): Date {
+  const threshold = new Date()
+  threshold.setHours(0, 0, 0, 0)
+  threshold.setDate(threshold.getDate() - (days - 1))
+  return threshold
+}
+
+export function EggsClient({
+  organizationId,
+  userRole,
+  pondeuseBatches,
+  initialRecords,
+  layerBatchMetrics,
+}: Props) {
   const [records, setRecords] = useState<EggRecordSummary[]>(initialRecords)
   const [showForm, setShowForm] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   const canEdit = ["SUPER_ADMIN", "OWNER", "MANAGER", "TECHNICIAN", "DATA_ENTRY"].includes(userRole)
+  const metricsByBatchId = new Map(layerBatchMetrics.map((metric) => [metric.batchId, metric]))
 
   const {
     register,
@@ -105,8 +131,8 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
       })
 
       if (res.success) {
-        toast.success("Record d'œufs enregistré")
-        const refreshed = await getEggRecords({ organizationId, limit: 50 })
+        toast.success("Record d'oeufs enregistre")
+        const refreshed = await getEggRecords({ organizationId, limit: 100 })
         if (refreshed.success) setRecords(refreshed.data)
         reset({
           batchId: "",
@@ -128,64 +154,113 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
 
   async function onDelete(recordId: string) {
     if (!confirm("Supprimer ce record ?")) return
+
     startTransition(async () => {
       const res = await deleteEggRecord({ organizationId, recordId })
       if (res.success) {
-        toast.success("Record supprimé")
-        setRecords((r) => r.filter((x) => x.id !== recordId))
+        toast.success("Record supprime")
+        setRecords((current) => current.filter((record) => record.id !== recordId))
       } else {
         toast.error(res.error)
       }
     })
   }
 
-  // ── Stats globales ──────────────────────────────────────────────────────
+  const todayKey = toDateKey(new Date())
+  const recentThreshold = getRecentDateThreshold(7)
+  const todayRecords = records.filter((record) => toDateKey(record.date) === todayKey)
+  const recentRecords = records.filter((record) => new Date(record.date) >= recentThreshold)
 
-  const todayStr = new Date().toISOString().split("T")[0]
-  const todayRecords = records.filter(
-    (r) => new Date(r.date).toISOString().split("T")[0] === todayStr,
+  const totalTodayEggs = todayRecords.reduce((sum, record) => sum + record.totalEggs, 0)
+  const totalTodaySellable = todayRecords.reduce((sum, record) => sum + record.sellableEggs, 0)
+  const totalTodayLiveHens = layerBatchMetrics.reduce(
+    (sum, metric) => sum + metric.liveHensToday,
+    0,
   )
-  const totalTodayEggs = todayRecords.reduce((s, r) => s + r.totalEggs, 0)
-  const totalTodaySellable = todayRecords.reduce((s, r) => s + r.sellableEggs, 0)
+  const todayLayingRate = calculateLayingRate(totalTodayEggs, totalTodayLiveHens)
+  const todaySellableRate =
+    totalTodayEggs > 0 ? (totalTodaySellable / totalTodayEggs) * 100 : null
+
+  const totalRecentEggs = recentRecords.reduce((sum, record) => sum + record.totalEggs, 0)
+  const recentDates = new Set(recentRecords.map((record) => toDateKey(record.date)))
+  const averageRecentEggs =
+    recentDates.size > 0 ? Math.round(totalRecentEggs / recentDates.size) : 0
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="mx-auto max-w-5xl space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Production d&apos;œufs</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="text-xl font-bold text-gray-900">Production d&apos;oeufs</h1>
+          <p className="mt-0.5 text-sm text-gray-500">
             {pondeuseBatches.length} lot{pondeuseBatches.length !== 1 ? "s" : ""} pondeuse actif{pondeuseBatches.length !== 1 ? "s" : ""}
           </p>
+          <p className="mt-2 max-w-2xl text-sm text-gray-600">
+            Lecture terrain des couches: volume du jour, qualite vendable et taux de ponte
+            estime sur les poules vivantes.
+          </p>
         </div>
+
         {canEdit && pondeuseBatches.length > 0 && (
           <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
+            <Plus className="mr-1.5 h-4 w-4" />
             Saisir
           </Button>
         )}
       </div>
 
-      {todayRecords.length > 0 && (
-        <div className="grid grid-cols-2 gap-3">
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-gray-500 uppercase tracking-wide">Total œufs aujourd&apos;hui</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{formatNumber(totalTodayEggs)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-gray-500 uppercase tracking-wide">Commercialisables</p>
-              <p className="text-2xl font-bold text-green-600 mt-1">{formatNumber(totalTodaySellable)}</p>
-              {totalTodayEggs > 0 && (
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {formatPercent((totalTodaySellable / totalTodayEggs) * 100, 0)} du total
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Card className="border-yellow-200 bg-yellow-50/80">
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-yellow-700">Oeufs aujourd&apos;hui</p>
+            <p className="mt-1 text-2xl font-bold text-yellow-950">
+              {formatNumber(totalTodayEggs)}
+            </p>
+            <p className="mt-1 text-xs text-yellow-800">
+              sur {formatNumber(totalTodayLiveHens)} poules vivantes estimees
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Oeufs vendables</p>
+            <p className="mt-1 text-2xl font-bold text-green-700">
+              {formatNumber(totalTodaySellable)}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">volume exploitable du jour</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Taux de ponte</p>
+            <p className="mt-1 text-2xl font-bold text-gray-900">
+              {todayLayingRate != null ? formatPercent(todayLayingRate, 1) : "-"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">corrige par effectif vivant</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Taux vendable</p>
+            <p className="mt-1 text-2xl font-bold text-gray-900">
+              {todaySellableRate != null ? formatPercent(todaySellableRate, 1) : "-"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">part des oeufs commercialisables</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Moyenne recente</p>
+            <p className="mt-1 text-2xl font-bold text-gray-900">
+              {formatNumber(averageRecentEggs)}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">oeufs par jour sur les 7 derniers jours</p>
+          </CardContent>
+        </Card>
+      </div>
 
       {showForm && canEdit && (
         <Card>
@@ -202,10 +277,10 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
                     className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                     {...register("batchId")}
                   >
-                    <option value="">Sélectionner un lot</option>
-                    {pondeuseBatches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.number} — {b.building.name}
+                    <option value="">Selectionner un lot</option>
+                    {pondeuseBatches.map((batch) => (
+                      <option key={batch.id} value={batch.id}>
+                        {batch.number} - {batch.building.name}
                       </option>
                     ))}
                   </select>
@@ -225,7 +300,7 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
                 </div>
 
                 <div>
-                  <Label htmlFor="total-eggs" required>Total œufs ramassés</Label>
+                  <Label htmlFor="total-eggs" required>Total oeufs ramasses</Label>
                   <Input
                     id="total-eggs"
                     type="number"
@@ -245,7 +320,7 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
                 </div>
 
                 <div>
-                  <Label htmlFor="broken">Cassés</Label>
+                  <Label htmlFor="broken">Casses</Label>
                   <Input
                     id="broken"
                     type="number"
@@ -265,7 +340,7 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
                 </div>
 
                 <div>
-                  <Label htmlFor="small">Petits / Déclassés</Label>
+                  <Label htmlFor="small">Petits / declasses</Label>
                   <Input
                     id="small"
                     type="number"
@@ -330,83 +405,145 @@ export function EggsClient({ organizationId, userRole, pondeuseBatches, initialR
       {pondeuseBatches.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <Egg className="h-10 w-10 text-gray-300 mb-3" />
+            <Egg className="mb-3 h-10 w-10 text-gray-300" />
             <p className="text-sm font-medium text-gray-900">Aucun lot pondeuse actif</p>
-            <p className="text-sm text-gray-500 mt-1">
-              Créez un lot de type Pondeuse pour saisir la production.
+            <p className="mt-1 text-sm text-gray-500">
+              Creez un lot de type Pondeuse pour saisir la production.
             </p>
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-green-600" />
-              Historique de production
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {records.length === 0 ? (
-              <p className="text-sm text-gray-500 px-4 py-6 text-center">
-                Aucun record encore. Commencez à saisir la production.
-              </p>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {records.map((rec) => {
-                  const batch = pondeuseBatches.find((b) => b.id === rec.batchId)
-                  const rate = batch ? layingRate(rec.totalEggs, batch.entryCount) : null
+        <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingUp className="h-4 w-4 text-green-600" />
+                Historique de production
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {records.length === 0 ? (
+                <p className="px-4 py-6 text-center text-sm text-gray-500">
+                  Aucun record encore. Commencez a saisir la production.
+                </p>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {records.map((record) => {
+                    const batch = pondeuseBatches.find((item) => item.id === record.batchId)
+                    const estimatedLiveHens = getLiveHensForDate(
+                      record.batchId,
+                      toDateKey(record.date),
+                      metricsByBatchId,
+                    )
+                    const rate =
+                      estimatedLiveHens != null
+                        ? calculateLayingRate(record.totalEggs, estimatedLiveHens)
+                        : null
+                    const qualityRate =
+                      record.totalEggs > 0
+                        ? (record.sellableEggs / record.totalEggs) * 100
+                        : null
 
-                  return (
-                    <div key={rec.id} className="flex items-center justify-between px-4 py-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-900">
-                            {formatDate(rec.date)}
-                          </span>
-                          {rate !== null && (
-                            <span
-                              className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
-                                rate >= 70
-                                  ? "bg-green-50 text-green-700"
-                                  : rate >= 50
-                                    ? "bg-orange-50 text-orange-700"
-                                    : "bg-red-50 text-red-700"
-                              }`}
+                    return (
+                      <div
+                        key={record.id}
+                        className="flex items-center justify-between gap-3 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium text-gray-900">
+                              {formatDate(record.date)}
+                            </span>
+                            {rate != null && (
+                              <span
+                                className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                  rate >= 70
+                                    ? "bg-green-50 text-green-700"
+                                    : rate >= 50
+                                      ? "bg-orange-50 text-orange-700"
+                                      : "bg-red-50 text-red-700"
+                                }`}
+                              >
+                                {formatPercent(rate, 0)} ponte
+                              </span>
+                            )}
+                            {qualityRate != null && (
+                              <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">
+                                {formatPercent(qualityRate, 0)} vendable
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-xs text-gray-500">
+                            {record.batch.number} - {formatNumber(record.totalEggs)} oeufs
+                            {batch ? ` - ${batch.building.name}` : ""}
+                          </p>
+                          <p className="mt-0.5 text-xs text-gray-400">
+                            Base estimee: {formatNumber(estimatedLiveHens ?? batch?.entryCount ?? 0)} poules vivantes
+                          </p>
+                        </div>
+
+                        <div className="ml-2 flex shrink-0 items-center gap-3">
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-green-700">
+                              {formatNumber(record.sellableEggs)}
+                            </p>
+                            <p className="text-xs text-gray-400">vendables</p>
+                          </div>
+
+                          {canEdit && (
+                            <button
+                              className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                              onClick={() => onDelete(record.id)}
                             >
-                              {formatPercent(rate, 0)} ponte
-                            </span>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           )}
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {rec.batch.number} — {rec.totalEggs} œufs
-                          {rec.brokenEggs + rec.dirtyEggs + rec.smallEggs > 0 && (
-                            <span className="text-orange-500">
-                              {" "}({rec.brokenEggs} cassés, {rec.dirtyEggs} sales)
-                            </span>
-                          )}
-                        </p>
                       </div>
-                      <div className="flex items-center gap-3 ml-2 shrink-0">
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-green-700">{formatNumber(rec.sellableEggs)}</p>
-                          <p className="text-xs text-gray-400">vendables</p>
-                        </div>
-                        {canEdit && (
-                          <button
-                            className="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors"
-                            onClick={() => onDelete(rec.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Target className="h-4 w-4 text-amber-600" />
+                Lecture rapide
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Lots actifs</p>
+                <p className="mt-1 text-xl font-bold text-gray-900">
+                  {formatNumber(pondeuseBatches.length)}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {formatNumber(totalTodayLiveHens)} poules vivantes estimees a suivre
+                </p>
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <p className="text-sm font-semibold text-gray-900">Ce que tu peux dire en demo</p>
+                <p className="mt-2 text-sm text-gray-600">
+                  Ici, on ne montre pas seulement combien d&apos;oeufs ont ete ramasses.
+                  On voit aussi le taux de ponte reel et la part vendable, donc la qualite
+                  economique de la journee.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-900">Correction metier</p>
+                <p className="mt-2 text-sm text-amber-800">
+                  Le taux de ponte n&apos;est plus lu sur l&apos;effectif d&apos;entree. Il est estime
+                  sur les poules vivantes a partir de la mortalite cumulee du lot.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   )

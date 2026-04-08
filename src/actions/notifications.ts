@@ -75,6 +75,7 @@ import {
 } from "@/src/lib/predictive-snapshots"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { fetchLocalWeather } from "@/src/lib/weather"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -954,6 +955,49 @@ export async function generateNotificationsForOrganization(
     }
   }
 
+  const canSeeAlerts = hasPlanFeature(subscription.plan, "ALERTS")
+  const canSeeAdvancedHealth = hasPlanFeature(subscription.plan, "ADVANCED_HEALTH")
+
+  // Signal 8 — Alertes Météo (Toute l'équipe) — Optionnelle (Plan Pro/Business)
+  if (canSeeAlerts) {
+    try {
+      const allMembers = await prisma.userOrganization.findMany({
+        where: {
+          organizationId,
+          user: { deletedAt: null },
+        },
+        select: { userId: true },
+      })
+      const allMemberIds = allMembers.map((m) => m.userId)
+      totalCreated += await checkWeatherAlerts(organizationId, allMemberIds)
+    } catch {
+      // Erreur silencieuse
+    }
+  }
+
+  // Signal 9 — Rappels de Vaccination (Toute l'équipe) — Optionnelle (Plan Pro/Business)
+  if (canSeeAdvancedHealth) {
+    try {
+      const allMembers = await prisma.userOrganization.findMany({
+        where: { organizationId, user: { deletedAt: null } },
+        select: { userId: true },
+      })
+      const allMemberIds = allMembers.map((m) => m.userId)
+      totalCreated += await checkVaccinationReminders(organizationId, allMemberIds)
+    } catch {
+      // Erreur silencieuse
+    }
+  }
+
+  // Signal 10 — Créances en retard (Propriétaires & Managers uniquement) — Optionnelle (Plan Pro/Business)
+  if (canSeeAlerts) {
+    try {
+      totalCreated += await checkOverdueInvoices(organizationId, userIds)
+    } catch {
+      // Erreur silencieuse
+    }
+  }
+
   return { created: totalCreated, targetUserIds: userIds }
 }
 
@@ -1129,5 +1173,185 @@ async function checkBatchMarginProjectionAlerts(
         },
       }
     }),
+  })
+}
+
+/**
+ * Signal 8 — Alertes Météo Intelligence Artificielle.
+ * Scanne les fermes de l'organisation et génère des alertes si les seuils
+ * de chaleur ou de pluie sont dépassés.
+ * Notifie toute l'équipe (OWNER, MANAGER, TECHNICIAN, etc.).
+ */
+async function checkWeatherAlerts(
+  organizationId: string,
+  userIds: string[],
+): Promise<number> {
+  const farms = await prisma.farm.findMany({
+    where: { organizationId, deletedAt: null, latitude: { not: null }, longitude: { not: null } },
+    select: { id: true, name: true, latitude: true, longitude: true },
+  })
+
+  if (farms.length === 0) return 0
+
+  const HEAT_THRESHOLD = 33
+  const RAIN_THRESHOLD = 40
+  const candidates: NotificationCandidate[] = []
+
+  for (const farm of farms) {
+    try {
+      const weather = await fetchLocalWeather(farm.latitude!, farm.longitude!)
+      if (!weather) continue
+
+      if (weather.temperatureMax > HEAT_THRESHOLD) {
+        candidates.push({
+          title: `Alerte Chaleur : ${farm.name}`,
+          message: `Forte chaleur prevue (${weather.temperatureMax}°C). Pensez a bien hydrater vos poulets et a ventiler les batiments.`,
+          resourceId: farm.id,
+          metadata: { temperatureMax: weather.temperatureMax, type: "HEAT" },
+        })
+      }
+
+      if (weather.precipitationProbability > RAIN_THRESHOLD) {
+        candidates.push({
+          title: `Risque de Pluie : ${farm.name}`,
+          message: `Risque de pluie eleve (${weather.precipitationProbability}%). Assurez-vous que la ferme est bien protegee.`,
+          resourceId: farm.id,
+          metadata: { precipitationProbability: weather.precipitationProbability, type: "RAIN" },
+        })
+      }
+    } catch (error) {
+      console.error(`Failed to check weather for farm ${farm.id}`, error)
+    }
+  }
+
+  if (candidates.length === 0) return 0
+
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.ALERTE_METEO,
+    resourceType: "FARM_WEATHER",
+    candidates,
+  })
+}
+
+/**
+ * Signal 9 — Rappels de Vaccination.
+ * Alerte si un lot atteint l'âge d'un vaccin prévu dans son plan vaccinal
+ * et que celui-ci n'a pas encore été enregistré.
+ */
+async function checkVaccinationReminders(
+  organizationId: string,
+  userIds: string[],
+): Promise<number> {
+  const activeBatches = await prisma.batch.findMany({
+    where: { organizationId, status: BatchStatus.ACTIVE, deletedAt: null },
+    select: { id: true, number: true, type: true, entryDate: true, entryAgeDay: true },
+  })
+
+  if (activeBatches.length === 0) return 0
+
+  const todayStr = new Date().toISOString().split("T")[0]
+  const candidates: NotificationCandidate[] = []
+
+  for (const batch of activeBatches) {
+    try {
+      // 1. Calculer l'âge actuel du lot
+      const diffTime = Math.abs(new Date().getTime() - new Date(batch.entryDate).getTime())
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+      const currentAge = batch.entryAgeDay + diffDays
+
+      // 2. Trouver les plans vaccinaux actifs pour ce type de lot (J et J+1)
+      const plans = await prisma.vaccinationPlan.findMany({
+        where: { organizationId, batchType: batch.type, isActive: true },
+        include: {
+          items: {
+            where: { dayOfAge: { in: [currentAge, currentAge + 1] } },
+          },
+        },
+      })
+
+      for (const plan of plans) {
+        for (const item of plan.items) {
+          const isTomorrow = item.dayOfAge === currentAge + 1
+
+          // 3. Vérifier si une vaccination a déjà été enregistrée pour ce vaccin
+          // Pour J-1, on ne vérifie pas "déjà fait aujourd'hui" car c'est pour demain.
+          // Mais pour Jour J, on vérifie si c'est déjà fait.
+          if (!isTomorrow) {
+            const alreadyDone = await prisma.vaccinationRecord.findFirst({
+              where: {
+                batchId: batch.id,
+                vaccineName: item.vaccineName,
+                date: new Date(todayStr),
+              },
+            })
+            if (alreadyDone) continue
+          }
+
+          candidates.push({
+            title: isTomorrow
+              ? `Vaccination Demain : ${batch.number}`
+              : `Vaccination Aujourd'hui : ${batch.number}`,
+            message: isTomorrow
+              ? `Vaccin ${item.vaccineName} prevu demain (J${item.dayOfAge}) pour le lot ${batch.number}.`
+              : `Vaccin ${item.vaccineName} prevu aujourd'hui (J${item.dayOfAge}) pour le lot ${batch.number}.`,
+            // On inclut dayOfAge dans le resourceId pour permettre les rappels successifs (J-1 puis J)
+            resourceId: `${batch.id}:${item.vaccineName}:${item.dayOfAge}`,
+            metadata: { vaccineName: item.vaccineName, dayOfAge: item.dayOfAge, isTomorrow },
+          })
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to check vaccination for batch ${batch.id}`, error)
+    }
+  }
+
+  if (candidates.length === 0) return 0
+
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.RETARD_VACCINATION,
+    resourceType: "BATCH_VACCINATION_REMINDER",
+    candidates,
+  })
+}
+
+/**
+ * Signal 10 — Factures de vente impayées à l'échéance.
+ */
+async function checkOverdueInvoices(
+  organizationId: string,
+  userIds: string[],
+): Promise<number> {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const overdueInvoices = await prisma.invoice.findMany({
+    where: {
+      organizationId,
+      type: "VENTE",
+      status: { not: "PAYEE" },
+      dueDate: { lte: today },
+    },
+    include: { customer: { select: { name: true } } },
+  })
+
+  if (overdueInvoices.length === 0) return 0
+
+  const candidates = overdueInvoices.map((inv) => ({
+    title: `Facture impayee : ${inv.number}`,
+    message: `La facture ${inv.number} pour ${inv.customer?.name ?? "Client inconnu"} est arrivee a echeance (${inv.totalFcfa - inv.paidFcfa} FCFA restant).`,
+    resourceId: inv.id,
+    metadata: { invoiceNumber: inv.number, totalFcfa: inv.totalFcfa, paidFcfa: inv.paidFcfa },
+  }))
+
+  return createNotificationsIfAbsent({
+    organizationId,
+    userIds,
+    type: NotificationType.CREANCE_EN_RETARD,
+    resourceType: "INVOICE_OVERDUE",
+    candidates,
   })
 }

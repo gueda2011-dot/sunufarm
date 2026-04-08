@@ -17,6 +17,7 @@ import { DashboardKpis } from "../_components/DashboardKpis"
 import { ActiveBatchList } from "../_components/ActiveBatchList"
 import { MortalityChart } from "../_components/MortalityChart"
 import { MobileQuickActions } from "../_components/MobileQuickActions"
+import { WeatherWidget } from "./_components/WeatherWidget"
 
 export const metadata: Metadata = { title: "Tableau de bord" }
 
@@ -86,6 +87,8 @@ export default async function DashboardPage() {
           Vue d&apos;ensemble de votre exploitation avicole.
         </p>
       </div>
+
+      <WeatherWidget />
 
       <MobileQuickActions />
 

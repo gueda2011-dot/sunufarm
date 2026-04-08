@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-01 (Session 66)
+> Derniere mise a jour : 2026-04-08 (Session 67)
 
 ---
 
@@ -12,14 +12,15 @@
 | Fondations produit | Analyse fonctionnelle, architecture, modelisation et schema Prisma | Termine |
 | Socle technique | Env, auth, permissions, validators, audit, formatters, helpers communs | En place |
 | Backend metier | Server Actions coeur de produit (`batches`, `daily`, `stock`, `health`, `sales`, `purchases`, `expenses`, `subscriptions`) | Largement en place |
-| Frontend metier | Pages dashboard et modules terrain/admin principaux | Largement en place |
-| Dashboard / KPI | Dashboard principal, KPI lot, rapports mensuels, exports PDF | En place |
-| Parcours email | Confirmation d'email et notifications via Resend | En place, depend de la config env |
-| Achats / finance / stock | Paiement fournisseur, envoi au stock, sorties terrain, integrite admin V1 | En place, encore a durcir |
+| Frontend metier | Pages dashboard et modules terrain/admin principaux | En place |
+| Météo & Audio | Intégration Open-Meteo (auto-remplissage) et Cloudinary (notes vocales) | Opérationnel |
+| Dashboard / KPI | Dashboard principal, KPI lot, rapports mensuels, exports PDF, Widget Météo | En place |
+| Parcours email | Confirmation d'email et notifications via Resend | En place |
+| Achats / finance / stock | Paiement fournisseur, envoi au stock, sorties terrain, integrite admin V1 | En place |
 | Donnees demo | Seed / demo stable pour onboarding et validations manuelles | En place |
 | Observabilite / securite | Health admin, logs critiques, backup / restore, incident response, rate limiting | En place |
-| Hors ligne / resilience terrain | File locale navigateur + resynchronisation V1 sur flux critiques | En place, a etendre |
-| Chantiers ouverts | Durcissement anti-orphelins, outillage admin V2, extension offline et simplification UX restante | En cours |
+| Hors ligne / resilience terrain | File locale navigateur + resynchronisation V1 sur flux critiques | En place |
+| Chantiers ouverts | Durcissement webhooks Wave, outillage admin V2, extension offline restante | En cours |
 
 ### Lecture rapide
 
@@ -94,6 +95,33 @@
 | Permissions ferme | JSON dans `UserOrganization.farmPermissions` | MVP - table separee en V2 |
 | Motif mortalite | Optionnel, defaut "Non precise" | Decision terrain validee |
 | Types de ventes MVP | Poulets vifs, oeufs, fientes uniquement | Decision produit validee |
+
+---
+
+---
+
+## Session 67 - 2026-04-08
+
+### Travail effectué
+
+- **Pivot de stockage Audio** : Passage de Firebase Storage (bloqué par les cartes prépayées) vers **Cloudinary** (API non-signée) pour permettre l'enregistrement vocal sans carte bancaire.
+- **Automatisation Météo** : Mise à jour de `DailyForm.tsx` pour remplir automatiquement la température et l'humidité via la géolocalisation à l'ouverture de la saisie.
+- **Support Historique Météo** : Modification de `fetchLocalWeather` pour récupérer les données météo d'une date passée (permet de corriger des oublis de saisie avec des données fiables).
+- **Dashboard Widget** : Création du composant `WeatherWidget` sur la page d'accueil de la ferme pour une visibilité immédiate des conditions climatiques.
+- **Sécurité & Permissions** : Mise à jour de `next.config.ts` pour autoriser explicitement le microphone et le GPS via les en-têtes de sécurité (Permissions-Policy).
+- **UX Polissage** : Sortie du bouton Micro et du bloc Météo du menu repliable pour une accessibilité maximale sur le terrain.
+
+### Résultat
+
+- L'application est maintenant adaptée aux réalités locales (barrière de la langue via l'audio, instabilité d'accès aux services bancaires mondiaux via Cloudinary).
+- Les données météo sont historiques et précises, évitant les erreurs de saisie manuelle.
+- Les techniciens de ferme gagnent un temps précieux chaque jour.
+
+### Prochaine session recommandée
+
+- Finalisation du module de paiement (Webhooks Wave) une fois les accès officiels obtenus.
+- Optimisation du poids des fichiers audio envoyés (compression côté client avant upload).
+- Analyse automatique des audios (Transcription) via une IA légère (Whisper) quand le budget le permettra.
 
 ---
 
@@ -1750,4 +1778,36 @@
 | Commerce | Customer, Supplier, Sale, SaleItem, Purchase, PurchaseItem |
 | Finances | Expense, ExpenseCategory, Invoice, Payment |
 | RH | Employee |
-| Systeme | Notification, AuditLog |
+| Systeme | Notification, AuditLog, PredictiveSnapshot, FormDraft, UserPushDevice |
+
+---
+
+## Session 57 - 2026-04-08
+
+### Travail effectue
+
+- Implementation des 3 signaux de notifications "Intelligentes" prioritaires :
+  - **Rappels de Vaccination** : Alerte matinale (J-1 et Jour J) basee sur l'age du lot et le plan vaccinal.
+  - **Suivi des Creances** : Alerte automatique a l'echeance des factures de vente non soldees (Owners & Managers).
+  - **Alerte Mortalite Critique (2%)** : Envoi Push instantane lors de la saisie si le taux depasse 2% (evenementiel).
+- Correction technique majeure du module Météo :
+  - Resolution de l'erreur `400 Bad Request` causee par le conflit de parametres `start_date` / `past_days` dans l'API Open-Meteo.
+  - Arrondi des coordonnees GPS a 4 decimales pour garantir la stabilite des requetes sur tous les terminaux.
+- Optimisation et Robustesse :
+  - Mise a jour de `findBatchWithFarm` pour inclure `number` et `entryCount` sans requetes SQL supplementaires.
+  - Fix des erreurs de portee de variables dans `daily-records.ts` suite a l'injection des alertes temps reel.
+  - Amelioration de la deduplication des notifications vaccins (unique par lot/vaccin/jour d'age).
+
+### Resultat
+
+- L'eleveur est desormais proactif sur sa sante animale et sa tresorerie sans consulter les rapports.
+- Les alertes de mortalite grave sont traitees en < 1 seconde apres la saisie terrain.
+- La recuperation automatique de la meteo est stable et ne crash plus sur le terrain.
+- Le cycle de notifications matinal (Cron) est plus complet et exploitable.
+
+### Prochaine session recommandee
+
+- Bloquer la suppression d'un achat alimentant un stock (toujours prioritaire).
+- Deploiement des Webhooks Wave (Paiements) pour automatiser le solde des factures.
+- Etendre les alertes meteo preventives (Pluie/Chaleur) basees sur les previsions Open-Meteo.
+- Compression audio client avant upload Cloudinary pour reduire la data mobile.

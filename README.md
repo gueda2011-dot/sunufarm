@@ -40,7 +40,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 ### Saisie journaliere
 
 - enregistrement quotidien des donnees terrain
-- mortalite, alimentation, eau, temperature, humidite et observations
+- mortalite, alimentation, eau, temperature (auto via Open-Meteo), humidite et observations (vocales via Cloudinary)
 - historique structure pour mieux comprendre ce qui se passe dans l'elevage
 - mode hors ligne V1 avec mise en file locale et resynchronisation automatique au retour du reseau
 
@@ -185,6 +185,8 @@ Le produit repose sur un socle moderne et robuste :
 - NextAuth
 - Tailwind CSS
 - Vitest
+- Cloudinary (Memoire Medias)
+- Open-Meteo (Climatologie)
 
 ## Installation et developpement
 
@@ -238,6 +240,11 @@ Configuration Firebase Cloud Messaging :
 - les evenements admin de paiement et abonnement creent aussi des notifications in-app/push pour les SUPER_ADMIN
 - le bouton "Declencher les notifications" dans `/admin` permet de tester le cycle complet sans attendre le cron
 - la cloche dans le header affiche les notifications en temps reel avec lecture et archivage
+- les notifications intelligentes prioritaires (S57) :
+  - Rappels de vaccination : alerte J-1 (preparation) et Jour J (execution si non fait)
+  - Suivi des creances : alerte automatique le jour de l'echeance des factures de vente impayees
+  - Alerte mortalite critique : push instantane aux Owners/Managers des que la mortalite depasse 2% (creation ou correction)
+- recuperation meteo terrain : correction du conflit de parametres Open-Meteo et arrondi des coordonnees (V1.1)
 
 Mode hors ligne V1 :
 

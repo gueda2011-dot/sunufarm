@@ -8,11 +8,13 @@ import {
   onMessage,
   type MessagePayload,
 } from "firebase/messaging"
+import { getStorage } from "firebase/storage"
 
 const firebaseWebConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 }
@@ -40,9 +42,14 @@ function getFirebaseWebApp() {
     apiKey: firebaseWebConfig.apiKey!,
     authDomain: firebaseWebConfig.authDomain,
     projectId: firebaseWebConfig.projectId!,
+    storageBucket: firebaseWebConfig.storageBucket,
     messagingSenderId: firebaseWebConfig.messagingSenderId!,
     appId: firebaseWebConfig.appId!,
   })
+}
+
+export function getFirebaseStorageApp() {
+  return getStorage(getFirebaseWebApp())
 }
 
 export async function isWebPushSupported() {
