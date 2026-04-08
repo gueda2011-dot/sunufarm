@@ -87,6 +87,7 @@ export function RecentRecords({ records, isLoading, selectedDate }: RecentRecord
                 <th className="px-4 py-2.5 text-right">Mort.</th>
                 <th className="px-4 py-2.5 text-right">Aliment</th>
                 <th className="px-4 py-2.5 text-right">Eau</th>
+                <th className="px-4 py-2.5 text-center">Audio</th>
               </tr>
             </thead>
             <tbody>
@@ -136,6 +137,15 @@ export function RecentRecords({ records, isLoading, selectedDate }: RecentRecord
                     {/* Eau */}
                     <td className="px-4 py-3 text-right tabular-nums text-gray-500 whitespace-nowrap">
                       {record.waterLiters != null ? `${record.waterLiters} L` : "—"}
+                    </td>
+
+                    {/* Audio */}
+                    <td className="px-4 py-3 text-center">
+                      {record.audioRecordUrl ? (
+                        <audio controls src={record.audioRecordUrl} className="h-8 w-32 mx-auto sm:w-48" />
+                      ) : (
+                        <span className="text-gray-300 text-xs">—</span>
+                      )}
                     </td>
                   </tr>
                 )

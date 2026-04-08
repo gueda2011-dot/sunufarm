@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useForm, useWatch, type Resolver } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -12,6 +12,7 @@ import {
   createDailyRecord,
   updateDailyRecord,
 } from "@/src/actions/daily-records"
+import { fetchLocalWeather } from "@/src/lib/weather"
 import {
   clearFormDraft,
   getFormDraft,
@@ -22,6 +23,7 @@ import {
   enqueueOfflineDailyRecord,
 } from "@/src/lib/offline-mutation-outbox"
 import { cn } from "@/src/lib/utils"
+import { AudioRecorder } from "./AudioRecorder"
 
 function emptyToUndefined(val: unknown): unknown {
   return val === "" || val === null || val === undefined ? undefined : val
@@ -49,7 +51,11 @@ function buildFormSchema(entryCount: number) {
       emptyToUndefined,
       z.coerce.number().int("Doit etre un entier").positive("Doit etre > 0").optional(),
     ),
+    temperatureMin: z.preprocess(emptyToUndefined, z.coerce.number().optional()),
+    temperatureMax: z.preprocess(emptyToUndefined, z.coerce.number().optional()),
+    humidity: z.preprocess(emptyToUndefined, z.coerce.number().min(0).max(100).optional()),
     observations: z.string().max(2000, "Maximum 2 000 caracteres").optional(),
+    audioRecordUrl: z.string().url().optional().nullable(),
   })
 }
 
@@ -59,7 +65,11 @@ type ParsedValues = {
   feedStockId?: string
   waterLiters?: number
   avgWeightG?: number
+  temperatureMin?: number
+  temperatureMax?: number
+  humidity?: number
   observations?: string
+  audioRecordUrl?: string | null
 }
 
 interface DailyFormProps {
@@ -75,7 +85,11 @@ interface DailyFormProps {
     feedStockId?: string | null
     waterLiters?: number | null
     avgWeightG?: number | null
+    temperatureMin?: number | null
+    temperatureMax?: number | null
+    humidity?: number | null
     observations?: string | null
+    audioRecordUrl?: string | null
   }
   feedStocks: Array<{
     id: string
@@ -108,10 +122,18 @@ export function DailyForm({
   const draftStorageKey = `sunufarm:draft:daily:${organizationId}:${batchId}:${selectedDate}`
   const draftFormKey = `daily:${organizationId}:${batchId}:${selectedDate}`
   const [detailsOpen, setDetailsOpen] = useState(
-    !!(defaultValues.waterLiters || defaultValues.avgWeightG || defaultValues.observations),
+    !!(
+      defaultValues.waterLiters ||
+      defaultValues.avgWeightG ||
+      defaultValues.temperatureMin ||
+      defaultValues.temperatureMax ||
+      defaultValues.humidity ||
+      defaultValues.observations
+    ),
   )
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [draftReady, setDraftReady] = useState(false)
+  const [isFetchingWeather, setIsFetchingWeather] = useState(false)
 
   const schema = buildFormSchema(entryCount)
 
@@ -120,6 +142,7 @@ export function DailyForm({
     handleSubmit,
     control,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<ParsedValues>({
     resolver: zodResolver(schema) as Resolver<ParsedValues>,
@@ -129,11 +152,16 @@ export function DailyForm({
       feedStockId: defaultValues.feedStockId ?? undefined,
       waterLiters: defaultValues.waterLiters ?? undefined,
       avgWeightG: defaultValues.avgWeightG ?? undefined,
+      temperatureMin: defaultValues.temperatureMin ?? undefined,
+      temperatureMax: defaultValues.temperatureMax ?? undefined,
+      humidity: defaultValues.humidity ?? undefined,
       observations: defaultValues.observations ?? "",
+      audioRecordUrl: defaultValues.audioRecordUrl ?? null,
     },
   })
 
   const draftValues = useWatch({ control })
+  const hasAutoFetchedWeather = useRef(false)
 
   useEffect(() => {
     if (isEditMode || typeof window === "undefined") {
@@ -167,12 +195,19 @@ export function DailyForm({
           feedStockId: parsedDraft.feedStockId ?? defaultValues.feedStockId ?? undefined,
           waterLiters: parsedDraft.waterLiters ?? defaultValues.waterLiters ?? undefined,
           avgWeightG: parsedDraft.avgWeightG ?? defaultValues.avgWeightG ?? undefined,
+          temperatureMin: parsedDraft.temperatureMin ?? defaultValues.temperatureMin ?? undefined,
+          temperatureMax: parsedDraft.temperatureMax ?? defaultValues.temperatureMax ?? undefined,
+          humidity: parsedDraft.humidity ?? defaultValues.humidity ?? undefined,
           observations: parsedDraft.observations ?? defaultValues.observations ?? "",
+          audioRecordUrl: parsedDraft.audioRecordUrl ?? defaultValues.audioRecordUrl ?? null,
         })
 
         if (
           parsedDraft.waterLiters !== undefined ||
           parsedDraft.avgWeightG !== undefined ||
+          parsedDraft.temperatureMin !== undefined ||
+          parsedDraft.temperatureMax !== undefined ||
+          parsedDraft.humidity !== undefined ||
           !!parsedDraft.observations
         ) {
           setDetailsOpen(true)
@@ -216,6 +251,41 @@ export function DailyForm({
     return () => window.clearTimeout(timeout)
   }, [draftFormKey, draftReady, draftStorageKey, draftValues, isEditMode, organizationId])
 
+  useEffect(() => {
+    // Si c'est en edition, ou pas encore charge, ou deja fetch, on ignore
+    if (!draftReady || isEditMode || hasAutoFetchedWeather.current) return;
+
+    // Si on a deja une temperture min existante dans le brouillon, on n'ecrase pas
+    if (draftValues.temperatureMin !== undefined || draftValues.temperatureMax !== undefined) {
+      hasAutoFetchedWeather.current = true;
+      return;
+    }
+
+    if (navigator.geolocation) {
+      hasAutoFetchedWeather.current = true;
+      setIsFetchingWeather(true);
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            const weather = await fetchLocalWeather(position.coords.latitude, position.coords.longitude, selectedDate);
+            if (weather) {
+              setValue("temperatureMin", weather.temperatureMin, { shouldDirty: true });
+              setValue("temperatureMax", weather.temperatureMax, { shouldDirty: true });
+              setValue("humidity", weather.humidity, { shouldDirty: true });
+            }
+          } catch (error) {
+            console.error("Auto weather fetch failed", error);
+          } finally {
+            setIsFetchingWeather(false);
+          }
+        },
+        () => {
+          setIsFetchingWeather(false); // Silencieux si l'utilisateur refuse ou si echec GPS
+        }
+      );
+    }
+  }, [draftReady, isEditMode, draftValues.temperatureMin, draftValues.temperatureMax, setValue]);
+
   const clearDrafts = async () => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(draftStorageKey)
@@ -235,7 +305,11 @@ export function DailyForm({
       feedStockId: data.feedStockId,
       waterLiters: data.waterLiters,
       avgWeightG: data.avgWeightG,
+      temperatureMin: data.temperatureMin,
+      temperatureMax: data.temperatureMax,
+      humidity: data.humidity,
       observations: data.observations,
+      audioRecordUrl: data.audioRecordUrl,
     })
 
     await clearDrafts()
@@ -256,7 +330,11 @@ export function DailyForm({
         feedStockId: data.feedStockId ?? null,
         waterLiters: data.waterLiters,
         avgWeightG: data.avgWeightG,
+        temperatureMin: data.temperatureMin,
+        temperatureMax: data.temperatureMax,
+        humidity: data.humidity,
         observations: data.observations,
+        audioRecordUrl: data.audioRecordUrl,
       })
 
       if (result.success) {
@@ -284,7 +362,11 @@ export function DailyForm({
         feedStockId: data.feedStockId,
         waterLiters: data.waterLiters,
         avgWeightG: data.avgWeightG,
+        temperatureMin: data.temperatureMin,
+        temperatureMax: data.temperatureMax,
+        humidity: data.humidity,
         observations: data.observations,
+        audioRecordUrl: data.audioRecordUrl,
       })
 
       if (result.success) {
@@ -305,6 +387,15 @@ export function DailyForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
+      {submitError && (
+        <div
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          role="alert"
+        >
+          {submitError}
+        </div>
+      )}
+
       {!isEditMode && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
           Brouillon automatique actif pour ce lot et cette date sur cet appareil et sur votre compte.
@@ -357,6 +448,82 @@ export function DailyForm({
         )}
       </div>
 
+      <div className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+        <div className="text-sm text-blue-900">
+          <p className="font-medium">Meteo et environnement</p>
+          <p className="text-blue-700">Recuperez les donnees locales automatiquement (GPS requis)</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          loading={isFetchingWeather}
+          onClick={() => {
+            if (!navigator.geolocation) {
+              toast.error("Votre navigateur ne supporte pas la geolocalisation");
+              return;
+            }
+            setIsFetchingWeather(true);
+            navigator.geolocation.getCurrentPosition(
+              async (position) => {
+                const weather = await fetchLocalWeather(position.coords.latitude, position.coords.longitude, selectedDate);
+                if (weather) {
+                  setValue("temperatureMin", weather.temperatureMin, { shouldDirty: true });
+                  setValue("temperatureMax", weather.temperatureMax, { shouldDirty: true });
+                  setValue("humidity", weather.humidity, { shouldDirty: true });
+                  toast.success("Meteo recuperee avec succes");
+                } else {
+                  toast.error("Impossible de recuperer la meteo");
+                }
+                setIsFetchingWeather(false);
+              },
+              (error) => {
+                toast.error("Localisation introuvable. Verifiez vos permissions.");
+                setIsFetchingWeather(false);
+              }
+            );
+          }}
+        >
+          {isFetchingWeather ? "..." : "Actualiser"}
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <NumericField
+          id="temperatureMin"
+          label="Temp. Min"
+          unit="°C"
+          placeholder="-"
+          error={errors.temperatureMin?.message}
+          {...register("temperatureMin")}
+        />
+        <NumericField
+          id="temperatureMax"
+          label="Temp. Max"
+          unit="°C"
+          placeholder="-"
+          error={errors.temperatureMax?.message}
+          {...register("temperatureMax")}
+        />
+      </div>
+
+      <NumericField
+        id="humidity"
+        label="Humidite"
+        unit="%"
+        placeholder="-"
+        error={errors.humidity?.message}
+        {...register("humidity")}
+      />
+
+      <AudioRecorder
+        organizationId={organizationId}
+        batchId={batchId}
+        existingAudioUrl={defaultValues.audioRecordUrl}
+        onAudioUploaded={(url) => setValue("audioRecordUrl", url, { shouldDirty: true })}
+        disabled={isSubmitting}
+      />
+
       <div>
         <button
           type="button"
@@ -377,6 +544,7 @@ export function DailyForm({
         </button>
 
         <div className={cn("mt-4 space-y-5", !detailsOpen && "hidden")}>
+
           <NumericField
             id="waterLiters"
             label="Eau consommee"
@@ -415,15 +583,6 @@ export function DailyForm({
           </div>
         </div>
       </div>
-
-      {submitError && (
-        <div
-          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-          role="alert"
-        >
-          {submitError}
-        </div>
-      )}
 
       <Button type="submit" variant="primary" className="w-full" loading={isSubmitting}>
         {isEditMode ? "Enregistrer la correction" : "Enregistrer"}

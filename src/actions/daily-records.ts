@@ -3,29 +3,6 @@
  *
  * Écran prioritaire du MVP terrain — objectif : saisie complète en < 30 secondes.
  * Ce module est le plus sollicité en production. Garder la logique simple et robuste.
- *
- * Périmètre MVP :
- *   - Lister et consulter les saisies d'un lot
- *   - Créer une saisie journalière (1 seule par lot et par date)
- *   - Corriger une saisie existante (sous conditions)
- *
- * Décision : pas de suppression
- *   Supprimer une saisie crée un trou dans l'historique et fausse les KPI cumulés.
- *   Pour corriger une erreur → utiliser updateDailyRecord.
- *   MANAGER+ peut corriger même après verrouillage.
- *
- * Règle de verrouillage J+1 :
- *   Une saisie datée D est modifiable les jours D et D+1.
- *   Elle est verrouillée à partir de J+2 00:00:00 UTC.
- *   Exemple : saisie du 20 mars → verrouillée le 22 mars à 00:00 UTC.
- *
- *   Qui peut modifier après verrouillage ?
- *     SUPER_ADMIN, OWNER, MANAGER uniquement (hasMinimumRole MANAGER).
- *     TECHNICIAN et DATA_ENTRY doivent contacter un gestionnaire.
- *
- * Chaîne d'appartenance validée :
- *   DailyRecord → Batch (organizationId + deletedAt) → Building → farmId
- *   Le farmId est résolu en une seule requête pour canAccessFarm.
  */
 
 "use server"
@@ -55,7 +32,11 @@ import {
   UserRole,
   BatchStatus,
   FeedMovementType,
+  NotificationType,
 } from "@/src/generated/prisma/client"
+import { sendPushNotificationToUser } from "@/src/lib/push-notifications"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { hasPlanFeature } from "@/src/lib/subscriptions"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -66,12 +47,6 @@ const clientMutationIdSchema = z.string().trim().min(1).max(100)
 const getDailyRecordsSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,
-  /**
-   * Cursor de pagination : date du dernier enregistrement reçu.
-   * La page suivante retourne les saisies dont la date est strictement
-   * antérieure à cursorDate (tri date desc).
-   * Utiliser record.date de la dernière entrée reçue comme valeur du curseur.
-   */
   cursorDate:     z.coerce.date().optional(),
   limit:          z.number().int().min(1).max(100).default(30),
 })
@@ -82,7 +57,6 @@ const getDailyRecordSchema = z.object({
   dailyRecordId:  requiredIdSchema,
 })
 
-/** Détail d'une mortalité par motif — optionnel, à renseigner après la saisie rapide */
 const mortalityDetailSchema = z.object({
   mortalityReasonId: optionalIdSchema,
   count:             nonNegativeIntSchema,
@@ -94,21 +68,16 @@ const createDailyRecordSchema = z.object({
   batchId:        requiredIdSchema,
   clientMutationId: clientMutationIdSchema.optional(),
   date:           dateSchema,
-
-  // Champs principaux — écran terrain 30 secondes
   mortality:      nonNegativeIntSchema,
   feedKg:         nonNegativeNumberSchema,
   feedStockId:    optionalIdSchema,
-
-  // Champs secondaires — optionnels, section "Ajouter détails"
   waterLiters:    nonNegativeNumberSchema.optional(),
   temperatureMin: z.number().optional(),
   temperatureMax: z.number().optional(),
   humidity:       z.number().min(0).max(100).optional(),
   avgWeightG:     z.number().int().positive().optional(),
   observations:   z.string().max(2000).optional(),
-
-  /** Motifs de mortalité détaillés — optionnels, alerte si absents 3 jours consécutifs */
+  audioRecordUrl: z.string().url().max(1000).optional(),
   mortalityDetails: z.array(mortalityDetailSchema).optional(),
 })
 
@@ -116,8 +85,6 @@ const updateDailyRecordSchema = z.object({
   organizationId:  requiredIdSchema,
   batchId:         requiredIdSchema,
   dailyRecordId:   requiredIdSchema,
-
-  // Tous les champs de saisie sont optionnels dans une mise à jour
   mortality:       nonNegativeIntSchema.optional(),
   feedKg:          nonNegativeNumberSchema.optional(),
   feedStockId:     z.string().cuid().nullable().optional(),
@@ -127,11 +94,7 @@ const updateDailyRecordSchema = z.object({
   humidity:        z.number().min(0).max(100).optional(),
   avgWeightG:      z.number().int().positive().optional(),
   observations:    z.string().max(2000).optional(),
-
-  /**
-   * Si fourni, remplace complètement les MortalityRecords existants.
-   * Si absent, les MortalityRecords existants sont conservés tels quels.
-   */
+  audioRecordUrl:  z.string().url().max(1000).optional().nullable(),
   mortalityDetails: z.array(mortalityDetailSchema).optional(),
 })
 
@@ -161,9 +124,9 @@ export interface DailyRecordDetail {
   humidity:       number | null
   avgWeightG:     number | null
   observations:   string | null
+  audioRecordUrl: string | null
   recordedById:   string | null
   lockedAt:       Date | null
-  /** Calculé à la volée — indique si la saisie est verrouillée pour les rôles standard */
   isLocked:       boolean
   createdAt:      Date
   updatedAt:      Date
@@ -174,22 +137,19 @@ export interface DailyRecordDetail {
 // Helpers internes
 // ---------------------------------------------------------------------------
 
-/**
- * Retourne un lot actif avec son farmId résolu via building, ou null.
- * Valide : lot appartient à l'org, n'est pas soft-deleted.
- */
 async function findBatchWithFarm(batchId: string, organizationId: string) {
   return prisma.batch.findFirst({
     where:  { id: batchId, organizationId, deletedAt: null },
     select: {
       id:       true,
+      number:   true,
       status:   true,
+      entryCount: true,
       building: { select: { farmId: true } },
     },
   })
 }
 
-/** Sélection Prisma partagée pour les détails de saisie */
 const dailyRecordDetailSelect = {
   id:             true,
   organizationId: true,
@@ -203,6 +163,7 @@ const dailyRecordDetailSelect = {
   humidity:       true,
   avgWeightG:     true,
   observations:   true,
+  audioRecordUrl: true,
   recordedById:   true,
   lockedAt:       true,
   createdAt:      true,
@@ -438,12 +399,6 @@ async function syncDailyFeedMovement(
   })
 }
 
-/**
- * Détecte une violation de contrainte unique Prisma (P2002).
- * Utilisé pour intercepter la race condition résiduelle dans createDailyRecord :
- * deux requêtes simultanées peuvent toutes les deux passer la vérification manuelle
- * puis l'une d'elles échoue sur la contrainte @@unique([batchId, date]).
- */
 function isUniqueConstraintError(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -453,7 +408,6 @@ function isUniqueConstraintError(error: unknown): boolean {
   )
 }
 
-/** Ajoute le champ calculé isLocked à un enregistrement retourné par Prisma */
 function withIsLocked<T extends { date: Date; lockedAt: Date | null }>(
   record: T,
 ): T & { isLocked: boolean } {
@@ -464,10 +418,6 @@ function withIsLocked<T extends { date: Date; lockedAt: Date | null }>(
 // 1. getDailyRecords
 // ---------------------------------------------------------------------------
 
-/**
- * Retourne les saisies journalières d'un lot, triées par date décroissante.
- * Pagination cursor-based — défaut 30 enregistrements (1 mois).
- */
 export async function getDailyRecords(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail[]>> {
@@ -478,12 +428,10 @@ export async function getDailyRecords(
     }
 
     const { organizationId, batchId, cursorDate, limit } = parsed.data
-
     const accessResult = await requireOrganizationModuleContext(organizationId, "DAILY")
     if (!accessResult.success) return accessResult
 
     const { role, farmPermissions } = accessResult.data.membership
-
     const batch = await findBatchWithFarm(batchId, organizationId)
     if (!batch) {
       return { success: false, error: "Lot introuvable" }
@@ -497,7 +445,6 @@ export async function getDailyRecords(
       where:   {
         batchId,
         organizationId,
-        // cursorDate = date du dernier record reçu → on prend les dates strictement antérieures
         ...(cursorDate ? { date: { lt: cursorDate } } : {}),
       },
       select:  dailyRecordDetailSelect,
@@ -515,9 +462,6 @@ export async function getDailyRecords(
 // 2. getDailyRecord
 // ---------------------------------------------------------------------------
 
-/**
- * Retourne le détail d'une saisie journalière.
- */
 export async function getDailyRecord(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail>> {
@@ -528,12 +472,10 @@ export async function getDailyRecord(
     }
 
     const { organizationId, batchId, dailyRecordId } = parsed.data
-
     const accessResult = await requireOrganizationModuleContext(organizationId, "DAILY")
     if (!accessResult.success) return accessResult
 
     const { role, farmPermissions } = accessResult.data.membership
-
     const batch = await findBatchWithFarm(batchId, organizationId)
     if (!batch) {
       return { success: false, error: "Lot introuvable" }
@@ -563,19 +505,6 @@ export async function getDailyRecord(
 // 3. createDailyRecord
 // ---------------------------------------------------------------------------
 
-/**
- * Crée une saisie journalière pour un lot actif.
- *
- * Contrainte : une seule saisie par lot et par date (@@unique en base).
- * La vérification est effectuée en amont pour retourner un message explicite.
- *
- * Les mortalityDetails (motifs de mortalité) sont optionnels à la création
- * et peuvent être ajoutés via updateDailyRecord. Une alerte est générée
- * si aucun motif n'est renseigné pendant 3 jours consécutifs.
- *
- * Requiert CREATE_DAILY_RECORD + accès en écriture à la ferme.
- * Le lot doit être ACTIVE — impossible de saisir sur un lot clôturé.
- */
 export async function createDailyRecord(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail>> {
@@ -594,10 +523,10 @@ export async function createDailyRecord(
       mortalityDetails,
       ...recordData
     } = parsed.data
+
     const accessResult = await requireOrganizationModuleContext(organizationId, "DAILY")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
-
     const { role, farmPermissions } = accessResult.data.membership
 
     if (!canPerformAction(role, "CREATE_DAILY_RECORD")) {
@@ -628,36 +557,29 @@ export async function createDailyRecord(
       }
     }
 
-    // Normaliser la date à minuit UTC pour la contrainte unique batchId/date
     const normalizedDate = toUtcDate(date)
-
-    // Vérifier le doublon avant insertion (message clair > erreur Prisma P2002)
     const existing = await prisma.dailyRecord.findUnique({
       where: { batchId_date: { batchId, date: normalizedDate } },
       select: { id: true },
     })
     if (existing) {
-      return {
-        success: false,
-        error:   "Une saisie existe déjà pour ce lot à cette date",
-      }
+      return { success: false, error: "Une saisie existe déjà pour ce lot à cette date" }
     }
 
-    // Créer la saisie + les détails de mortalité dans une transaction
     let record: Prisma.DailyRecordGetPayload<{ select: typeof dailyRecordDetailSelect }>
     try {
       record = await prisma.$transaction(async (tx) => {
-      const created = await tx.dailyRecord.create({
-        data: {
-          organizationId,
-          batchId,
-          clientMutationId: clientMutationId ?? null,
-          date:         normalizedDate,
-          recordedById: actorId,
-          ...recordData,
-        },
-        select: dailyRecordDetailSelect,
-      })
+        const created = await tx.dailyRecord.create({
+          data: {
+            organizationId,
+            batchId,
+            clientMutationId: clientMutationId ?? null,
+            date:         normalizedDate,
+            recordedById: actorId,
+            ...recordData,
+          },
+          select: dailyRecordDetailSelect,
+        })
 
         if (mortalityDetails?.length) {
           await tx.mortalityRecord.createMany({
@@ -703,9 +625,58 @@ export async function createDailyRecord(
     })
 
     const [enrichedRecord] = await enrichRecordsWithFeedStock(organizationId, [record])
+
+    // --- Alerte Mortalité Critique (Audit Priorité 2%) ---
+    const subscription = await getOrganizationSubscription(organizationId)
+    const canSeeAlerts = hasPlanFeature(subscription.plan, "ALERTS")
+
+    if (canSeeAlerts) {
+      try {
+        const mortalityRate = recordData.mortality / batch.entryCount
+        if (mortalityRate >= 0.02) {
+          const targetMembers = await prisma.userOrganization.findMany({
+            where: {
+              organizationId,
+              role: { in: [UserRole.OWNER, UserRole.MANAGER] },
+              user: { deletedAt: null },
+            },
+            select: { userId: true },
+          })
+
+          for (const member of targetMembers) {
+            const notification = await prisma.notification.create({
+              data: {
+                organizationId,
+                userId:       member.userId,
+                type:         NotificationType.MORTALITE_ELEVEE,
+                title:        "Alerte Mortalite Critique !",
+                message:      `Mortalite elevee detectee sur le lot ${batch.number} : ${recordData.mortality} sujets (${(mortalityRate * 100).toFixed(1)}%).`,
+                resourceType: "DAILY_RECORD",
+                resourceId:   record.id,
+              },
+            })
+
+            sendPushNotificationToUser({
+              organizationId,
+              userId: member.userId,
+              message: {
+                organizationId,
+                title: notification.title,
+                body:  notification.message,
+                notificationId: notification.id,
+                resourceType: notification.resourceType,
+                resourceId: notification.resourceId,
+              },
+            }).catch(() => {})
+          }
+        }
+      } catch (pushError) {
+        console.error("Failed to send immediate mortality alert", pushError)
+      }
+    }
+
     return { success: true, data: enrichedRecord }
   } catch (error) {
-    // Race condition résiduelle : deux saisies simultanées pour le même lot/date
     if (isUniqueConstraintError(error)) {
       return { success: false, error: "Une saisie existe déjà pour ce lot à cette date" }
     }
@@ -717,20 +688,6 @@ export async function createDailyRecord(
 // 4. updateDailyRecord
 // ---------------------------------------------------------------------------
 
-/**
- * Corrige une saisie journalière existante.
- *
- * Règle de verrouillage (voir en-tête du module) :
- *   - Saisie déverrouillée → tout membre avec UPDATE_DAILY_RECORD peut corriger
- *   - Saisie verrouillée  → MANAGER+ uniquement (hasMinimumRole MANAGER)
- *
- * mortalityDetails :
- *   - Si fourni → remplace complètement les motifs de mortalité existants
- *   - Si absent → les motifs existants sont conservés sans modification
- *
- * recordedById est conservé (auteur original) — l'auteur de la correction
- * est tracé dans l'audit log.
- */
 export async function updateDailyRecord(
   data: unknown,
 ): Promise<ActionResult<DailyRecordDetail>> {
@@ -751,21 +708,21 @@ export async function updateDailyRecord(
     const accessResult = await requireOrganizationModuleContext(organizationId, "DAILY")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
-
     const { role, farmPermissions } = accessResult.data.membership
 
     if (!canPerformAction(role, "UPDATE_DAILY_RECORD")) {
       return { success: false, error: "Permission refusée" }
     }
 
-    // Récupérer la saisie avec le contexte batch/ferme en une requête
     const existing = await prisma.dailyRecord.findFirst({
       where:  { id: dailyRecordId, batchId, organizationId },
       select: {
         ...dailyRecordDetailSelect,
         batch: {
           select: {
+            number:   true,
             status:   true,
+            entryCount: true,
             building: { select: { farmId: true } },
           },
         },
@@ -780,22 +737,13 @@ export async function updateDailyRecord(
       return { success: false, error: "Accès en écriture refusé sur cette ferme" }
     }
 
-    // Règle lot clôturé :
-    //   - Lot ACTIVE  → correction autorisée selon les règles de verrouillage ci-dessous
-    //   - Lot clôturé → MANAGER+ uniquement, quelle que soit la date de la saisie
-    //     Cas d'usage : erreur découverte après clôture du lot (ex. mortalité mal saisie)
-    //     DATA_ENTRY et TECHNICIAN ne peuvent pas modifier les données d'un lot terminé
-    if (
-      existing.batch.status !== BatchStatus.ACTIVE &&
-      !hasMinimumRole(role, UserRole.MANAGER)
-    ) {
+    if (existing.batch.status !== BatchStatus.ACTIVE && !hasMinimumRole(role, UserRole.MANAGER)) {
       return {
         success: false,
         error:   "Ce lot est clôturé. Seul un gestionnaire peut corriger les saisies d'un lot terminé.",
       }
     }
 
-    // Vérification du verrouillage
     const locked = isDailyRecordLocked(existing.date, existing.lockedAt)
     if (locked && !hasMinimumRole(role, UserRole.MANAGER)) {
       return {
@@ -804,32 +752,45 @@ export async function updateDailyRecord(
       }
     }
 
-    // Mise à jour de la saisie + remplacement optionnel des mortalityDetails
     let updated: Prisma.DailyRecordGetPayload<{ select: typeof dailyRecordDetailSelect }>
     try {
       updated = await prisma.$transaction(async (tx) => {
-      const record = await tx.dailyRecord.update({
-        where:  { id: dailyRecordId },
-        data:   updates,
-        select: dailyRecordDetailSelect,
-      })
+        const record = await tx.dailyRecord.update({
+          where:  { id: dailyRecordId },
+          data:   updates,
+          select: dailyRecordDetailSelect,
+        })
 
-      // Remplacement complet des motifs si fournis
-      if (mortalityDetails !== undefined) {
-        await tx.mortalityRecord.deleteMany({ where: { dailyRecordId } })
+        if (mortalityDetails !== undefined) {
+          await tx.mortalityRecord.deleteMany({ where: { dailyRecordId } })
+          if (mortalityDetails.length > 0) {
+            await tx.mortalityRecord.createMany({
+              data: mortalityDetails.map((d) => ({
+                dailyRecordId,
+                mortalityReasonId: d.mortalityReasonId ?? null,
+                count:             d.count,
+                notes:             d.notes ?? null,
+              })),
+            })
+          }
 
-        if (mortalityDetails.length > 0) {
-          await tx.mortalityRecord.createMany({
-            data: mortalityDetails.map((d) => ({
-              dailyRecordId,
-              mortalityReasonId: d.mortalityReasonId ?? null,
-              count:             d.count,
-              notes:             d.notes ?? null,
-            })),
+          await syncDailyFeedMovement(tx, {
+            organizationId,
+            actorId,
+            batchId,
+            farmId: existing.batch.building.farmId,
+            recordId: dailyRecordId,
+            date: existing.date,
+            feedKg: updates.feedKg ?? existing.feedKg,
+            feedStockId,
+          })
+
+          return tx.dailyRecord.findUniqueOrThrow({
+            where:  { id: dailyRecordId },
+            select: dailyRecordDetailSelect,
           })
         }
 
-        // Recharger avec les nouveaux mortalityRecords
         await syncDailyFeedMovement(tx, {
           organizationId,
           actorId,
@@ -838,27 +799,10 @@ export async function updateDailyRecord(
           recordId: dailyRecordId,
           date: existing.date,
           feedKg: updates.feedKg ?? existing.feedKg,
-          feedStockId,
+          feedStockId: feedStockId ?? undefined,
         })
 
-        return tx.dailyRecord.findUniqueOrThrow({
-          where:  { id: dailyRecordId },
-          select: dailyRecordDetailSelect,
-        })
-      }
-
-      await syncDailyFeedMovement(tx, {
-        organizationId,
-        actorId,
-        batchId,
-        farmId: existing.batch.building.farmId,
-        recordId: dailyRecordId,
-        date: existing.date,
-        feedKg: updates.feedKg ?? existing.feedKg,
-        feedStockId: feedStockId ?? undefined,
-      })
-
-      return record
+        return record
       })
     } catch (error) {
       if (error instanceof BusinessRuleError) {
@@ -874,9 +818,6 @@ export async function updateDailyRecord(
       resourceType:   "DAILY_RECORD",
       resourceId:     dailyRecordId,
       before:         existing,
-      // Granularité : les champs scalaires modifiés + mortalityDetails si remplacés.
-      // Les mortalityDetails non fournis (undefined) ne figurent pas dans after —
-      // leur absence signifie "non modifiés", ce qui est fidèle à l'intention.
       after: {
         ...updates,
         ...(feedStockId !== undefined ? { feedStockId } : {}),
@@ -885,6 +826,57 @@ export async function updateDailyRecord(
     })
 
     const [enrichedRecord] = await enrichRecordsWithFeedStock(organizationId, [updated])
+
+    // --- Alerte Mortalité Critique ---
+    const subscription = await getOrganizationSubscription(organizationId)
+    const canSeeAlerts = hasPlanFeature(subscription.plan, "ALERTS")
+
+    if (canSeeAlerts) {
+      try {
+        const mortality = updates.mortality ?? existing.mortality
+      const mortalityRate = mortality / existing.batch.entryCount
+      if (mortalityRate >= 0.02) {
+        const targetMembers = await prisma.userOrganization.findMany({
+          where: {
+            organizationId,
+            role: { in: [UserRole.OWNER, UserRole.MANAGER] },
+            user: { deletedAt: null },
+          },
+          select: { userId: true },
+        })
+
+        for (const member of targetMembers) {
+          const notification = await prisma.notification.create({
+            data: {
+              organizationId,
+              userId:       member.userId,
+              type:         NotificationType.MORTALITE_ELEVEE,
+              title:        "Alerte Mortalite Critique !",
+              message:      `Mortalite elevee detectee (Correction) sur le lot ${existing.batch.number} : ${mortality} sujets (${(mortalityRate * 100).toFixed(1)}%).`,
+              resourceType: "DAILY_RECORD",
+              resourceId:   updated.id,
+            },
+          })
+
+          sendPushNotificationToUser({
+            organizationId,
+            userId: member.userId,
+            message: {
+              organizationId,
+              title: notification.title,
+              body:  notification.message,
+              notificationId: notification.id,
+              resourceType: notification.resourceType,
+              resourceId: notification.resourceId,
+            },
+          }).catch(() => {})
+        }
+      }
+      } catch (pushError) {
+        console.error("Failed to send immediate mortality alert on update", pushError)
+      }
+    }
+
     return { success: true, data: enrichedRecord }
   } catch {
     return { success: false, error: "Impossible de mettre à jour la saisie" }

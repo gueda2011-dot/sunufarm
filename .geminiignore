@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.git/
+.github/
+.cache/
+.antigravity/
+.claude/
+*.bak
+package-lock.json
+*.tsbuildinfo
+dist/
+build/
+out/
+coverage/

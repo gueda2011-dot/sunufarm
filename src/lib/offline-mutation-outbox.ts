@@ -23,6 +23,10 @@ export interface OfflineDailyQueuePayload {
   waterLiters?: number
   avgWeightG?: number
   observations?: string
+  temperatureMin?: number
+  temperatureMax?: number
+  humidity?: number
+  audioRecordUrl?: string | null
 }
 
 export interface OfflineExpenseQueuePayload {
@@ -465,6 +469,10 @@ async function replayQueueItem(item: OfflineQueueItem) {
         waterLiters: payload.waterLiters,
         avgWeightG: payload.avgWeightG,
         observations: payload.observations,
+        temperatureMin: payload.temperatureMin,
+        temperatureMax: payload.temperatureMax,
+        humidity: payload.humidity,
+        audioRecordUrl: payload.audioRecordUrl,
       })
     }
     case "CREATE_EXPENSE": {
