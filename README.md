@@ -98,6 +98,16 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - prediction du risque mortalite sur 7 jours pour les plans `Pro` et `Business`
 - vaccinations et traitements disponibles hors ligne en V1 avec synchro differée
 
+### Intelligence Collective (Phase A)
+
+- a chaque cloture d'un lot, un snapshot anonymise est genere automatiquement et verse dans un pool collectif
+- aucune donnee identifiable : pas d'organizationId, pas de ferme, pas d'eleveur — uniquement les metriques agregees du lot
+- benchmark collectif progressif : l'analyse IA compare automatiquement le lot aux lots reels similaires du reseau (race + region + saison)
+- strategie de fallback : si la donnee precise manque, le systeme elargit la comparaison (race seule, puis type de lot global)
+- le benchmark collectif est injecte dans chaque analyse GPT/Claude a la place des seuils codes en dur
+- un cron nocturne alimente le pool avec les lots historiques et logue les statistiques du pool
+- boucle de feedback prevue : `RecommendationFeedback` permet de valider si un conseil a ete suivi et d'ajuster la confiance des patterns appris
+
 ## Cas d'usage concret
 
 Un eleveur demarre un nouveau lot de poulets de chair.
@@ -170,6 +180,8 @@ Inclut aussi :
 - simple a prendre en main
 - moderne dans l'experience utilisateur
 - concu comme un vrai produit SaaS, avec vision long terme
+- **apprend du terrain** : les donnees reelles des exploitations enricissent progressivement les benchmarks et les seuils d'alerte — le systeme devient plus pertinent a chaque lot ferme
+- **intelligence collective et non individuelle** : les conseils se basent sur ce que font vraiment les meilleurs elevages, pas sur des regles theoriques
 
 SunuFarm ne cherche pas a etre un logiciel complexe de plus.
 Il cherche a devenir l'outil de pilotage quotidien de l'eleveur.
@@ -235,6 +247,7 @@ Configuration Firebase Cloud Messaging :
   - `NEXT_PUBLIC_FIREBASE_VAPID_KEY`
 - si les 3 variables serveur sont absentes, l'envoi push est silencieusement desactive (pas d'erreur)
 - le cron `/api/cron/notifications` requiert `CRON_SECRET` en production, sinon toutes les requetes retournent 401
+- le cron `/api/cron/collective-intelligence` tourne a 3h du matin (vercel.json) et assure le backfill du pool de snapshots anonymises + logue les stats du pool
 - autoriser les notifications dans le navigateur pour enregistrer le device — le bouton disparait une fois le device enregistre avec succes
 - les notifications push ciblent les membres SUPER_ADMIN, OWNER et MANAGER de chaque organisation
 - les evenements admin de paiement et abonnement creent aussi des notifications in-app/push pour les SUPER_ADMIN

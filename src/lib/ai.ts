@@ -5,6 +5,7 @@ import { getBatchOperationalSnapshot } from "@/src/lib/batch-metrics"
 import { getServerEnv } from "@/src/lib/env"
 import type { OrganizationSubscriptionSummary } from "@/src/lib/subscriptions.server"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
+import { getCollectiveBenchmark } from "@/src/lib/collective-benchmark"
 
 const ANALYSIS_MODELS = {
   openai: {
@@ -55,6 +56,19 @@ const analyzeBatchDataSchema = z.object({
     avgCostPerBird: z.number().nullable(),
     bestMarginRate: z.number().nullable(),
     worstMortalityRatePct: z.number().nullable(),
+  }).nullable(),
+  collectiveBenchmark: z.object({
+    sampleSize: z.number().int().nonnegative(),
+    scope: z.string(),
+    medianMortalityRate: z.number().nullable(),
+    p10MortalityRate: z.number().nullable(),
+    p75MortalityRate: z.number().nullable(),
+    medianFCR: z.number().nullable(),
+    medianMarginRate: z.number().nullable(),
+    medianSalePricePerKgFcfa: z.number().nullable(),
+    avgHeatStressDays: z.number().nullable(),
+    usedRegionCode: z.string().nullable(),
+    usedBreedCode: z.string().nullable(),
   }).nullable(),
 })
 
@@ -213,12 +227,14 @@ export async function buildBatchAnalysisInput(
         entryCount: true,
         entryAgeDay: true,
         totalCostFcfa: true,
+        breed: { select: { code: true } },
         building: {
           select: {
             name: true,
             farm: {
               select: {
                 name: true,
+                address: true,
               },
             },
           },
@@ -358,6 +374,29 @@ export async function buildBatchAnalysisInput(
       }
     : null
 
+  // Benchmark collectif — depuis le pool anonymisé cross-organisations
+  const entryDate = new Date(batch.entryDate)
+  const collectiveBenchmarkRaw = await getCollectiveBenchmark({
+    batchType: batch.type,
+    breedCode: batch.breed?.code ?? null,
+    regionCode: null, // dérivé automatiquement par l'engine si adresse disponible
+    entryMonth: entryDate.getUTCMonth() + 1,
+  })
+
+  const collectiveBenchmark = collectiveBenchmarkRaw ? {
+    sampleSize: collectiveBenchmarkRaw.sampleSize,
+    scope: collectiveBenchmarkRaw.scope,
+    medianMortalityRate: collectiveBenchmarkRaw.medianMortalityRate,
+    p10MortalityRate: collectiveBenchmarkRaw.p10MortalityRate,
+    p75MortalityRate: collectiveBenchmarkRaw.p75MortalityRate,
+    medianFCR: collectiveBenchmarkRaw.medianFCR,
+    medianMarginRate: collectiveBenchmarkRaw.medianMarginRate,
+    medianSalePricePerKgFcfa: collectiveBenchmarkRaw.medianSalePricePerKgFcfa,
+    avgHeatStressDays: collectiveBenchmarkRaw.avgHeatStressDays,
+    usedRegionCode: collectiveBenchmarkRaw.usedRegionCode,
+    usedBreedCode: collectiveBenchmarkRaw.usedBreedCode,
+  } : null
+
   return analyzeBatchDataSchema.parse({
     batchId: batch.id,
     batchNumber: batch.number,
@@ -388,6 +427,7 @@ export async function buildBatchAnalysisInput(
       waterLiters: record.waterLiters ?? null,
     })),
     benchmark,
+    collectiveBenchmark,
   })
 }
 

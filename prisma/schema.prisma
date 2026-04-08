@@ -1307,3 +1307,117 @@ model PredictiveSnapshot {
   @@index([organizationId, snapshotDate])
   @@index([alertLevel, snapshotDate])
 }
+
+// =============================================================================
+// INTELLIGENCE COLLECTIVE — SNAPSHOTS ANONYMISÉS + PATTERNS APPRIS
+// =============================================================================
+
+/**
+ * Snapshot anonymisé généré à la clôture de chaque lot.
+ * PAS d'organizationId — données strictement anonymisées.
+ * Alimente le pool d'intelligence collective cross-organisations.
+ *
+ * Opt-in : generé uniquement si l'organisation a activé le partage (default: true).
+ * regionCode : dérivé du pays/région de la ferme (DAKAR, THIES, SAINT_LOUIS...).
+ */
+model BatchOutcomeSnapshot {
+  id String @id @default(cuid())
+
+  // Contexte du lot (anonymisé)
+  batchType    BatchType
+  breedCode    String? // "COBB500", "ROSS308", "ISA_BROWN"
+  regionCode   String? // "DAKAR", "THIES", "SAINT_LOUIS", "LOUGA"...
+  buildingType BuildingType
+  entryCount   Int
+  durationDays Int // durée réelle du lot en jours
+  entryMonth   Int // 1-12 (saisonnalité)
+  entryYear    Int // pour filtrer les données récentes
+
+  // Résultats finaux du lot
+  finalMortalityRatePct Float // taux de mortalité total sur le lot
+  finalFCR              Float? // Feed Conversion Ratio (feedKgTotal / weightGainKgTotal)
+  finalMarginRatePct    Float? // marge nette en % du coût total
+  avgSalePricePerKgFcfa Int? // prix de vente moyen en FCFA/kg
+
+  // Profil météo agrégé sur la durée du lot
+  avgTemperatureMax Float? // température max moyenne sur la durée
+  avgHumidity       Float? // humidité relative moyenne
+  heatStressDays    Int? // nb jours avec temp > 35°C
+  coldStressDays    Int? // nb jours avec temp < 18°C
+
+  // Signaux sanitaires
+  treatmentCount       Int @default(0) // nb de traitements réalisés
+  majorMortalityDays   Int @default(0) // nb de jours avec mortalité > 2%
+  overdueVaccineDays   Int @default(0) // nb de jours de retard vaccination cumulés
+  vaccinationCompleted Boolean @default(false) // plan vaccinal complété ?
+
+  // Consommation et croissance
+  totalFeedKg    Float? // aliment total distribué
+  feedKgPerBird  Float? // FCR partiel : aliment/sujet vivant
+  avgFinalWeightG Int? // poids moyen à la vente
+
+  // Métadonnées
+  dataVersion Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([batchType, breedCode, regionCode])
+  @@index([entryMonth, batchType])
+  @@index([entryYear, batchType])
+  @@index([createdAt])
+  @@index([regionCode, batchType])
+}
+
+/**
+ * Patterns appris depuis le pool de snapshots.
+ * Mis à jour périodiquement par le cron d'intelligence collective.
+ * La confidence augmente ou baisse selon les feedbacks terrain.
+ */
+model LearnedPattern {
+  id          String   @id @default(cuid())
+  patternType String // "WEATHER_MORTALITY", "VACCINE_FCR", "TREATMENT_OUTCOME", "FCR_BENCHMARK"
+  scope       String // "GLOBAL", "REGION:DAKAR", "BREED:COBB500", "SEASON:HOT"
+  condition   Json // conditions déclenchantes sérialisées
+  outcome     Json // résultat observé avec deltaMin, deltaMax, deltaMedian
+  confidence  Float    @default(0.5) // 0-1
+  sampleSize  Int      @default(0)
+  positiveCount Int    @default(0) // feedbacks positifs
+  negativeCount Int    @default(0) // feedbacks négatifs
+  isActive    Boolean  @default(true)
+  lastUpdated DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([patternType, isActive])
+  @@index([scope, isActive])
+  @@index([confidence, sampleSize])
+}
+
+/**
+ * Boucle de feedback : l'éleveur indique s'il a suivi le conseil et ce qui s'est passé.
+ * C'est le mécanisme qui permet aux patterns d'apprendre depuis le terrain.
+ */
+model RecommendationFeedback {
+  id             String  @id @default(cuid())
+  organizationId String
+  batchId        String
+  patternType    String // type de pattern concerné
+  recommendationId String? // id de la recommandation IA concernée
+
+  // A-t-il suivi le conseil ?
+  followed    Boolean?
+  followedAt  DateTime?
+
+  // Résultat observé (renseigné manuellement ou via le formulaire de suivi)
+  outcomeTag   String? // "mortalite_reduite", "stable", "aggravee", "non_observe"
+  outcomeNotes String? // commentaire libre du technicien
+
+  // Timestamp de l'observation du résultat (typiquement J+7)
+  observedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, batchId])
+  @@index([patternType])
+  @@index([followed, outcomeTag])
+}
