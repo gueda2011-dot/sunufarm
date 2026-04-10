@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const {
   createDailyRecordMock,
+  createEggRecordMock,
   createExpenseMock,
+  createPurchaseMock,
   createVaccinationMock,
   createTreatmentMock,
   createSaleMock,
@@ -10,7 +12,9 @@ const {
   createMedicineMovementMock,
 } = vi.hoisted(() => ({
   createDailyRecordMock: vi.fn(),
+  createEggRecordMock: vi.fn(),
   createExpenseMock: vi.fn(),
+  createPurchaseMock: vi.fn(),
   createVaccinationMock: vi.fn(),
   createTreatmentMock: vi.fn(),
   createSaleMock: vi.fn(),
@@ -26,9 +30,17 @@ vi.mock("@/src/actions/expenses", () => ({
   createExpense: createExpenseMock,
 }))
 
+vi.mock("@/src/actions/eggs", () => ({
+  createEggRecord: createEggRecordMock,
+}))
+
 vi.mock("@/src/actions/health", () => ({
   createVaccination: createVaccinationMock,
   createTreatment: createTreatmentMock,
+}))
+
+vi.mock("@/src/actions/purchases", () => ({
+  createPurchase: createPurchaseMock,
 }))
 
 vi.mock("@/src/actions/sales", () => ({

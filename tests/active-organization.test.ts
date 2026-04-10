@@ -8,11 +8,15 @@ const memberships: OrganizationMembershipSummary[] = [
   {
     organizationId: "org-a",
     role: "OWNER",
+    farmPermissions: [],
+    modulePermissions: null,
     organization: { id: "org-a", name: "Alpha" },
   },
   {
     organizationId: "org-b",
     role: "MANAGER",
+    farmPermissions: [],
+    modulePermissions: null,
     organization: { id: "org-b", name: "Beta" },
   },
 ]

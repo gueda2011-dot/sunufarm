@@ -4,6 +4,10 @@ import { useState } from "react"
 import Link from "next/link"
 import type { SubscriptionPlan } from "@/src/generated/prisma/client"
 import { formatDate } from "@/src/lib/formatters"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
 import type {
   TreatmentSummary,
   VaccinationPlanSummary,
@@ -11,6 +15,7 @@ import type {
 } from "@/src/actions/health"
 import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
 import { HealthAIOverviewCard } from "./HealthAIOverviewCard"
+import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 
 interface BatchInfo {
   number: string
@@ -45,6 +50,18 @@ interface Props {
   activeTreatmentsCount: number
   totalVaxCount: number
   totalTreatmentsCount: number
+  offlineBatches: Array<{
+    id: string
+    number: string
+    status: string
+  }>
+  offlineMedicineStocks: Array<{
+    id: string
+    farmId: string
+    name: string
+    unit: string
+    quantityOnHand: number
+  }>
 }
 
 function KpiCard({
@@ -95,8 +112,59 @@ export function HealthPageClient({
   activeTreatmentsCount,
   totalVaxCount,
   totalTreatmentsCount,
+  offlineBatches,
+  offlineMedicineStocks,
 }: Props) {
   const [tab, setTab] = useState<Tab>("vaccinations")
+  const {
+    isOnline,
+    pendingCount,
+    failedCount,
+    items,
+    isSyncing,
+    lastSyncedAt,
+    lastError,
+    sync,
+    retryItem,
+    removeItem,
+  } = useOfflineSyncStatus({ scope: "health" })
+
+  const { data: cachedVaccinations = vaccinations, isOfflineFallback: usesVaccinationFallback } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.healthVaccinations,
+    organizationId,
+    initialData: vaccinations,
+    ttlMs: OFFLINE_TTL_MS.records,
+  })
+  const { data: cachedTreatments = treatments, isOfflineFallback: usesTreatmentFallback } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.healthTreatments,
+    organizationId,
+    initialData: treatments,
+    ttlMs: OFFLINE_TTL_MS.records,
+  })
+  useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.healthVaccinationPlans,
+    organizationId,
+    initialData: vaccinationPlans,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.healthBatchAlerts,
+    organizationId,
+    initialData: batchAlerts,
+    ttlMs: OFFLINE_TTL_MS.records,
+  })
+  useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.healthBatches,
+    organizationId,
+    initialData: offlineBatches,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.healthMedicineStocks,
+    organizationId,
+    initialData: offlineMedicineStocks,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -105,7 +173,31 @@ export function HealthPageClient({
         <p className="mt-0.5 text-sm text-gray-500">
           Pilotage des vaccinations, traitements et lots a surveiller.
         </p>
+        {!isOnline && (usesVaccinationFallback || usesTreatmentFallback) ? (
+          <p className="mt-1 text-xs text-amber-700">
+            Historique sante affiche depuis le dernier etat connu hors ligne.
+          </p>
+        ) : null}
       </div>
+
+      <OfflineSyncCard
+        isOnline={isOnline}
+        pendingCount={pendingCount}
+        failedCount={failedCount}
+        isSyncing={isSyncing}
+        lastSyncedAt={lastSyncedAt}
+        lastError={lastError}
+        items={items}
+        onSync={() => {
+          void sync()
+        }}
+        onRetryItem={(itemId) => {
+          void retryItem(itemId)
+        }}
+        onRemoveItem={(itemId) => {
+          void removeItem(itemId)
+        }}
+      />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <KpiCard
@@ -287,10 +379,10 @@ export function HealthPageClient({
       </div>
 
       {tab === "vaccinations" && (
-        <VaccinationsTable vaccinations={vaccinations} batchMap={batchMap} />
+        <VaccinationsTable vaccinations={cachedVaccinations} batchMap={batchMap} />
       )}
       {tab === "traitements" && (
-        <TreatmentsTable treatments={treatments} batchMap={batchMap} />
+        <TreatmentsTable treatments={cachedTreatments} batchMap={batchMap} />
       )}
     </div>
   )

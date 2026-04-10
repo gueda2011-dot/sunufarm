@@ -7,10 +7,13 @@ import { createTreatment, createVaccination } from "@/src/actions/health"
 import { createPurchase } from "@/src/actions/purchases"
 import { createSale } from "@/src/actions/sales"
 import { createFeedMovement, createMedicineMovement } from "@/src/actions/stock"
+import { markOptimisticItemFailed, markOptimisticItemSynced, removeOptimisticItem } from "@/src/lib/offline-optimistic"
+import {
+  openOfflineDb,
+  requestToPromise,
+} from "@/src/lib/offline-cache"
+import { OFFLINE_QUEUE_STORE } from "@/src/lib/offline-keys"
 
-const DB_NAME = "sunufarm-offline"
-const DB_VERSION = 1
-const STORE_NAME = "mutation-outbox"
 const SYNC_META_KEY = "sunufarm:offline-sync-meta"
 const QUEUE_EVENT = "sunufarm:offline-outbox-changed"
 
@@ -225,32 +228,13 @@ function writeOfflineDailySyncMeta(meta: OfflineDailySyncMeta) {
   window.localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta))
 }
 
-function openOfflineDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION)
-
-    request.onupgradeneeded = () => {
-      const db = request.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: "id" })
-        store.createIndex("status", "status", { unique: false })
-        store.createIndex("createdAt", "createdAt", { unique: false })
-        store.createIndex("type", "type", { unique: false })
-      }
-    }
-
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error("INDEXED_DB_OPEN_FAILED"))
-  })
-}
-
 function withStore<T>(
   mode: IDBTransactionMode,
   handler: (store: IDBObjectStore) => Promise<T>,
 ): Promise<T> {
   return openOfflineDb().then((db) => new Promise<T>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode)
-    const store = transaction.objectStore(STORE_NAME)
+    const transaction = db.transaction(OFFLINE_QUEUE_STORE, mode)
+    const store = transaction.objectStore(OFFLINE_QUEUE_STORE)
 
     transaction.onerror = () => reject(transaction.error ?? new Error("INDEXED_DB_TX_FAILED"))
     transaction.onabort = () => reject(transaction.error ?? new Error("INDEXED_DB_TX_ABORTED"))
@@ -258,13 +242,6 @@ function withStore<T>(
 
     void handler(store).then(resolve).catch(reject)
   }))
-}
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error("INDEXED_DB_REQUEST_FAILED"))
-  })
 }
 
 function createQueueKey(parts: string[]) {
@@ -371,6 +348,11 @@ function isAlreadyHandledError(item: OfflineQueueItem, message: string | undefin
   return false
 }
 
+function getOptimisticId(item: OfflineQueueItem): string | null {
+  const payload = item.payload as { clientMutationId?: string }
+  return payload.clientMutationId ?? null
+}
+
 async function listOfflineQueueItems(): Promise<OfflineQueueItem[]> {
   return withStore<OfflineQueueItem[]>("readonly", async (store) => {
     const request = store.getAll()
@@ -392,6 +374,26 @@ export async function listPendingOfflineQueueItemsByScope(scope: string) {
   return items.filter((item) => item.scope === scope)
 }
 
+export async function flushOfflineQueueByScope(scope: string) {
+  const items = await listPendingOfflineQueueItemsByScope(scope)
+  let processed = 0
+  let synced = 0
+
+  for (const item of items) {
+    const result = await flushOfflineDailyQueue({ itemId: item.id })
+    processed += result.processed
+    synced += result.synced
+  }
+
+  const remainingItems = await listPendingOfflineQueueItemsByScope(scope)
+
+  return {
+    processed,
+    synced,
+    failed: remainingItems.length,
+  }
+}
+
 async function getOfflineQueueItem(id: string): Promise<OfflineQueueItem | undefined> {
   return withStore<OfflineQueueItem | undefined>("readonly", async (store) => {
     const request = store.get(id)
@@ -405,7 +407,12 @@ async function putQueueItem(item: OfflineQueueItem) {
 }
 
 export async function deleteOfflineDailyQueueItem(id: string) {
+  const item = await getOfflineQueueItem(id)
   await withStore<void>("readwrite", (store) => requestToPromise(store.delete(id)).then(() => undefined))
+  const optimisticId = item ? getOptimisticId(item) : null
+  if (optimisticId) {
+    await removeOptimisticItem(optimisticId)
+  }
   emitQueueChanged()
 }
 
@@ -687,6 +694,10 @@ export async function flushOfflineDailyQueue(options?: { itemId?: string }) {
       const result = await replayQueueItem(item)
 
       if (result.success || isAlreadyHandledError(item, result.error)) {
+        const optimisticId = getOptimisticId(item)
+        if (optimisticId) {
+          await markOptimisticItemSynced(optimisticId)
+        }
         await deleteOfflineDailyQueueItem(item.id)
         synced += 1
         continue
@@ -698,6 +709,10 @@ export async function flushOfflineDailyQueue(options?: { itemId?: string }) {
         updatedAt: new Date().toISOString(),
         lastError: result.error,
       })
+      const optimisticId = getOptimisticId(item)
+      if (optimisticId) {
+        await markOptimisticItemFailed(optimisticId, result.error)
+      }
     } catch (error) {
       if (isLikelyOfflineError(error)) {
         break
@@ -709,6 +724,13 @@ export async function flushOfflineDailyQueue(options?: { itemId?: string }) {
         updatedAt: new Date().toISOString(),
         lastError: error instanceof Error ? error.message : "SYNC_FAILED",
       })
+      const optimisticId = getOptimisticId(item)
+      if (optimisticId) {
+        await markOptimisticItemFailed(
+          optimisticId,
+          error instanceof Error ? error.message : "SYNC_FAILED",
+        )
+      }
     }
   }
 

@@ -1,20 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { CircleAlert, Plus, Trash2 } from "lucide-react"
 import { createSale } from "@/src/actions/sales"
 import { formatMoneyFCFA } from "@/src/lib/formatters"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 import {
   createClientMutationId,
-  deleteOfflineDailyQueueItem,
   enqueueOfflineSale,
-  flushOfflineDailyQueue,
-  listPendingOfflineQueueItemsByScope,
-  readOfflineDailySyncMeta,
-  retryOfflineDailyQueueItem,
-  subscribeToOfflineDailyQueue,
 } from "@/src/lib/offline-mutation-outbox"
 
 type Props = {
@@ -87,6 +85,18 @@ function computeItemTotal(item: Item) {
 
 export function CreateSaleForm({ organizationId, customers, batches }: Props) {
   const router = useRouter()
+  const { data: cachedCustomers = customers } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.saleCustomers,
+    organizationId,
+    initialData: customers,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: cachedBatches = batches } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.saleBatches,
+    organizationId,
+    initialData: batches,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -95,19 +105,18 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
   const [saleDate, setSaleDate] = useState(new Date().toISOString().slice(0, 10))
   const [notes, setNotes] = useState("")
   const [items, setItems] = useState<Item[]>([getDefaultItem("POULET_VIF")])
-  const [isOnline, setIsOnline] = useState<boolean>(() => (
-    typeof navigator === "undefined" ? true : navigator.onLine
-  ))
-  const [pendingItems, setPendingItems] = useState<Array<{
-    id: string
-    label: string
-    createdAt: string
-    status: "pending" | "failed"
-    lastError?: string
-  }>>([])
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
-  const [lastSyncError, setLastSyncError] = useState<string | null>(null)
+  const {
+    isOnline,
+    pendingCount,
+    failedCount,
+    items: pendingItems,
+    isSyncing,
+    lastSyncedAt,
+    lastError: lastSyncError,
+    sync: syncOfflineQueue,
+    retryItem: retryOfflineItem,
+    removeItem: removeOfflineItem,
+  } = useOfflineSyncStatus({ scope: "sales" })
 
   const totalFcfa = useMemo(
     () => items.reduce((sum, item) => sum + computeItemTotal(item), 0),
@@ -116,69 +125,10 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
 
   const selectedProduct = PRODUCT_TYPE_OPTIONS.find((item) => item.value === productType)
 
-  const refreshOfflineState = useCallback(async () => {
-    const nextItems = await listPendingOfflineQueueItemsByScope("sales")
-    setPendingItems(nextItems)
-    const meta = readOfflineDailySyncMeta()
-    setLastSyncedAt(meta.lastSyncedAt)
-    setLastSyncError(meta.lastError)
-  }, [])
-
-  const syncOfflineQueue = useCallback(async () => {
-    if (!isOnline || isSyncing) return
-
-    setIsSyncing(true)
-    try {
-      await flushOfflineDailyQueue()
-      await refreshOfflineState()
-      router.refresh()
-    } finally {
-      setIsSyncing(false)
-    }
-  }, [isOnline, isSyncing, refreshOfflineState, router])
-
-  const retryOfflineItem = useCallback(async (itemId: string) => {
-    if (!isOnline || isSyncing) return
-
-    setIsSyncing(true)
-    try {
-      await retryOfflineDailyQueueItem(itemId)
-      await flushOfflineDailyQueue({ itemId })
-      await refreshOfflineState()
-      router.refresh()
-    } finally {
-      setIsSyncing(false)
-    }
-  }, [isOnline, isSyncing, refreshOfflineState, router])
-
-  const removeOfflineItem = useCallback(async (itemId: string) => {
-    await deleteOfflineDailyQueueItem(itemId)
-    await refreshOfflineState()
-  }, [refreshOfflineState])
-
   useEffect(() => {
-    void refreshOfflineState()
-
-    const unsubscribe = subscribeToOfflineDailyQueue(() => {
-      void refreshOfflineState()
-    })
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
-
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-
-    return () => {
-      unsubscribe()
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [refreshOfflineState])
-
-  useEffect(() => {
-    if (!isOnline || pendingItems.length === 0) return
-    void syncOfflineQueue()
-  }, [isOnline, pendingItems.length, syncOfflineQueue])
+    if (pendingItems.length === 0) return
+    router.refresh()
+  }, [pendingItems.length, router])
 
   function updateItem(index: number, field: keyof Item, value: string | number) {
     setItems((current) => {
@@ -250,7 +200,6 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
     const queueSale = async () => {
       await enqueueOfflineSale(payload)
       setSuccess("Vente enregistree hors ligne et mise en attente.")
-      await refreshOfflineState()
     }
 
     setLoading(true)
@@ -338,7 +287,7 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
                   className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
                 >
                   <option value="">Client divers / non selectionne</option>
-                  {customers.map((customer) => (
+                  {cachedCustomers.map((customer) => (
                     <option key={customer.id} value={customer.id}>
                       {customer.name}{customer.phone ? ` - ${customer.phone}` : ""}
                     </option>
@@ -412,7 +361,7 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
                           className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
                         >
                           <option value="">Aucun lot precise</option>
-                          {batches.map((batch) => (
+                          {cachedBatches.map((batch) => (
                             <option key={batch.id} value={batch.id}>
                               {batch.number} - {batch.farmName}
                             </option>
@@ -488,8 +437,8 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
         <aside className="space-y-5">
           <OfflineSyncCard
             isOnline={isOnline}
-            pendingCount={pendingItems.length}
-            failedCount={pendingItems.filter((item) => item.status === "failed").length}
+            pendingCount={pendingCount}
+            failedCount={failedCount}
             isSyncing={isSyncing}
             lastSyncedAt={lastSyncedAt}
             lastError={lastSyncError}
@@ -523,7 +472,7 @@ export function CreateSaleForm({ organizationId, customers, batches }: Props) {
               <div className="flex items-center justify-between text-gray-600">
                 <span>Client</span>
                 <span className="max-w-[11rem] truncate font-medium text-gray-900">
-                  {customers.find((customer) => customer.id === customerId)?.name ?? "Client divers"}
+                  {cachedCustomers.find((customer) => customer.id === customerId)?.name ?? "Client divers"}
                 </span>
               </div>
             </div>

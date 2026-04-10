@@ -261,18 +261,30 @@ Configuration Firebase Cloud Messaging :
 
 Mode hors ligne V1 :
 
-- l'application peut deja conserver localement puis resynchroniser certaines creations metier si la connexion tombe
-- flux couverts en V1 :
+- l'application peut maintenant rouvrir des ecrans critiques hors ligne apres une premiere visite online, grace au service worker et a un cache local IndexedDB
+- pages critiques couvertes en priorite :
+  - `Saisie journaliere`
+  - `Sante`
+  - `Stock`
+  - `Nouvelle vente`
+  - `Oeufs`
+  - `Achats fournisseur`
+- references locales disponibles selon les modules : lots actifs, stocks aliment / medicaments, clients, fournisseurs, fermes et historiques recents
+- les actions metier sont stockees localement dans le navigateur puis rejouees automatiquement au retour du reseau
+- flux de creation couverts en V1 :
   - `Saisie journaliere`
   - `Vaccinations`
   - `Traitements`
   - `Depenses`
   - `Ventes`
   - `Mouvements de stock`
-- les actions sont stockees localement dans le navigateur puis rejouees automatiquement au retour du reseau
-- un panneau de synchronisation affiche les elements en attente, les erreurs, permet une resynchronisation globale et des actions `Retenter` / `Supprimer` par element
+  - `Production d'oeufs`
+  - `Achats fournisseur`
+- un panneau de synchronisation unifie affiche les elements en attente, les erreurs, permet une resynchronisation globale ou par module et des actions `Retenter` / `Supprimer` par element
+- une couche optimiste locale affiche immediatement certaines saisies hors ligne avec badge `En attente`
+- la page `/offline` sert de hub terrain avec etat reseau, organisation active, compteurs de sync, raccourcis utiles et dernieres ressources locales connues
 - les flux offline critiques utilisent maintenant une `clientMutationId` persistée cote serveur pour limiter les doublons lors d'un rejeu apres reconnexion
-- le perimetre V1 couvre uniquement la creation hors ligne, pas encore l'edition hors ligne ni la resolution avancee de conflits
+- le perimetre V1 couvre uniquement la creation hors ligne, pas encore l'edition hors ligne, l'upload audio/image hors ligne ni la resolution avancee de conflits
 
 Prediction de rupture stock V1 :
 

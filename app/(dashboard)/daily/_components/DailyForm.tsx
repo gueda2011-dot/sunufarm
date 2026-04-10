@@ -22,6 +22,7 @@ import {
   createClientMutationId,
   enqueueOfflineDailyRecord,
 } from "@/src/lib/offline-mutation-outbox"
+import { addOptimisticItem } from "@/src/lib/offline-optimistic"
 import { cn } from "@/src/lib/utils"
 import { AudioRecorder } from "./AudioRecorder"
 
@@ -224,8 +225,12 @@ export function DailyForm({
     defaultValues.avgWeightG,
     defaultValues.feedKg,
     defaultValues.feedStockId,
+    defaultValues.audioRecordUrl,
+    defaultValues.humidity,
     defaultValues.mortality,
     defaultValues.observations,
+    defaultValues.temperatureMax,
+    defaultValues.temperatureMin,
     defaultValues.waterLiters,
     draftFormKey,
     draftStorageKey,
@@ -284,7 +289,7 @@ export function DailyForm({
         }
       );
     }
-  }, [draftReady, isEditMode, draftValues.temperatureMin, draftValues.temperatureMax, setValue]);
+  }, [draftReady, isEditMode, draftValues.temperatureMin, draftValues.temperatureMax, selectedDate, setValue]);
 
   const clearDrafts = async () => {
     if (typeof window !== "undefined") {
@@ -295,11 +300,29 @@ export function DailyForm({
 
   const queueCurrentEntry = async (data: ParsedValues) => {
     const clientMutationId = createClientMutationId("daily")
+    const dateIso = new Date(`${selectedDate}T00:00:00Z`).toISOString()
+
+    await addOptimisticItem({
+      id: clientMutationId,
+      organizationId,
+      scope: "daily",
+      type: "CREATE_DAILY_RECORD",
+      label: `Saisie journaliere ${selectedDate}`,
+      data: {
+        batchId,
+        dateIso,
+        mortality: data.mortality,
+        feedKg: data.feedKg,
+        waterLiters: data.waterLiters,
+        audioRecordUrl: data.audioRecordUrl,
+      },
+    })
+
     await enqueueOfflineDailyRecord({
       clientMutationId,
       organizationId,
       batchId,
-      dateIso: new Date(`${selectedDate}T00:00:00Z`).toISOString(),
+      dateIso,
       mortality: data.mortality,
       feedKg: data.feedKg,
       feedStockId: data.feedStockId,
@@ -477,7 +500,7 @@ export function DailyForm({
                 }
                 setIsFetchingWeather(false);
               },
-              (error) => {
+              () => {
                 toast.error("Localisation introuvable. Verifiez vos permissions.");
                 setIsFetchingWeather(false);
               }

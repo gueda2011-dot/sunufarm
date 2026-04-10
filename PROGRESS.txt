@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-08 (Session 68)
+> Derniere mise a jour : 2026-04-10 (Session 69)
 
 ---
 
@@ -19,7 +19,7 @@
 | Achats / finance / stock | Paiement fournisseur, envoi au stock, sorties terrain, integrite admin V1 | En place |
 | Donnees demo | Seed / demo stable pour onboarding et validations manuelles | En place |
 | Observabilite / securite | Health admin, logs critiques, backup / restore, incident response, rate limiting | En place |
-| Hors ligne / resilience terrain | File locale navigateur + resynchronisation V1 sur flux critiques | En place |
+| Hors ligne / resilience terrain | Shell offline, cache IndexedDB, outbox locale et resynchronisation V1 sur flux critiques | En place |
 | Intelligence Collective | Pool de snapshots anonymises, benchmark collectif, boucle de feedback, cron backfill | Phase A livree |
 | Chantiers ouverts | Durcissement webhooks Wave, outillage admin V2, extension offline restante | En cours |
 
@@ -59,7 +59,77 @@
 | Rapports | Fonctionnels au MVP |
 | Admin plateforme | Fonctionnel, avec supervision de base et integrite stock V1 |
 | Emails transactionnels | Fonctionnels si Resend est correctement configure |
-| Offline / sync terrain | V1 operationnelle sur creations critiques |
+| Offline / sync terrain | V1 operationnelle sur shell critique, lectures locales et creations critiques |
+
+---
+
+## Session 69 - 2026-04-10
+
+### Travail effectue
+
+- Construction d'une vraie couche offline locale basee sur `IndexedDB` :
+  - `src/lib/offline-cache.ts`
+  - `src/lib/offline-keys.ts`
+  - `src/lib/offline-ttl.ts`
+- Ajout du hook generique `src/hooks/useOfflineData.ts` pour relire un fallback local propre hors ligne dans les Client Components
+- Mise en cache des references et historiques critiques pour :
+  - `Saisie journaliere`
+  - `Sante`
+  - `Stock`
+  - `Nouvelle vente`
+  - `Oeufs`
+  - `Achats fournisseur`
+- Refonte du `service worker` (`public/sw.js`) pour pre-cacher le shell des routes critiques et permettre leur reouverture hors ligne
+- Ajout d'un contexte de session offline minimal :
+  - `app/api/offline-context/route.ts`
+  - `src/lib/offline-session.ts`
+  - `src/hooks/useOfflineSessionContext.ts`
+  - `src/components/pwa/OfflineSessionBootstrap.tsx`
+- Ajout d'une couche optimiste locale `src/lib/offline-optimistic.ts` et branchement initial sur :
+  - `Saisie journaliere`
+  - `Oeufs`
+  - `Achats fournisseur`
+- Factorisation du suivi de synchro avec `src/hooks/useOfflineSyncStatus.ts`
+- Harmonisation du panneau de synchro sur :
+  - `daily`
+  - `health`
+  - `stock`
+  - `sales/new`
+  - `eggs`
+  - `purchases`
+- Refonte de `/offline` en hub utile avec :
+  - etat reseau
+  - organisation active
+  - compteurs de sync
+  - repartition par module
+  - raccourcis offline
+  - ressources en cache
+  - dernieres saisies locales
+- Corrections de qualite projet pour remettre la base au vert :
+  - fix `tsc --noEmit`
+  - fix `npm run lint`
+  - fix `npm run test`
+  - validation `npm run build`
+
+### Resultat
+
+- Les modules terrain prioritaires peuvent maintenant se rouvrir hors ligne apres une premiere visite online, avec un shell disponible et des references minimales locales
+- L'utilisateur voit ses elements en attente de synchro de facon plus coherente, quel que soit le module
+- Le projet a maintenant une base offline V1 plus credible pour des tests terrain reels, sans refonte d'architecture
+- Le socle de qualite est revenu au vert : `tsc --noEmit`, `npm run lint`, `npm run test` et `npm run build` passent
+
+### Limites V1 explicites
+
+- Pas d'edition hors ligne generale
+- Pas d'upload audio / image hors ligne
+- Pas de resolution de conflits avancee
+- Certaines pages restent en mode `dernier etat connu` hors ligne
+
+### Prochaine session recommandee
+
+- Faire une recette offline terrain complete sur navigateur mobile / telephone
+- Lisser les redondances UX entre panneau de synchro et certaines listes locales `en attente`
+- Etendre ensuite le niveau de polissage offline aux ecrans detail ou aux modules secondaires si le terrain le justifie
 
 ---
 

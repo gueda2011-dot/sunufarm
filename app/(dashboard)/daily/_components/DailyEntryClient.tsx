@@ -1,21 +1,21 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { getDailyRecords } from "@/src/actions/daily-records"
 import type { BatchSummary } from "@/src/actions/batches"
-import type { DailyRecordDetail } from "@/src/actions/daily-records"
-import { DailyForm } from "./DailyForm"
-import { RecentRecords } from "./RecentRecords"
-import { OfflineSyncCard } from "./OfflineSyncCard"
+import { getDailyRecords, type DailyRecordDetail } from "@/src/actions/daily-records"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { setCachedResource } from "@/src/lib/offline-cache"
 import {
-  deleteOfflineDailyQueueItem,
-  flushOfflineDailyQueue,
-  listPendingOfflineQueueItemsByScope,
-  readOfflineDailySyncMeta,
-  retryOfflineDailyQueueItem,
-  subscribeToOfflineDailyQueue,
-} from "@/src/lib/offline-mutation-outbox"
+  listOptimisticItems,
+  subscribeToOptimisticItems,
+} from "@/src/lib/offline-optimistic"
+import { DailyForm } from "./DailyForm"
+import { OfflineSyncCard } from "./OfflineSyncCard"
+import { RecentRecords, type RecentRecordRow } from "./RecentRecords"
 
 function todayStr(): string {
   const now = new Date()
@@ -32,8 +32,8 @@ function computeAgeDay(batch: BatchSummary, dateStr: string): number {
   return batch.entryAgeDay + diffDays
 }
 
-function recordMatchesDate(record: DailyRecordDetail, dateStr: string): boolean {
-  return new Date(record.date).toISOString().substring(0, 10) === dateStr
+function recordMatchesDate(recordDate: Date | string, dateStr: string): boolean {
+  return new Date(recordDate).toISOString().substring(0, 10) === dateStr
 }
 
 const MANAGER_OR_ABOVE = ["SUPER_ADMIN", "OWNER", "MANAGER"] as const
@@ -62,21 +62,34 @@ export function DailyEntryClient({
   const canEditLocked = MANAGER_OR_ABOVE.includes(
     userRole as (typeof MANAGER_OR_ABOVE)[number],
   )
-  const [isOnline, setIsOnline] = useState<boolean>(() => (
-    typeof navigator === "undefined" ? true : navigator.onLine
-  ))
-  const [pendingSyncCount, setPendingSyncCount] = useState(0)
-  const [failedSyncCount, setFailedSyncCount] = useState(0)
-  const [pendingItems, setPendingItems] = useState<Array<{
-    id: string
-    label: string
-    createdAt: string
-    status: "pending" | "failed"
-    lastError?: string
-  }>>([])
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
-  const [lastSyncError, setLastSyncError] = useState<string | null>(null)
+  const {
+    isOnline,
+    pendingCount: pendingSyncCount,
+    failedCount: failedSyncCount,
+    items: pendingItems,
+    isSyncing,
+    lastSyncedAt,
+    lastError: lastSyncError,
+    sync: syncOfflineQueue,
+    retryItem: retryOfflineItem,
+    removeItem: removeOfflineItem,
+  } = useOfflineSyncStatus({ scope: "daily" })
+
+  const {
+    data: batches = initialBatches,
+    isOfflineFallback: isOfflineBatches,
+  } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.dailyBatches,
+    organizationId,
+    initialData: initialBatches,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: feedStocks = initialFeedStocks } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.dailyFeedStocks,
+    organizationId,
+    initialData: initialFeedStocks,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
 
   const [selectedBatchId, setSelectedBatchId] = useState<string>(() => {
     if (defaultBatchId && initialBatches.some((batch) => batch.id === defaultBatchId)) {
@@ -88,10 +101,20 @@ export function DailyEntryClient({
   const [selectedDate, setSelectedDate] = useState<string>(todayStr())
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingRecord, setEditingRecord] = useState<DailyRecordDetail | null>(null)
+  const [optimisticRows, setOptimisticRows] = useState<RecentRecordRow[]>([])
 
-  const selectedBatch = initialBatches.find((batch) => batch.id === selectedBatchId)
+  const selectedBatch = batches.find((batch) => batch.id === selectedBatchId)
+  const {
+    data: cachedRecentRecords,
+    isOfflineFallback: isOfflineRecentRecords,
+  } = useOfflineData<DailyRecordDetail[]>({
+    key: OFFLINE_RESOURCE_KEYS.dailyRecords(selectedBatchId || "none"),
+    organizationId,
+    ttlMs: OFFLINE_TTL_MS.records,
+    enabled: !!selectedBatchId,
+  })
 
-  const { data: recentRecords = [], isLoading: loadingRecords } = useQuery({
+  const { data: onlineRecentRecords = [], isLoading: loadingRecords } = useQuery({
     queryKey: ["dailyRecords", organizationId, selectedBatchId],
     queryFn: async () => {
       if (!selectedBatchId) return []
@@ -104,12 +127,85 @@ export function DailyEntryClient({
 
       return result.success ? result.data : []
     },
-    enabled: !!selectedBatchId,
+    enabled: !!selectedBatchId && isOnline,
     staleTime: 60_000,
   })
 
-  const existingRecord = recentRecords.find((record) => recordMatchesDate(record, selectedDate))
-  const isLocked = !!(existingRecord?.isLocked && !canEditLocked)
+  useEffect(() => {
+    if (!selectedBatchId || !isOnline) return
+
+    void setCachedResource({
+      key: OFFLINE_RESOURCE_KEYS.dailyRecords(selectedBatchId),
+      organizationId,
+      version: 1,
+      savedAt: new Date().toISOString(),
+      ttlMs: OFFLINE_TTL_MS.records,
+      data: onlineRecentRecords,
+    })
+  }, [isOnline, onlineRecentRecords, organizationId, selectedBatchId])
+
+  const onlineRecordRows: RecentRecordRow[] = onlineRecentRecords.map((record) => ({
+    ...record,
+    date: record.date,
+  }))
+  const cachedRecordRows: RecentRecordRow[] = (cachedRecentRecords ?? []).map((record) => ({
+    ...record,
+    date: record.date,
+  }))
+
+  useEffect(() => {
+    async function refreshOptimisticRows() {
+      const items = await listOptimisticItems<{
+        batchId: string
+        dateIso: string
+        mortality: number
+        feedKg: number
+        waterLiters?: number
+        audioRecordUrl?: string | null
+      }>(organizationId, "daily")
+
+      setOptimisticRows(
+        items
+          .filter((item) => item.status !== "synced")
+          .filter((item) => item.data.batchId === selectedBatchId)
+          .map((item) => ({
+            id: item.id,
+            date: item.data.dateIso,
+            mortality: item.data.mortality,
+            feedKg: item.data.feedKg,
+            waterLiters: item.data.waterLiters,
+            audioRecordUrl: item.data.audioRecordUrl,
+            isOptimistic: true,
+            syncStatus: item.status,
+            syncError: item.error,
+          })),
+      )
+    }
+
+    void refreshOptimisticRows()
+    const unsubscribe = subscribeToOptimisticItems(() => {
+      void refreshOptimisticRows()
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [organizationId, selectedBatchId])
+
+  const baseRows = isOnline ? onlineRecordRows : cachedRecordRows
+  const mergedRecentRows = useMemo(() => {
+    const nonDuplicateOptimisticRows = optimisticRows.filter((optimistic) => !baseRows.some((record) => (
+      recordMatchesDate(record.date, new Date(optimistic.date).toISOString().substring(0, 10))
+    )))
+
+    return [...nonDuplicateOptimisticRows, ...baseRows].sort((left, right) => (
+      new Date(right.date).getTime() - new Date(left.date).getTime()
+    ))
+  }, [baseRows, optimisticRows])
+
+  const existingPersistedRecord = baseRows.find((record) => recordMatchesDate(record.date, selectedDate))
+  const existingRecord = mergedRecentRows.find((record) => recordMatchesDate(record.date, selectedDate))
+  const isLocked = !!(existingPersistedRecord?.isLocked && !canEditLocked)
 
   const handleSuccess = useCallback(() => {
     queryClient.invalidateQueries({
@@ -119,82 +215,15 @@ export function DailyEntryClient({
     setEditingRecord(null)
   }, [organizationId, queryClient, selectedBatchId])
 
-  const refreshOfflineState = useCallback(async () => {
-    const items = await listPendingOfflineQueueItemsByScope("daily")
-    setPendingSyncCount(items.length)
-    setFailedSyncCount(items.filter((item) => item.status === "failed").length)
-    setPendingItems(items)
-
-    const syncMeta = readOfflineDailySyncMeta()
-    setLastSyncedAt(syncMeta.lastSyncedAt)
-    setLastSyncError(syncMeta.lastError)
-  }, [])
-
-  const syncOfflineQueue = useCallback(async () => {
-    if (!isOnline || isSyncing) return
-
-    setIsSyncing(true)
-    try {
-      await flushOfflineDailyQueue()
-      await refreshOfflineState()
-      queryClient.invalidateQueries({ queryKey: ["dailyRecords", organizationId] })
-    } finally {
-      setIsSyncing(false)
-    }
-  }, [isOnline, isSyncing, organizationId, queryClient, refreshOfflineState])
-
-  const retryOfflineItem = useCallback(async (itemId: string) => {
-    if (!isOnline || isSyncing) return
-
-    setIsSyncing(true)
-    try {
-      await retryOfflineDailyQueueItem(itemId)
-      await flushOfflineDailyQueue({ itemId })
-      await refreshOfflineState()
-      queryClient.invalidateQueries({ queryKey: ["dailyRecords", organizationId] })
-    } finally {
-      setIsSyncing(false)
-    }
-  }, [isOnline, isSyncing, organizationId, queryClient, refreshOfflineState])
-
-  const removeOfflineItem = useCallback(async (itemId: string) => {
-    await deleteOfflineDailyQueueItem(itemId)
-    await refreshOfflineState()
-  }, [refreshOfflineState])
-
   useEffect(() => {
-    void refreshOfflineState()
-
-    const unsubscribe = subscribeToOfflineDailyQueue(() => {
-      void refreshOfflineState()
-    })
-
-    const handleOnline = () => {
-      setIsOnline(true)
-    }
-    const handleOffline = () => {
-      setIsOnline(false)
-    }
-
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-
-    return () => {
-      unsubscribe()
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [refreshOfflineState])
-
-  useEffect(() => {
-    if (!isOnline || pendingSyncCount === 0) return
-    void syncOfflineQueue()
-  }, [isOnline, pendingSyncCount, syncOfflineQueue])
+    if (pendingSyncCount === 0) return
+    queryClient.invalidateQueries({ queryKey: ["dailyRecords", organizationId] })
+  }, [organizationId, pendingSyncCount, queryClient])
 
   const handleEditExisting = () => {
-    if (!existingRecord) return
+    if (!existingPersistedRecord) return
     setIsEditMode(true)
-    setEditingRecord(existingRecord)
+    setEditingRecord(existingPersistedRecord as DailyRecordDetail)
   }
 
   const ageDay = selectedBatch ? computeAgeDay(selectedBatch, selectedDate) : null
@@ -204,21 +233,25 @@ export function DailyEntryClient({
     feedStockId: editingRecord?.feedStockId ?? undefined,
     waterLiters: editingRecord?.waterLiters ?? undefined,
     avgWeightG: editingRecord?.avgWeightG ?? undefined,
+    temperatureMin: editingRecord?.temperatureMin ?? undefined,
+    temperatureMax: editingRecord?.temperatureMax ?? undefined,
+    humidity: editingRecord?.humidity ?? undefined,
     observations: editingRecord?.observations ?? "",
+    audioRecordUrl: editingRecord?.audioRecordUrl ?? null,
   }
   const availableFeedStocks = selectedBatch
-    ? initialFeedStocks.filter((stock) => stock.farmId === selectedBatch.building.farmId)
+    ? feedStocks.filter((stock) => stock.farmId === selectedBatch.building.farmId)
     : []
 
-  if (initialBatches.length === 0) {
+  if (batches.length === 0) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
-        <p className="mb-4 text-5xl" aria-hidden>🐓</p>
-        <h2 className="mb-2 text-lg font-semibold text-gray-900">
-          Aucun lot actif
-        </h2>
+        <p className="mb-4 text-5xl" aria-hidden>Farm</p>
+        <h2 className="mb-2 text-lg font-semibold text-gray-900">Aucun lot actif</h2>
         <p className="text-sm text-gray-500">
-          Creez un lot d&apos;elevage pour commencer la saisie journaliere.
+          {isOfflineBatches
+            ? "Aucun lot actif n'a encore ete mis en cache sur cet appareil."
+            : "Creez un lot d'elevage pour commencer la saisie journaliere."}
         </p>
       </div>
     )
@@ -231,6 +264,11 @@ export function DailyEntryClient({
         <p className="mt-0.5 text-sm text-gray-500">
           3 champs suffisent. Details optionnels disponibles en bas.
         </p>
+        {!isOnline && (isOfflineBatches || isOfflineRecentRecords) ? (
+          <p className="mt-1 text-xs text-amber-700">
+            Affichage hors ligne sur la base du dernier etat connu.
+          </p>
+        ) : null}
       </div>
 
       <OfflineSyncCard
@@ -266,12 +304,12 @@ export function DailyEntryClient({
           }}
           className="h-[52px] w-full rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-600"
         >
-          {initialBatches.length > 1 && (
+          {batches.length > 1 ? (
             <option value="">- Selectionner un lot -</option>
-          )}
-          {initialBatches.map((batch) => (
+          ) : null}
+          {batches.map((batch) => (
             <option key={batch.id} value={batch.id}>
-              {batch.number} · {batch.building.farm.name} / {batch.building.name}
+              {batch.number} - {batch.building.farm.name} / {batch.building.name}
             </option>
           ))}
         </select>
@@ -295,12 +333,10 @@ export function DailyEntryClient({
         />
       </div>
 
-      {selectedBatch && (
+      {selectedBatch ? (
         <div className="flex items-center justify-between rounded-xl border border-green-100 bg-green-50 px-4 py-3 text-sm">
           <div className="min-w-0">
-            <span className="truncate font-semibold text-green-800">
-              {selectedBatch.number}
-            </span>
+            <span className="truncate font-semibold text-green-800">{selectedBatch.number}</span>
             <span className="ml-2 truncate text-xs text-green-600">
               {selectedBatch.building.farm.name} / {selectedBatch.building.name}
             </span>
@@ -310,9 +346,9 @@ export function DailyEntryClient({
             <div className="text-green-500">{selectedBatch.entryCount} sujets</div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {existingRecord && !isEditMode && selectedBatch && (
+      {existingPersistedRecord && !isEditMode && selectedBatch ? (
         <div
           className={`flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
             isLocked
@@ -323,17 +359,17 @@ export function DailyEntryClient({
           <p className="flex-1">
             {isLocked ? (
               <>
-                <span className="font-semibold">Saisie verrouillee.</span>
-                {" "}Contactez un gestionnaire pour la corriger.
+                <span className="font-semibold">Saisie verrouillee.</span>{" "}
+                Contactez un gestionnaire pour la corriger.
               </>
             ) : (
               <>
-                <span className="font-semibold">Saisie existante pour cette date.</span>
-                {" "}Vous pouvez la corriger.
+                <span className="font-semibold">Saisie existante pour cette date.</span>{" "}
+                Vous pouvez la corriger.
               </>
             )}
           </p>
-          {!isLocked && (
+          {!isLocked ? (
             <button
               type="button"
               onClick={handleEditExisting}
@@ -341,11 +377,11 @@ export function DailyEntryClient({
             >
               Modifier
             </button>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
-      {selectedBatch && (!existingRecord || isEditMode) && !isLocked && (
+      {selectedBatch && (!existingPersistedRecord || isEditMode) && !isLocked ? (
         <DailyForm
           key={`${selectedBatchId}-${selectedDate}-${isEditMode ? "edit" : "create"}`}
           organizationId={organizationId}
@@ -359,18 +395,23 @@ export function DailyEntryClient({
           onSuccess={handleSuccess}
           onOfflineQueued={() => {
             handleSuccess()
-            void refreshOfflineState()
           }}
         />
-      )}
+      ) : null}
 
-      {selectedBatch && (
+      {selectedBatch ? (
         <RecentRecords
-          records={recentRecords}
-          isLoading={loadingRecords}
+          records={mergedRecentRows}
+          isLoading={loadingRecords && isOnline}
           selectedDate={selectedDate}
         />
-      )}
+      ) : null}
+
+      {!isOnline && existingRecord?.isOptimistic ? (
+        <p className="text-xs text-amber-700">
+          Une saisie locale existe deja pour cette date. Elle sera synchronisee au retour du reseau.
+        </p>
+      ) : null}
     </div>
   )
 }

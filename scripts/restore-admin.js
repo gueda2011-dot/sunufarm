@@ -2,8 +2,10 @@
  * Restore superadmin account without touching existing data.
  * Run with: node scripts/restore-admin.js
  */
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { Client } = require("pg")
 const bcrypt = require("bcryptjs")
+const { randomUUID } = require("crypto")
 
 const DATABASE_URL =
   process.env.SUNUFARM_DATABASE_URL ||
@@ -36,8 +38,7 @@ async function main() {
     )
     console.log("Admin user already existed — password reset and account restored.")
   } else {
-    const { v4: uuidv4 } = require("crypto")
-    const newId = require("crypto").randomUUID()
+    const newId = randomUUID()
     await client.query(
       `INSERT INTO "User" (id, email, name, "passwordHash", "emailVerified", phone, "createdAt", "updatedAt")
        VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
@@ -57,7 +58,7 @@ async function main() {
     orgId = orgRes.rows[0].id
     console.log("Platform organisation already exists.")
   } else {
-    const newOrgId = require("crypto").randomUUID()
+    const newOrgId = randomUUID()
     await client.query(
       `INSERT INTO "Organization" (id, name, slug, currency, locale, timezone, "createdAt", "updatedAt")
        VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
@@ -71,7 +72,7 @@ async function main() {
     await client.query(
       `INSERT INTO "Subscription" (id, "organizationId", plan, status, "amountFcfa", "currentPeriodStart", "currentPeriodEnd", "createdAt", "updatedAt")
        VALUES ($1, $2, 'BUSINESS', 'ACTIVE', 25000, $3, $4, $3, $3)`,
-      [require("crypto").randomUUID(), orgId, now, nextYear.toISOString()],
+      [randomUUID(), orgId, now, nextYear.toISOString()],
     )
     console.log("Platform organisation created.")
   }
@@ -86,7 +87,7 @@ async function main() {
     await client.query(
       `INSERT INTO "UserOrganization" (id, "userId", "organizationId", role, "createdAt", "updatedAt")
        VALUES ($1, $2, $3, 'SUPER_ADMIN', $4, $4)`,
-      [require("crypto").randomUUID(), adminId, orgId, now],
+      [randomUUID(), adminId, orgId, now],
     )
     console.log("SUPER_ADMIN membership created.")
   } else if (memberRes.rows[0].role !== "SUPER_ADMIN") {

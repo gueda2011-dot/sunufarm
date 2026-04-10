@@ -1,9 +1,21 @@
-const CACHE_NAME = "sunufarm-v2"
+const CACHE_NAME = "sunufarm-v3"
 const OFFLINE_URL = "/offline"
-const APP_SHELL = [
+const CRITICAL_ROUTES = [
+  "/dashboard",
+  "/daily",
+  "/health",
+  "/stock",
+  "/sales/new",
+  "/finances",
+  "/eggs",
+  "/purchases",
+  "/batches",
   OFFLINE_URL,
+]
+const APP_SHELL = [
   "/icon",
   "/apple-icon",
+  "/manifest.webmanifest",
 ]
 
 const OFFLINE_HTML = `<!doctype html>
@@ -14,12 +26,7 @@ const OFFLINE_HTML = `<!doctype html>
     <meta name="theme-color" content="#16a34a" />
     <title>SunuFarm hors ligne</title>
     <style>
-      :root {
-        color-scheme: light;
-      }
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
@@ -34,7 +41,7 @@ const OFFLINE_HTML = `<!doctype html>
         color: #111827;
       }
       .card {
-        width: min(100%, 480px);
+        width: min(100%, 560px);
         border-radius: 28px;
         border: 1px solid #d1fae5;
         background: #ffffff;
@@ -54,23 +61,9 @@ const OFFLINE_HTML = `<!doctype html>
         text-transform: uppercase;
         padding: 8px 12px;
       }
-      h1 {
-        margin: 18px 0 10px;
-        font-size: 28px;
-        line-height: 1.2;
-      }
-      p {
-        margin: 0;
-        color: #4b5563;
-        line-height: 1.6;
-        font-size: 15px;
-      }
-      .actions {
-        margin-top: 24px;
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
+      h1 { margin: 18px 0 10px; font-size: 28px; line-height: 1.2; }
+      p { margin: 0; color: #4b5563; line-height: 1.6; font-size: 15px; }
+      .actions { margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap; }
       .button {
         appearance: none;
         border: 0;
@@ -83,10 +76,7 @@ const OFFLINE_HTML = `<!doctype html>
         text-decoration: none;
         cursor: pointer;
       }
-      .ghost {
-        background: #f3f4f6;
-        color: #111827;
-      }
+      .ghost { background: #f3f4f6; color: #111827; }
     </style>
   </head>
   <body>
@@ -94,12 +84,12 @@ const OFFLINE_HTML = `<!doctype html>
       <div class="badge">Hors ligne</div>
       <h1>Connexion indisponible</h1>
       <p>
-        SunuFarm ne detecte pas de reseau pour le moment. Vous pouvez reessayer,
-        ou revenir aux donnees deja ouvertes sur cet appareil.
+        SunuFarm ne detecte pas de reseau. Le shell des pages critiques reste disponible,
+        ainsi que les donnees deja mises en cache sur cet appareil.
       </p>
       <div class="actions">
         <button class="button" onclick="window.location.reload()">Reessayer</button>
-        <a class="button ghost" href="/dashboard">Retour au tableau de bord</a>
+        <a class="button ghost" href="/offline">Ouvrir le hub offline</a>
       </div>
     </main>
   </body>
@@ -114,12 +104,26 @@ function createOfflineResponse() {
   })
 }
 
+async function cacheNetworkResponse(request, response) {
+  if (!response || !response.ok || !request.url.startsWith(self.location.origin)) {
+    return response
+  }
+
+  const cache = await caches.open(CACHE_NAME)
+  await cache.put(request, response.clone())
+  return response
+}
+
+async function precacheCriticalRoutes(cache) {
+  await Promise.allSettled(
+    [...APP_SHELL, ...CRITICAL_ROUTES].map((resource) => cache.add(resource)),
+  )
+  await cache.put(OFFLINE_URL, createOfflineResponse())
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      await Promise.allSettled(APP_SHELL.map((resource) => cache.add(resource)))
-      await cache.put(OFFLINE_URL, createOfflineResponse())
-    }),
+    caches.open(CACHE_NAME).then((cache) => precacheCriticalRoutes(cache)),
   )
   self.skipWaiting()
 })
@@ -137,14 +141,15 @@ self.addEventListener("activate", (event) => {
   self.clients.claim()
 })
 
-async function cacheNetworkResponse(request, response) {
-  if (!response || !response.ok || !request.url.startsWith(self.location.origin)) {
-    return response
-  }
-
-  const cache = await caches.open(CACHE_NAME)
-  await cache.put(request, response.clone())
-  return response
+function isStaticAsset(requestUrl) {
+  return (
+    requestUrl.pathname.startsWith("/_next/static/") ||
+    requestUrl.pathname === "/icon" ||
+    requestUrl.pathname === "/apple-icon" ||
+    requestUrl.pathname === "/manifest.webmanifest" ||
+    requestUrl.pathname.startsWith("/icons/") ||
+    requestUrl.pathname.startsWith("/branding/")
+  )
 }
 
 self.addEventListener("fetch", (event) => {
@@ -152,36 +157,46 @@ self.addEventListener("fetch", (event) => {
 
   const requestUrl = new URL(event.request.url)
   const isSameOrigin = requestUrl.origin === self.location.origin
-  const isStaticAsset = isSameOrigin && (
-    requestUrl.pathname.startsWith("/_next/static/") ||
-    requestUrl.pathname === "/icon" ||
-    requestUrl.pathname === "/apple-icon" ||
-    requestUrl.pathname === "/manifest.webmanifest" ||
-    requestUrl.pathname.startsWith("/icons/")
-  )
+
+  if (!isSameOrigin) return
 
   if (event.request.mode === "navigate") {
     event.respondWith((async () => {
-      try {
-        const networkResponse = await fetch(event.request)
-        return await cacheNetworkResponse(event.request, networkResponse)
-      } catch {
-        const cachedPage = await caches.match(event.request)
-        if (cachedPage) return cachedPage
+      const cache = await caches.open(CACHE_NAME)
+      const cachedPage = await cache.match(event.request)
 
-        const offlinePage = await caches.match(OFFLINE_URL)
-        if (offlinePage) return offlinePage
+      const networkUpdate = fetch(event.request)
+        .then((response) => cacheNetworkResponse(event.request, response))
+        .catch(() => null)
 
-        return createOfflineResponse()
+      if (cachedPage) {
+        event.waitUntil(networkUpdate)
+        return cachedPage
       }
+
+      const networkResponse = await networkUpdate
+      if (networkResponse) {
+        return networkResponse
+      }
+
+      const fallback = await cache.match(OFFLINE_URL)
+      return fallback || createOfflineResponse()
     })())
     return
   }
 
-  if (isStaticAsset) {
+  if (isStaticAsset(requestUrl)) {
     event.respondWith((async () => {
-      const cachedAsset = await caches.match(event.request)
-      if (cachedAsset) return cachedAsset
+      const cache = await caches.open(CACHE_NAME)
+      const cachedAsset = await cache.match(event.request)
+      if (cachedAsset) {
+        event.waitUntil(
+          fetch(event.request)
+            .then((response) => cacheNetworkResponse(event.request, response))
+            .catch(() => null),
+        )
+        return cachedAsset
+      }
 
       try {
         const networkResponse = await fetch(event.request)

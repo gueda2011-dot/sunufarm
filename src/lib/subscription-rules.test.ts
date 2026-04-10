@@ -49,7 +49,6 @@ describe("subscription-rules", () => {
     expect(
       hasActivePaidPlan(
         {
-          plan: SubscriptionPlan.PRO,
           status: SubscriptionStatus.ACTIVE,
           amountFcfa: 10_000,
           currentPeriodEnd: null,
@@ -61,7 +60,6 @@ describe("subscription-rules", () => {
     expect(
       hasActivePaidPlan(
         {
-          plan: SubscriptionPlan.BASIC,
           status: SubscriptionStatus.ACTIVE,
           amountFcfa: 0,
           currentPeriodEnd: new Date("2026-03-29T10:00:00.000Z"),
@@ -77,7 +75,6 @@ describe("subscription-rules", () => {
     expect(
       hasActivePaidPlan(
         {
-          plan: SubscriptionPlan.PRO,
           status: SubscriptionStatus.CANCELED,
           amountFcfa: 10_000,
           currentPeriodEnd: new Date("2026-03-29T10:00:00.000Z"),
@@ -89,7 +86,6 @@ describe("subscription-rules", () => {
     expect(
       hasActivePaidPlan(
         {
-          plan: SubscriptionPlan.BASIC,
           status: SubscriptionStatus.ACTIVE,
           amountFcfa: 0,
           currentPeriodEnd: new Date("2026-03-27T10:00:00.000Z"),

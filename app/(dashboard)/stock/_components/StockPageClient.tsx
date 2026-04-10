@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { toast } from "sonner"
 import type {
   FeedMovementSummary,
@@ -21,7 +21,13 @@ import {
   formatMoneyFCFA,
   formatNumber,
 } from "@/src/lib/formatters"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { setCachedResource } from "@/src/lib/offline-cache"
 import { StockMovementPanel } from "./StockMovementPanel"
+import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 
 type Props = {
   organizationId: string
@@ -121,13 +127,61 @@ export function StockPageClient({
   feedTrends,
   medicineTrends,
 }: Props) {
+  const {
+    isOnline,
+    pendingCount,
+    failedCount,
+    items,
+    isSyncing,
+    lastSyncedAt,
+    lastError,
+    sync,
+    retryItem,
+    removeItem,
+  } = useOfflineSyncStatus({ scope: "stock" })
+  const { data: cachedFarms = farms } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.stockFarms,
+    organizationId,
+    initialData: farms,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: cachedBatches = batches } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.stockBatches,
+    organizationId,
+    initialData: batches,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: cachedFeedStocks = initialFeedStocks, isOfflineFallback: usesOfflineFeedStocks } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.stockFeedStocks,
+    organizationId,
+    initialData: initialFeedStocks,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: cachedMedicineStocks = initialMedicineStocks, isOfflineFallback: usesOfflineMedicineStocks } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.stockMedicineStocks,
+    organizationId,
+    initialData: initialMedicineStocks,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: cachedFeedMovements = initialFeedMovements } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.stockFeedMovements,
+    organizationId,
+    initialData: initialFeedMovements,
+    ttlMs: OFFLINE_TTL_MS.records,
+  })
+  const { data: cachedMedicineMovements = initialMedicineMovements } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.stockMedicineMovements,
+    organizationId,
+    initialData: initialMedicineMovements,
+    ttlMs: OFFLINE_TTL_MS.records,
+  })
   const [tab, setTab] = useState<StockTab>("ALIMENT")
   const [isPending, startTransition] = useTransition()
   const [search, setSearch] = useState("")
   const [feedFilter, setFeedFilter] = useState<"ALL" | "ALERT">("ALL")
   const [medicineFilter, setMedicineFilter] = useState<"ALL" | "ALERT">("ALL")
-  const [feedStocks, setFeedStocks] = useState(initialFeedStocks)
-  const [medicineStocks, setMedicineStocks] = useState(initialMedicineStocks)
+  const [feedStocks, setFeedStocks] = useState(cachedFeedStocks)
+  const [medicineStocks, setMedicineStocks] = useState(cachedMedicineStocks)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -148,6 +202,38 @@ export function StockPageClient({
   const [medicineNotes, setMedicineNotes] = useState("")
 
   const normalizedSearch = search.trim().toLowerCase()
+
+  useEffect(() => {
+    setFeedStocks(cachedFeedStocks)
+  }, [cachedFeedStocks])
+
+  useEffect(() => {
+    setMedicineStocks(cachedMedicineStocks)
+  }, [cachedMedicineStocks])
+
+  useEffect(() => {
+    if (!isOnline) return
+    void setCachedResource({
+      key: OFFLINE_RESOURCE_KEYS.stockFeedStocks,
+      organizationId,
+      version: 1,
+      savedAt: new Date().toISOString(),
+      ttlMs: OFFLINE_TTL_MS.references,
+      data: feedStocks,
+    })
+  }, [feedStocks, isOnline, organizationId])
+
+  useEffect(() => {
+    if (!isOnline) return
+    void setCachedResource({
+      key: OFFLINE_RESOURCE_KEYS.stockMedicineStocks,
+      organizationId,
+      version: 1,
+      savedAt: new Date().toISOString(),
+      ttlMs: OFFLINE_TTL_MS.references,
+      data: medicineStocks,
+    })
+  }, [isOnline, medicineStocks, organizationId])
 
   const filteredFeedStocks = useMemo(() => {
     return feedStocks.filter((stock) => {
@@ -372,6 +458,31 @@ export function StockPageClient({
 
   return (
     <div className="space-y-5">
+      {!isOnline && (usesOfflineFeedStocks || usesOfflineMedicineStocks) ? (
+        <p className="text-xs text-amber-700">
+          Stocks et mouvements affiches depuis le dernier etat connu hors ligne.
+        </p>
+      ) : null}
+
+      <OfflineSyncCard
+        isOnline={isOnline}
+        pendingCount={pendingCount}
+        failedCount={failedCount}
+        isSyncing={isSyncing}
+        lastSyncedAt={lastSyncedAt}
+        lastError={lastError}
+        items={items}
+        onSync={() => {
+          void sync()
+        }}
+        onRetryItem={(itemId) => {
+          void retryItem(itemId)
+        }}
+        onRemoveItem={(itemId) => {
+          void removeItem(itemId)
+        }}
+      />
+
       {atRiskItems.length > 0 ? (
         <div className={cn(
           "rounded-2xl border",
@@ -469,7 +580,7 @@ export function StockPageClient({
                     className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
                   >
                     <option value="">Selectionner</option>
-                    {farms.map((farm) => (
+                    {cachedFarms.map((farm) => (
                       <option key={farm.id} value={farm.id}>{farm.name}</option>
                     ))}
                   </select>
@@ -557,7 +668,7 @@ export function StockPageClient({
                     className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
                   >
                     <option value="">Selectionner</option>
-                    {farms.map((farm) => (
+                    {cachedFarms.map((farm) => (
                       <option key={farm.id} value={farm.id}>{farm.name}</option>
                     ))}
                   </select>
@@ -650,7 +761,7 @@ export function StockPageClient({
         canCreateMovement={canCreateMovement}
         feedStocks={feedStocks}
         medicineStocks={medicineStocks}
-        batches={batches}
+        batches={cachedBatches}
       />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -911,7 +1022,7 @@ export function StockPageClient({
               </p>
             </div>
 
-            {initialFeedMovements.length === 0 ? (
+            {(isOnline ? initialFeedMovements : cachedFeedMovements).length === 0 ? (
               <div className="px-4 py-10 text-center">
                 <p className="text-sm text-gray-500">Aucun mouvement enregistré.</p>
               </div>
@@ -929,7 +1040,7 @@ export function StockPageClient({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {initialFeedMovements.map((movement) => (
+                    {(isOnline ? initialFeedMovements : cachedFeedMovements).map((movement) => (
                       <tr key={movement.id} className="text-gray-700">
                         <td className="px-4 py-3">{formatDate(movement.date)}</td>
                         <td className="px-4 py-3 font-medium">
@@ -1109,7 +1220,7 @@ export function StockPageClient({
               </p>
             </div>
 
-            {initialMedicineMovements.length === 0 ? (
+            {(isOnline ? initialMedicineMovements : cachedMedicineMovements).length === 0 ? (
               <div className="px-4 py-10 text-center">
                 <p className="text-sm text-gray-500">Aucun mouvement enregistre.</p>
               </div>
@@ -1127,7 +1238,7 @@ export function StockPageClient({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {initialMedicineMovements.map((movement) => (
+                    {(isOnline ? initialMedicineMovements : cachedMedicineMovements).map((movement) => (
                       <tr key={movement.id} className="text-gray-700">
                         <td className="px-4 py-3">{formatDate(movement.date)}</td>
                         <td className="px-4 py-3 font-medium">
