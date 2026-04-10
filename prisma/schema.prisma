@@ -685,9 +685,10 @@ model EggProductionRecord {
   dirtyEggs    Int @default(0) // sales
   smallEggs    Int @default(0) // petits / déclassés (classe B/C)
 
-  passageCount Int     @default(1) // nombre de passages de ramassage dans la journée
-  observations String?
-  recordedById String?
+  passageCount      Int     @default(1) // nombre de passages de ramassage dans la journée
+  observations      String?
+  recordedById      String?
+  clientMutationId  String? @unique
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1022,13 +1023,14 @@ model Purchase {
   supplierId     String?
   invoiceId      String?  @unique
   purchaseDate   DateTime @db.Date
-  reference      String? // numéro facture fournisseur
-  totalFcfa      Int      @default(0)
-  paidFcfa       Int      @default(0)
-  notes          String?
-  createdById    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  reference        String? // numéro facture fournisseur
+  totalFcfa        Int      @default(0)
+  paidFcfa         Int      @default(0)
+  notes            String?
+  clientMutationId String?  @unique
+  createdById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   organization Organization   @relation(fields: [organizationId], references: [id])
   supplier     Supplier?      @relation(fields: [supplierId], references: [id])

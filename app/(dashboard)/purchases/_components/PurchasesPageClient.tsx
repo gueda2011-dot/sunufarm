@@ -9,6 +9,10 @@ import {
   recordPurchasePayment,
   type PurchaseSummary,
 } from "@/src/actions/purchases"
+import {
+  createClientMutationId,
+  enqueueOfflinePurchase,
+} from "@/src/lib/offline-mutation-outbox"
 import type {
   FeedStockSummary,
   MedicineStockSummary,
@@ -255,7 +259,27 @@ export function PurchasesPageClient({
     }
 
     startTransition(async () => {
+      const clientMutationId = createClientMutationId("purchase")
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true
+
+      if (!isOnline) {
+        await enqueueOfflinePurchase({
+          clientMutationId,
+          organizationId,
+          supplierId: supplierId || undefined,
+          purchaseDate,
+          reference: reference || undefined,
+          notes: notes || undefined,
+          items,
+        })
+        window.alert("Hors ligne — achat sauvegardé localement. Il sera synchronisé automatiquement dès le retour de connexion.")
+        resetForm()
+        setShowForm(false)
+        return
+      }
+
       const result = await createPurchase({
+        clientMutationId,
         organizationId,
         supplierId: supplierId || undefined,
         purchaseDate: new Date(purchaseDate),

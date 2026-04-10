@@ -2,7 +2,9 @@
 
 import { createDailyRecord } from "@/src/actions/daily-records"
 import { createExpense } from "@/src/actions/expenses"
+import { createEggRecord } from "@/src/actions/eggs"
 import { createTreatment, createVaccination } from "@/src/actions/health"
+import { createPurchase } from "@/src/actions/purchases"
 import { createSale } from "@/src/actions/sales"
 import { createFeedMovement, createMedicineMovement } from "@/src/actions/stock"
 
@@ -112,6 +114,37 @@ export interface OfflineMedicineMovementQueuePayload {
   date: string
 }
 
+export interface OfflineEggRecordQueuePayload {
+  clientMutationId: string
+  organizationId: string
+  batchId: string
+  date: string
+  totalEggs: number
+  sellableEggs: number
+  brokenEggs?: number
+  dirtyEggs?: number
+  smallEggs?: number
+  passageCount?: number
+  observations?: string
+}
+
+export interface OfflinePurchaseItemQueuePayload {
+  description: string
+  quantity: number
+  unit: string
+  unitPriceFcfa: number
+}
+
+export interface OfflinePurchaseQueuePayload {
+  clientMutationId: string
+  organizationId: string
+  supplierId?: string
+  purchaseDate: string
+  reference?: string
+  notes?: string
+  items: OfflinePurchaseItemQueuePayload[]
+}
+
 type OfflineQueuePayload =
   | OfflineDailyQueuePayload
   | OfflineExpenseQueuePayload
@@ -120,6 +153,8 @@ type OfflineQueuePayload =
   | OfflineSaleQueuePayload
   | OfflineFeedMovementQueuePayload
   | OfflineMedicineMovementQueuePayload
+  | OfflineEggRecordQueuePayload
+  | OfflinePurchaseQueuePayload
 
 export type OfflineQueueItemType =
   | "CREATE_DAILY_RECORD"
@@ -129,6 +164,8 @@ export type OfflineQueueItemType =
   | "CREATE_SALE"
   | "CREATE_FEED_MOVEMENT"
   | "CREATE_MEDICINE_MOVEMENT"
+  | "CREATE_EGG_RECORD"
+  | "CREATE_PURCHASE"
 
 export interface OfflineQueueItem {
   id: string
@@ -275,6 +312,14 @@ function buildQueueLabel(item: {
       const payload = item.payload as OfflineMedicineMovementQueuePayload
       return `Mouvement medicament ${payload.type} - ${payload.date}`
     }
+    case "CREATE_EGG_RECORD": {
+      const payload = item.payload as OfflineEggRecordQueuePayload
+      return `Production oeufs - ${payload.date.slice(0, 10)}`
+    }
+    case "CREATE_PURCHASE": {
+      const payload = item.payload as OfflinePurchaseQueuePayload
+      return `Achat fournisseur - ${payload.purchaseDate.slice(0, 10)}`
+    }
   }
 }
 
@@ -295,6 +340,10 @@ function buildQueueScope(item: {
     case "CREATE_FEED_MOVEMENT":
     case "CREATE_MEDICINE_MOVEMENT":
       return "stock"
+    case "CREATE_EGG_RECORD":
+      return "eggs"
+    case "CREATE_PURCHASE":
+      return "purchases"
   }
 }
 
@@ -313,6 +362,10 @@ function isAlreadyHandledError(item: OfflineQueueItem, message: string | undefin
 
   if (item.type === "CREATE_DAILY_RECORD") {
     return isAlreadyCreatedError(message)
+  }
+
+  if (item.type === "CREATE_EGG_RECORD") {
+    return /record.*oeufs.*existe.*deja|un record d.?oeufs existe/i.test(message)
   }
 
   return false
@@ -454,6 +507,22 @@ export async function enqueueOfflineMedicineMovement(payload: OfflineMedicineMov
   )
 }
 
+export async function enqueueOfflineEggRecord(payload: OfflineEggRecordQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_EGG_RECORD",
+    payload,
+    createQueueKey(["egg", payload.organizationId, payload.batchId, payload.date]),
+  )
+}
+
+export async function enqueueOfflinePurchase(payload: OfflinePurchaseQueuePayload) {
+  return enqueueOfflineItem(
+    "CREATE_PURCHASE",
+    payload,
+    payload.clientMutationId,
+  )
+}
+
 async function replayQueueItem(item: OfflineQueueItem) {
   switch (item.type) {
     case "CREATE_DAILY_RECORD": {
@@ -560,6 +629,34 @@ async function replayQueueItem(item: OfflineQueueItem) {
         reference: payload.reference,
         notes: payload.notes,
         date: new Date(payload.date),
+      })
+    }
+    case "CREATE_EGG_RECORD": {
+      const payload = item.payload as OfflineEggRecordQueuePayload
+      return createEggRecord({
+        clientMutationId: payload.clientMutationId,
+        organizationId: payload.organizationId,
+        batchId: payload.batchId,
+        date: new Date(payload.date),
+        totalEggs: payload.totalEggs,
+        sellableEggs: payload.sellableEggs,
+        brokenEggs: payload.brokenEggs ?? 0,
+        dirtyEggs: payload.dirtyEggs ?? 0,
+        smallEggs: payload.smallEggs ?? 0,
+        passageCount: payload.passageCount ?? 1,
+        observations: payload.observations,
+      })
+    }
+    case "CREATE_PURCHASE": {
+      const payload = item.payload as OfflinePurchaseQueuePayload
+      return createPurchase({
+        clientMutationId: payload.clientMutationId,
+        organizationId: payload.organizationId,
+        supplierId: payload.supplierId,
+        purchaseDate: payload.purchaseDate,
+        reference: payload.reference,
+        notes: payload.notes,
+        items: payload.items,
       })
     }
   }

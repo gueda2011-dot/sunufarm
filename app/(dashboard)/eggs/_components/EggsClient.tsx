@@ -16,6 +16,10 @@ import {
   getEggRecords,
   type EggRecordSummary,
 } from "@/src/actions/eggs"
+import {
+  createClientMutationId,
+  enqueueOfflineEggRecord,
+} from "@/src/lib/offline-mutation-outbox"
 import type { BatchSummary } from "@/src/actions/batches"
 import { formatDate, formatNumber, formatPercent } from "@/src/lib/formatters"
 import { layingRate as calculateLayingRate } from "@/src/lib/kpi"
@@ -117,7 +121,36 @@ export function EggsClient({
 
   const onSubmit: SubmitHandler<SubmitValues> = async (data) => {
     startTransition(async () => {
+      const clientMutationId = createClientMutationId("egg")
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true
+
+      if (!isOnline) {
+        await enqueueOfflineEggRecord({
+          clientMutationId,
+          organizationId,
+          batchId: data.batchId,
+          date: data.date,
+          totalEggs: data.totalEggs,
+          sellableEggs: data.sellableEggs,
+          brokenEggs: data.brokenEggs,
+          dirtyEggs: data.dirtyEggs,
+          smallEggs: data.smallEggs,
+          passageCount: data.passageCount,
+          observations: data.observations || undefined,
+        })
+        toast.info("Hors ligne — record sauvegardé, sera synchronisé dès le retour de connexion")
+        reset({
+          batchId: "",
+          date: new Date().toISOString().split("T")[0],
+          totalEggs: 0, sellableEggs: 0, brokenEggs: 0,
+          dirtyEggs: 0, smallEggs: 0, passageCount: 1, observations: "",
+        })
+        setShowForm(false)
+        return
+      }
+
       const res = await createEggRecord({
+        clientMutationId,
         organizationId,
         batchId: data.batchId,
         date: new Date(data.date),
@@ -137,13 +170,8 @@ export function EggsClient({
         reset({
           batchId: "",
           date: new Date().toISOString().split("T")[0],
-          totalEggs: 0,
-          sellableEggs: 0,
-          brokenEggs: 0,
-          dirtyEggs: 0,
-          smallEggs: 0,
-          passageCount: 1,
-          observations: "",
+          totalEggs: 0, sellableEggs: 0, brokenEggs: 0,
+          dirtyEggs: 0, smallEggs: 0, passageCount: 1, observations: "",
         })
         setShowForm(false)
       } else {
