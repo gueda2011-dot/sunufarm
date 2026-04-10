@@ -616,6 +616,16 @@ async function createDemoWorkspace(passwordHash: string) {
 async function main() {
   console.log("Initializing SunuFarm demo seed...")
 
+  if (process.env.SEED_FORCE_RESET !== "true") {
+    console.error("")
+    console.error("ERROR: This seed deletes ALL data before recreating it.")
+    console.error("To confirm you want to wipe the database, run:")
+    console.error("")
+    console.error("  SEED_FORCE_RESET=true npx prisma db seed")
+    console.error("")
+    process.exit(1)
+  }
+
   await clearAll()
 
   const passwordHash = await bcrypt.hash("demo123", 10)
