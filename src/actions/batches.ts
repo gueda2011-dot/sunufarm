@@ -50,6 +50,7 @@ import {
 import { BatchType, BatchStatus } from "@/src/generated/prisma/client"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { generateBatchOutcomeSnapshot } from "@/src/lib/collective-intelligence"
+import { resolveEntitlementGate } from "@/src/lib/gate-resolver"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -429,11 +430,14 @@ export async function createBatch(
         status: BatchStatus.ACTIVE,
       },
     })
+    const batchGate = resolveEntitlementGate(subscription, "ACTIVE_BATCH_LIMIT", {
+      usage: activeBatchCount,
+    })
 
-    if (activeBatchCount >= subscription.maxActiveBatches) {
+    if (batchGate.access !== "full") {
       return {
         success: false,
-        error: `Le plan ${subscription.label} est limite a ${subscription.maxActiveBatches} lot(s) actif(s). Passez au niveau superieur pour continuer.`,
+        error: batchGate.reason,
       }
     }
 

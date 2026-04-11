@@ -7,7 +7,6 @@ import {
   buildBusinessDashboardViewModel,
   type BusinessDashboardViewModel,
 } from "@/src/lib/business-dashboard"
-import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import {
   getBatchMarginPredictionsInternal,
@@ -18,6 +17,7 @@ import {
   getBatchMarginTrend,
   getBatchMortalityTrend,
 } from "@/src/lib/predictive-snapshots"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
 
 export async function getBusinessDashboardOverview(
   organizationId: string,
@@ -26,8 +26,9 @@ export async function getBusinessDashboardOverview(
   if (!accessResult.success) return accessResult
 
   const subscription = await getOrganizationSubscription(organizationId)
-  if (!hasPlanFeature(subscription.plan, "GLOBAL_ANALYTICS")) {
-    return forbidden("La vue Business transverse est reservee au plan Business.")
+  const businessGate = resolveEntitlementGate(subscription, "GLOBAL_DASHBOARD")
+  if (!gateHasFullAccess(businessGate)) {
+    return forbidden(businessGate.reason)
   }
 
   try {

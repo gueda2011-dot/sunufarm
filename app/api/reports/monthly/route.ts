@@ -14,10 +14,12 @@ import {
   getMonthlyReportData,
 } from "@/src/lib/monthly-reports"
 import {
-  getFeatureUpgradeMessage,
-  hasPlanFeature,
-} from "@/src/lib/subscriptions"
+  buildMonthlyReportsPreview,
+  hasMonthlyReportsPreviewData,
+} from "@/src/lib/reports-preview"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { track } from "@/src/lib/analytics"
 
 export const dynamic = "force-dynamic"
 
@@ -48,20 +50,6 @@ export async function GET(request: Request) {
       return apiError("Acces refuse au module REPORTS.", {
         status: 403,
         code: "MODULE_ACCESS_DENIED",
-      })
-    }
-
-    const subscription = await getOrganizationSubscription(activeMembership.organizationId)
-    if (!hasPlanFeature(subscription.plan, "REPORTS")) {
-      logger.warn("reports.monthly.plan_upgrade_required", {
-        requestId,
-        userId: session.user.id,
-        organizationId: activeMembership.organizationId,
-        plan: subscription.plan,
-      })
-      return apiError(getFeatureUpgradeMessage("REPORTS"), {
-        status: 403,
-        code: "PLAN_UPGRADE_REQUIRED",
       })
     }
 
@@ -99,6 +87,33 @@ export async function GET(request: Request) {
       year,
       month,
     })
+    const subscription = await getOrganizationSubscription(activeMembership.organizationId)
+    const reportsPreviewEnabled = hasMonthlyReportsPreviewData(report)
+    const reportsGate = resolveEntitlementGate(subscription, "ADVANCED_REPORTS", {
+      hasMinimumData: reportsPreviewEnabled,
+      previewEnabled: reportsPreviewEnabled,
+    })
+    const watermarkGate = resolveEntitlementGate(subscription, "EXPORT_WITHOUT_WATERMARK")
+    const isStarterPreviewPdf =
+      subscription.commercialPlan === "STARTER" &&
+      reportsGate.access === "preview" &&
+      format === "pdf"
+
+    if (!gateHasFullAccess(reportsGate) && !isStarterPreviewPdf) {
+      logger.warn("reports.monthly.plan_upgrade_required", {
+        requestId,
+        userId: session.user.id,
+        organizationId: activeMembership.organizationId,
+        plan: subscription.commercialPlan,
+        access: reportsGate.access,
+        format,
+      })
+      return apiError(reportsGate.reason, {
+        status: 403,
+        code: "PLAN_UPGRADE_REQUIRED",
+      })
+    }
+
     const fileStem = `sunufarm-rapport-${year}-${String(month).padStart(2, "0")}`
 
     logger.info("reports.monthly.generated", {
@@ -110,10 +125,23 @@ export async function GET(request: Request) {
       month,
     })
 
+    void track({
+      userId: session.user.id,
+      organizationId: activeMembership.organizationId,
+      event: "export_launched",
+      plan: subscription.commercialPlan,
+      properties: { format, reportType: "monthly", year, month, watermark: watermarkGate.watermark },
+    })
+
     if (format === "pdf") {
+      const previewModel = isStarterPreviewPdf
+        ? buildMonthlyReportsPreview(report, subscription.commercialPlan)
+        : undefined
       const doc = React.createElement(MonthlyReportDocument, {
         report,
         logoSrc: await getSunuFarmLogoDataUri(),
+        previewModel,
+        watermarkText: watermarkGate.watermark ? "STARTER - APERCU" : undefined,
       })
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -14,12 +14,10 @@ import {
 import { canAccessFarm } from "@/src/lib/permissions"
 import { requiredIdSchema } from "@/src/lib/validators"
 import { computeBatchProfitability } from "@/src/lib/batch-profitability"
-import {
-  getFeatureUpgradeMessage,
-  hasPlanFeature,
-} from "@/src/lib/subscriptions"
+import { getFeatureUpgradeMessage } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { BatchType, UserRole } from "@/src/generated/prisma/client"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
 
 const getBatchProfitabilitySchema = z.object({
   organizationId: requiredIdSchema,
@@ -73,10 +71,11 @@ export async function getBatchProfitability(
     if (!roleResult.success) return roleResult
 
     const subscription = await getOrganizationSubscription(organizationId)
-    if (!hasPlanFeature(subscription.plan, "PROFITABILITY")) {
+    const profitabilityGate = resolveEntitlementGate(subscription, "REAL_PROFITABILITY")
+    if (!gateHasFullAccess(profitabilityGate)) {
       return {
         success: false,
-        error: getFeatureUpgradeMessage("PROFITABILITY"),
+        error: profitabilityGate.reason || getFeatureUpgradeMessage("PROFITABILITY"),
       }
     }
 

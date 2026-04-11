@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-10 (Session 69)
+> Derniere mise a jour : 2026-04-11 (Session 70)
 
 ---
 
@@ -21,6 +21,8 @@
 | Observabilite / securite | Health admin, logs critiques, backup / restore, incident response, rate limiting | En place |
 | Hors ligne / resilience terrain | Shell offline, cache IndexedDB, outbox locale et resynchronisation V1 sur flux critiques | En place |
 | Intelligence Collective | Pool de snapshots anonymises, benchmark collectif, boucle de feedback, cron backfill | Phase A livree |
+| Monetisation / paywalls | Catalogue plans FREE/STARTER/PRO/BUSINESS, gate resolver, FeatureGateCard, page pricing | En place |
+| Instrumentation / funnel | Table analytics_events, track() fire-and-forget, 7 surfaces instrumentees, funnel 5 etapes, requetes SQL | En place |
 | Chantiers ouverts | Durcissement webhooks Wave, outillage admin V2, extension offline restante | En cours |
 
 ### Lecture rapide
@@ -36,6 +38,7 @@
 - Une V1 `Business` existe maintenant pour le pilotage global exploitation, reservee au plan `BUSINESS`
 - La couche `Business` a deja une phase de polissage produit et de differenciation conversion, sans changer son architecture
 - La Phase A de l'Intelligence Collective est livree : snapshots anonymises auto-generes a chaque cloture de lot, pool cross-organisations query-able avec fallback progressif (precis / etudie / global), benchmark collectif injecte dans les analyses IA, cron de backfill pour les lots deja fermes
+- La couche d'instrumentation produit est en place : 7 paywalls instrumentes, funnel de conversion en 5 etapes mesurable bout en bout, requetes SQL pret-a-l'emploi pour analyser la friction et prioriser les ameliorations
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
 
 ### Modules produit - etat actuel
@@ -57,9 +60,73 @@
 | Ventes | Fonctionnel, avec creation offline V1 |
 | Dashboard | Fonctionnel, achats + depenses integres dans les KPI |
 | Rapports | Fonctionnels au MVP |
+| Monetisation / paywalls | Fonctionnelle : catalogue plans, gate resolver, FeatureGateCard, page pricing, paywalls sur 7 surfaces |
+| Instrumentation produit | En place : table analytics_events, funnel 5 etapes, 7 surfaces instrumentees, requetes SQL d'analyse |
 | Admin plateforme | Fonctionnel, avec supervision de base et integrite stock V1 |
 | Emails transactionnels | Fonctionnels si Resend est correctement configure |
 | Offline / sync terrain | V1 operationnelle sur shell critique, lectures locales et creations critiques |
+
+---
+
+## Session 70 - 2026-04-11
+
+### Travail effectue
+
+**Phase 5 — Instrumentation, funnel de conversion et optimisation produit** (Sous-lots 1, 2 et 3)
+
+#### Sous-lot 1 : Instrumentation
+
+- **Schema Prisma** : nouveau modele `AnalyticsEvent` (table `analytics_events`), append-only, indexes sur `(event, created_at)`, `(organization_id, event, created_at)`, `(user_id, event, created_at)`. Applique via `prisma db execute --stdin` (migration normale bloquee par drift DB).
+- **`src/lib/analytics.ts`** : couche `track()` fire-and-forget — ne bloque jamais le chemin utilisateur, erreurs avalees et loguees en warn.
+- **`src/actions/analytics.ts`** : Server Action `trackAlertAction` pour les evenements client-side depuis `NotificationDropdown`.
+- **`app/api/track/pricing-cta/route.ts`** : route redirect — enregistre `pricing_cta_clicked` cote serveur puis redirige vers WhatsApp, sans JavaScript client.
+- **`src/components/subscription/FeatureGateCard.tsx`** : ajout prop `trackingSurface` pour construire le lien `/pricing?from=<surface>`.
+- **5 paywalls instrumentes** : `batches/[id]/page.tsx` (profitabilite, mortalite, marge), `reports/page.tsx`, `business/page.tsx`, `batches/new/page.tsx`, `team/page.tsx`.
+- **3 routes export instrumentees** : batch PDF, mensuel PDF/Excel/CSV, Business Excel/CSV.
+- **Page `/pricing`** : tracking `pricing_page_visited` avec contexte `from=`.
+- **`NotificationDropdown`** : `handleNavigate` appelle `trackAlertAction` avant `router.push`.
+
+#### Sous-lot 2 : Exploitation funnel
+
+- **Evenement `subscription_activated`** ajoute au type `AnalyticsEventName`.
+- **`src/lib/subscription-lifecycle.ts`** : `activateOrganizationSubscription` accepte maintenant `userId?` et `triggeredBy?`, appelle `track()` apres l'upsert. Couvre les 3 chemins : `user_confirm`, `admin_direct`, `admin_wave`.
+- **`docs/analytics/funnel-queries.sql`** : 7 requetes pret-a-l'emploi — funnel brut, conversion par surface, conversion par plan cible, drop-off par etape, breakdown activations, cohorte hebdomadaire, audit de coherence.
+
+#### Sous-lot 3 : Audit friction et corrections
+
+Audit complet de tous les call sites `track()` — 3 trous identifies et corriges :
+
+1. **`FULL_HISTORY` non tracee** (surface FREE → STARTER la plus exposee) :
+   - `batches/[id]/page.tsx` : ajout `track(paywall_viewed)` pour `historyGate`
+   - `RecentDailyRecords.tsx` : lien "Voir les plans" corrige en `/pricing?from=full_history`
+
+2. **`farm_limit` non tracee** :
+   - `farms/page.tsx` : ajout `track(paywall_viewed)` quand `farmGate.access !== "full"`
+   - `FarmsClient.tsx` : ajout `trackingSurface="farm_limit"` sur `FeatureGateCard`
+
+3. **Boite noire WhatsApp** — gap entre clic CTA et activation non mesurable :
+   - Ajout evenement `subscription_payment_requested` dans `createSubscriptionPaymentRequest`
+   - Proprietes : `{ plan, amountFcfa, paymentMethod }`
+   - Requetes SQL mises a jour pour inclure cette 4e etape du funnel
+
+**README.md mis a jour** : section Pricing corrigee (FREE/STARTER/PRO/BUSINESS avec vrais prix), section Instrumentation produit et funnel ajoutee.
+
+### Resultat
+
+- Le funnel de conversion est desormais mesurable en 5 etapes bout en bout : `paywall_viewed → pricing_page_visited → pricing_cta_clicked → subscription_payment_requested → subscription_activated`
+- 7 surfaces paywalls instrumentees sans exception
+- `tsc --noEmit` : OK
+
+### Limites V1 explicites
+
+- Pas de dashboard analytics in-app — les requetes sont a executer manuellement sur la base Supabase
+- Pas de retargeting ou de relance automatique — les recommandations produit (R1, R2, R3) sont prevues pour une prochaine phase apres accumulation de donnees reelles
+
+### Prochaine session recommandee
+
+- Laisser les donnees s'accumuler quelques semaines puis executer les requetes de `docs/analytics/funnel-queries.sql`
+- Si drop-off CTA→payment > 70% : planifier une relance in-app post-CTA (notification 24h apres clic sans payment)
+- Si drop-off payment→activation > 48h median : planifier une alerte admin pour les paiements PENDING trop longtemps
 
 ---
 

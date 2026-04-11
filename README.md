@@ -137,41 +137,66 @@ Le produit est pense pour des usages concrets, avec une interface simple et une 
 
 ## Pricing
 
-### Basic - 3 000 FCFA / mois
+### Gratuit - 0 FCFA
 
-Pour les petits elevages qui veulent digitaliser leur suivi de base.
+Pour decouvrir SunuFarm sans engagement. Inclut 1 ferme, 1 lot actif, la saisie journaliere complete et une lecture simplifiee du lot avec apercus partiels.
 
-### Pro - 10 000 FCFA / mois
+### Starter - 3 500 FCFA / mois
 
-Notre offre principale, concue pour les elevages qui veulent mieux piloter leur rentabilite et leur croissance.
+Pour organiser l'exploitation au quotidien. Inclut les lots illimites, les ventes, depenses, stock basique, historique complet et export PDF avec watermark.
 
-Inclut maintenant :
+### Pro - 8 000 FCFA / mois
 
-- rapports
-- rentabilite par lot
-- prix minimum de vente par lot
-- alertes intelligentes
-- analyse AI des lots
-- prediction de rupture stock
-- prediction risque mortalite
+Notre offre recommandee pour les elevages qui veulent proteger leur marge. Inclut en plus :
+
+- rentabilite reelle par lot et prix minimum de vente
+- alertes actionnables sur mortalite, aliment et stock
+- prediction de rupture stock sur 14 jours
+- prediction risque mortalite sur 7 jours
 - projection marge finale
+- export PDF sans watermark
 
-### Business - 25 000 FCFA / mois
+### Business - 20 000 FCFA / mois
 
-Pour les structures plus avancees qui ont besoin d'un pilotage plus complet et d'un meilleur niveau d'organisation.
+Pour les structures multi-sites ou les equipes de production qui ont besoin d'un pilotage global. Inclut tout le plan Pro, plus :
 
-Inclut aussi :
-
-- vue globale exploitation avec synthese dirigeant
+- fermes et batiments en nombre illimite
+- dashboard global cross-fermes avec synthese dirigeant
 - signaux prioritaires et recommandations de pilotage
-- export Business consolide
-- prix minimum de vente par lot
-- prediction de rupture stock
-- prediction risque mortalite
-- projection marge finale
-- multi-fermes
-- gestion d'equipe
-- exports avances
+- gestion d'equipe, roles et permissions par module
+- export Business consolide Excel / CSV
+
+## Instrumentation produit et funnel de conversion
+
+SunuFarm dispose d'une couche d'instrumentation interne pour mesurer le comportement des utilisateurs face aux fonctionnalites premium et optimiser la conversion.
+
+### Evenements traces
+
+| Evenement | Declencheur |
+|---|---|
+| `paywall_viewed` | Affichage d'un paywall (7 surfaces : profitabilite, mortalite, marge, historique, limite lot, rapports, business, equipe, fermes) |
+| `pricing_page_visited` | Visite de `/pricing` avec contexte d'origine (`from=`) |
+| `pricing_cta_clicked` | Clic sur un bouton "Choisir plan" via la route de tracking |
+| `subscription_payment_requested` | Soumission d'une demande de paiement par l'owner |
+| `subscription_activated` | Activation du plan (user confirm / admin direct / admin Wave) |
+| `export_launched` | Telechargement d'un rapport (PDF batch, mensuel, Business Excel/CSV) |
+| `alert_action_clicked` | Clic sur une action depuis la cloche de notifications |
+
+### Funnel mesurable
+
+```
+paywall_viewed → pricing_page_visited → pricing_cta_clicked → subscription_payment_requested → subscription_activated
+```
+
+Chaque etape conserve le contexte d'origine (`from`, `surface`, `entitlement`) pour identifier les paywalls qui convertissent le mieux et les points de friction reels.
+
+### Architecture
+
+- Table `analytics_events` (PostgreSQL, append-only)
+- `src/lib/analytics.ts` — `track()` fire-and-forget, erreurs avalees, accessible uniquement cote serveur
+- `src/actions/analytics.ts` — Server Action pour les evenements client (alertes NotificationDropdown)
+- `app/api/track/pricing-cta/route.ts` — route redirect qui trace le clic CTA puis redirige vers WhatsApp, sans JavaScript client
+- `docs/analytics/funnel-queries.sql` — 7 requetes SQL pret a l'emploi pour analyser le funnel, les taux de conversion par surface, le drop-off par etape et la coherence des donnees
 
 ## Pourquoi SunuFarm est different
 

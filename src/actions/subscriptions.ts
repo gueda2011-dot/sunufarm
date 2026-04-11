@@ -43,6 +43,7 @@ import {
 } from "@/src/lib/subscription-rules"
 import { getAdminBaseUrl, sendAdminAlertEmail } from "@/src/lib/admin-alerts"
 import { createAdminEventNotifications } from "@/src/lib/admin-event-notifications"
+import { track } from "@/src/lib/analytics"
 
 const createSubscriptionPaymentSchema = z.object({
   organizationId: requiredIdSchema,
@@ -193,6 +194,18 @@ export async function createSubscriptionPaymentRequest(
       },
     })
 
+    void track({
+      userId: actorId,
+      organizationId,
+      event: "subscription_payment_requested",
+      plan: currentSubscription.commercialPlan,
+      properties: {
+        plan: requestedPlan,
+        amountFcfa: PLAN_DEFINITIONS[requestedPlan].monthlyPriceFcfa,
+        paymentMethod,
+      },
+    })
+
     revalidatePath("/settings")
 
     return actionSuccess({
@@ -278,6 +291,8 @@ export async function confirmSubscriptionPayment(
         amountFcfa: payment.amountFcfa,
         now,
         periodStart,
+        userId: actorId,
+        triggeredBy: "user_confirm",
       })
     })
 
@@ -568,6 +583,8 @@ export async function adminUpdateOrganizationSubscription(
       plan,
       amountFcfa: PLAN_DEFINITIONS[plan].monthlyPriceFcfa,
       now,
+      userId: actorId,
+      triggeredBy: "admin_direct",
     })
 
     await createAuditLog({

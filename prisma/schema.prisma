@@ -1423,3 +1423,39 @@ model RecommendationFeedback {
   @@index([patternType])
   @@index([followed, outcomeTag])
 }
+
+// =============================================================================
+// ANALYTICS — ÉVÉNEMENTS PRODUIT (Phase 5)
+// =============================================================================
+
+/**
+ * Événements produit pour le funnel de conversion et l'instrumentation.
+ *
+ * Événements standards :
+ *   paywall_viewed        — un paywall s'est affiché (FeatureGateCard rendu)
+ *   pricing_page_visited  — la page /pricing a été visitée (avec contexte from)
+ *   pricing_cta_clicked   — clic sur un bouton d'achat (WhatsApp redirect)
+ *   export_launched       — un rapport a été téléchargé
+ *   alert_action_clicked  — clic sur l'action d'une alerte (NotificationDropdown)
+ *   feature_viewed        — une feature premium vue avec accès complet
+ *
+ * Règles :
+ *   - organizationId et userId sont optionnels pour robustesse (sessions partielles)
+ *   - plan = plan commercial au moment de l'événement (FREE, STARTER, PRO, BUSINESS)
+ *   - properties = JSON libre, schéma défini par event (entitlement, surface, format, etc.)
+ *   - Cette table est append-only — ne jamais update ni delete
+ */
+model AnalyticsEvent {
+  id             String   @id @default(cuid())
+  organizationId String?
+  userId         String?
+  event          String
+  plan           String?
+  properties     Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  @@index([event, createdAt])
+  @@index([organizationId, event, createdAt])
+  @@index([userId, event, createdAt])
+  @@map("analytics_events")
+}

@@ -163,6 +163,18 @@ const s = StyleSheet.create({
     paddingTop: 8,
   },
   footerText: { fontSize: 8, color: "#9ca3af" },
+  watermark: {
+    position: "absolute",
+    top: "40%",
+    left: 0,
+    right: 0,
+    textAlign: "center",
+    fontSize: 34,
+    color: "#d97706",
+    opacity: 0.12,
+    transform: "rotate(-24deg)",
+    fontFamily: "Helvetica-Bold",
+  },
 })
 
 // ---------------------------------------------------------------------------
@@ -243,6 +255,7 @@ interface Props {
   recentRecords:  DailyRow[]
   generatedAt:    Date
   logoSrc?:       string
+  watermarkText?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +282,7 @@ export function BatchReportDocument({
   recentRecords,
   generatedAt,
   logoSrc,
+  watermarkText,
 }: Props) {
   const statusCfg = STATUS_CONFIG[batchStatus] ?? STATUS_CONFIG.CLOSED
   const isActive  = batchStatus === "ACTIVE"
@@ -280,6 +294,7 @@ export function BatchReportDocument({
       subject="Rapport de lot d'élevage"
     >
       <Page size="A4" style={s.page}>
+        {watermarkText ? <Text style={s.watermark} fixed>{watermarkText}</Text> : null}
 
         {/* ── En-tête ─────────────────────────────────────────────────────── */}
         <View style={s.header}>

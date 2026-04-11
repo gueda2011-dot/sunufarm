@@ -27,8 +27,8 @@ import {
   predictMedicineStockRupture,
   type StockRupturePrediction,
 } from "@/src/lib/predictive-rules"
-import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
 import type {
   MarginTrendResult,
   RiskTrendResult,
@@ -315,8 +315,9 @@ export async function getStockPredictions(
   if (!accessResult.success) return accessResult
 
   const subscription = await getOrganizationSubscription(organizationId)
-  if (!hasPlanFeature(subscription.plan, "PREDICTIVE_STOCK_ALERTS")) {
-    return forbidden("Les alertes predictives de rupture stock sont disponibles a partir du plan Pro.")
+  const stockGate = resolveEntitlementGate(subscription, "PREDICTIVE_STOCK_ALERTS")
+  if (!gateHasFullAccess(stockGate)) {
+    return forbidden(stockGate.reason)
   }
 
   try {
@@ -359,8 +360,9 @@ export async function getBatchMortalityInsight(
   if (!accessResult.success) return accessResult
 
   const subscription = await getOrganizationSubscription(organizationId)
-  if (!hasPlanFeature(subscription.plan, "PREDICTIVE_HEALTH_ALERTS")) {
-    return forbidden("Les alertes predictives de mortalite sont disponibles a partir du plan Pro.")
+  const mortalityGate = resolveEntitlementGate(subscription, "PREDICTIVE_HEALTH_ALERTS")
+  if (!gateHasFullAccess(mortalityGate)) {
+    return forbidden(mortalityGate.reason)
   }
 
   try {
@@ -393,8 +395,9 @@ export async function getBatchMarginInsight(
   if (!accessResult.success) return accessResult
 
   const subscription = await getOrganizationSubscription(organizationId)
-  if (!hasPlanFeature(subscription.plan, "PREDICTIVE_MARGIN_ALERTS")) {
-    return forbidden("Les projections predictives de marge sont disponibles a partir du plan Pro.")
+  const marginGate = resolveEntitlementGate(subscription, "PREDICTIVE_MARGIN_ALERTS")
+  if (!gateHasFullAccess(marginGate)) {
+    return forbidden(marginGate.reason)
   }
 
   try {

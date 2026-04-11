@@ -10,11 +10,32 @@
  *   generateNotifications évalue les signaux et ne crée que les notifications
  *   manquantes. Elle est safe à appeler plusieurs fois par le même utilisateur.
  *
- * Anti-spam — une seule notification par jour calendaire (Ajustement 1) :
- *   Règle explicite : un seul enregistrement par (type, resourceType, resourceId, userId)
- *   et par jour calendaire UTC. "Jour calendaire" = de 00:00:00 UTC à 23:59:59 UTC.
- *   NB : ce n'est PAS une fenêtre glissante de 24h. Un nouveau jour calendaire reset
- *   la déduplication, même si la notification a été créée à 23:59 la veille.
+ * Anti-spam — fenêtre glissante par type (Ajustement 6) :
+ *   Règle : un seul enregistrement par (type, resourceType, resourceId, userId)
+ *   dans la fenêtre de cooldown propre au resourceType.
+ *   Les alertes critiques (rupture, mortalité, marge) ont un cooldown de 1 jour.
+ *   Les rappels basse priorité ont un cooldown étendu pour réduire le bruit :
+ *     MEDICINE_STOCK_EXPIRY  → 7 jours  (péremption lente, pas besoin de rappel quotidien)
+ *     MEDICINE_STOCK         → 3 jours
+ *     FEED_STOCK             → 2 jours
+ *     BATCH (motif manquant) → 2 jours
+ *     BATCH_VACCINATION_REMINDER → 3 jours
+ *     INVOICE_OVERDUE        → 3 jours
+ *   Par défaut : 1 jour pour tous les autres types.
+ *
+ * Regroupement DAILY_RECORD_MISSING (Ajustement 7) :
+ *   Si 2+ lots actifs n'ont pas de saisie hier, une seule notification groupée
+ *   est générée (titre : "N lots sans saisie hier") au lieu de N notifications.
+ *   L'action URL pointe vers /batches (liste) plutôt qu'un lot individuel.
+ *
+ * Détection de persistance (isRecurring) :
+ *   getNotifications marque `isRecurring = true` sur chaque notification dont
+ *   le signal (resourceType + resourceId) a déjà déclenché une notification
+ *   dans les 7 derniers jours. Cela permet à l'UI d'afficher "Persistant".
+ *
+ * Auto-archival silencieux (Ajustement 8) :
+ *   generateNotificationsForOrganization archive automatiquement les notifications
+ *   au statut LU datant de plus de 14 jours. Opération idempotente et silencieuse.
  *
  * Robustesse des check* (Ajustement 2) :
  *   Chaque signal est évalué dans son propre try/catch.
@@ -24,7 +45,7 @@
  *   STOCK_ALIMENT_CRITIQUE   → stock aliment sous seuil (resourceType: FEED_STOCK)
  *   AUTRE + MEDICINE_STOCK   → stock médicament sous seuil
  *   AUTRE + MEDICINE_STOCK_EXPIRY → médicament proche péremption (< 30 jours)
- *   AUTRE + DAILY_RECORD_MISSING  → saisie journalière absente
+ *   AUTRE + DAILY_RECORD_MISSING  → saisie journalière absente (groupée si N > 1)
  *   MOTIF_MORTALITE_MANQUANT      → 3 jours consécutifs sans motif (resourceType: BATCH)
  *
  *   Note : les types MORTALITE_ELEVEE, TAUX_PONTE_BAS, RETARD_VACCINATION,
@@ -76,6 +97,8 @@ import {
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { fetchLocalWeather } from "@/src/lib/weather"
+import { resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { getPremiumSurfaceCopy } from "@/src/lib/premium-surface-copy"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -128,6 +151,30 @@ export interface NotificationSummary {
   metadata:       unknown
   readAt:         Date | null
   createdAt:      Date
+  alertKind?:     "simple" | "actionable"
+  signalLabel?:   string
+  signalTone?:    "neutral" | "warning" | "critical"
+  consequence?:   string | null
+  priority?:      "high" | "medium" | "low"
+  actionLabel?:   string
+  actionUrl?:     string
+  /** Vrai si le même signal a déjà déclenché une notification dans les 7 derniers jours */
+  isRecurring?:   boolean
+  /** Évolution du signal par rapport au précédent déclenchement (disponible si isRecurring) */
+  trend?:         "worsening" | "stable" | "improving"
+}
+
+export interface NotificationTeaser {
+  id: string
+  title: string
+  message: string
+  access: "blocked" | "preview" | "locked"
+  priority: "high"
+  signalLabel: string
+  signalTone: "warning" | "critical"
+  consequence: string
+  ctaLabel: string
+  footerHint?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +196,300 @@ const notificationSelect = {
   createdAt:      true,
 } as const
 
+function getNotificationPriority(
+  alertKind: "simple" | "actionable",
+  signalTone: "neutral" | "warning" | "critical",
+  resourceType: string | null,
+): "high" | "medium" | "low" {
+  if (alertKind === "actionable" && signalTone === "critical") return "high"
+  if (alertKind === "actionable") return "medium"
+  if (signalTone === "warning" && (resourceType === "DAILY_RECORD" || resourceType === "BATCH")) return "medium"
+  return "low"
+}
+
+/**
+ * Retourne le label d'action et l'URL de destination pour chaque type de notification.
+ *
+ * Principes :
+ *   • Le label décrit une action concrète ("Saisir", "Réapprovisionner") pas un état ("Voir").
+ *   • L'URL cible directement le bon écran avec tab (?tab=) ou anchor (#) quand possible.
+ *   • FEED_STOCK* → /stock?tab=aliment   (onglet aliment présélectionné)
+ *   • MEDICINE_STOCK* → /stock?tab=medicament
+ *   • BATCH_MORTALITY_PREDICTIVE → /batches/{id}#alerte-mortalite  (scroll direct)
+ *   • BATCH_MARGIN_PREDICTIVE    → /batches/{id}#alerte-marge
+ *   • BATCH_VACCINATION_REMINDER → /batches/{batchId}#sante
+ *     (resourceId format : "{batchId}:{vaccineName}:{dayOfAge}")
+ */
+function getNotificationActionInfo(
+  resourceType: string | null,
+  resourceId: string | null,
+  metadata: unknown,
+): { actionLabel?: string; actionUrl?: string } {
+  const meta = (metadata !== null && typeof metadata === "object") ? metadata as Record<string, unknown> : null
+
+  switch (resourceType) {
+    // ── Stock aliment ──────────────────────────────────────────────────────
+    case "FEED_STOCK":
+      return { actionLabel: "Gérer le stock aliment", actionUrl: "/stock?tab=aliment" }
+    case "FEED_STOCK_RUPTURE":
+      return { actionLabel: "Réapprovisionner", actionUrl: "/stock?tab=aliment" }
+
+    // ── Stock médicament ───────────────────────────────────────────────────
+    case "MEDICINE_STOCK":
+      return { actionLabel: "Gérer le stock médicament", actionUrl: "/stock?tab=medicament" }
+    case "MEDICINE_STOCK_EXPIRY":
+      return { actionLabel: "Gérer l'expiration", actionUrl: "/stock?tab=medicament" }
+    case "MEDICINE_STOCK_RUPTURE":
+      return { actionLabel: "Réapprovisionner", actionUrl: "/stock?tab=medicament" }
+
+    // ── Saisie journalière manquante ───────────────────────────────────────
+    case "DAILY_RECORD_MISSING":
+      if (!resourceId) return {}
+      return resourceId.startsWith("grouped-")
+        ? { actionLabel: "Saisir pour les lots", actionUrl: "/batches" }
+        : { actionLabel: "Saisir maintenant", actionUrl: `/batches/${resourceId}` }
+
+    // ── Anomalie journalière ───────────────────────────────────────────────
+    case "DAILY_RECORD": {
+      const batchId = typeof meta?.batchId === "string" ? meta.batchId : null
+      return batchId ? { actionLabel: "Documenter l'anomalie", actionUrl: `/batches/${batchId}#saisies` } : {}
+    }
+
+    // ── Motif de mortalité manquant ────────────────────────────────────────
+    case "BATCH":
+      return resourceId ? { actionLabel: "Saisir le motif", actionUrl: `/batches/${resourceId}` } : {}
+
+    // ── Prédictions avec scroll direct sur la card ─────────────────────────
+    case "BATCH_MORTALITY_PREDICTIVE":
+      return resourceId
+        ? { actionLabel: "Analyser le risque", actionUrl: `/batches/${resourceId}#alerte-mortalite` }
+        : {}
+    case "BATCH_MARGIN_PREDICTIVE":
+      return resourceId
+        ? { actionLabel: "Analyser la marge", actionUrl: `/batches/${resourceId}#alerte-marge` }
+        : {}
+
+    // ── Rappel vaccination — resourceId = "{batchId}:{vaccineName}:{dayOfAge}" ──
+    // isTomorrow = true  → rappel J-1 : "Préparer la vaccination"
+    // isTomorrow = false → rappel J   : "Vacciner maintenant" (le jour même)
+    case "BATCH_VACCINATION_REMINDER": {
+      const batchId = resourceId ? resourceId.split(":")[0] : null
+      const isToday = meta?.isTomorrow === false
+      return batchId
+        ? {
+            actionLabel: isToday ? "Vacciner maintenant" : "Préparer la vaccination",
+            actionUrl: `/batches/${batchId}#sante`,
+          }
+        : {}
+    }
+
+    // ── Finances ───────────────────────────────────────────────────────────
+    case "INVOICE_OVERDUE":
+      return { actionLabel: "Voir les créances", actionUrl: "/finances" }
+
+    // ── Météo ferme ────────────────────────────────────────────────────────
+    case "FARM_WEATHER":
+      return { actionLabel: "Voir les fermes", actionUrl: "/farms" }
+
+    default:
+      return {}
+  }
+}
+
+function decorateNotification(notification: NotificationSummary): NotificationSummary {
+  let alertKind: "simple" | "actionable" = "simple"
+  let signalLabel = "Info"
+  let signalTone: "neutral" | "warning" | "critical" = "neutral"
+  let consequence: string | null = null
+
+  switch (notification.resourceType) {
+    case "FEED_STOCK":
+    case "MEDICINE_STOCK":
+    case "MEDICINE_STOCK_EXPIRY":
+    case "DAILY_RECORD_MISSING":
+    case "FARM_WEATHER":
+    case "BATCH_VACCINATION_REMINDER":
+      alertKind = "simple"; signalLabel = "Rappel"; signalTone = "warning"; break
+    case "BATCH":
+      alertKind = "simple"; signalLabel = "Motif manquant"; signalTone = "warning"; break
+    case "DAILY_RECORD":
+      alertKind = "simple"; signalLabel = "Anomalie"; signalTone = "warning"
+      consequence = "Ce signal doit etre documente rapidement pour eviter une derive plus couteuse."; break
+    case "FEED_STOCK_RUPTURE":
+    case "MEDICINE_STOCK_RUPTURE":
+      alertKind = "actionable"; signalLabel = "Rupture imminente"; signalTone = "critical"
+      consequence = "Une rupture peut bloquer l exploitation et degrader rapidement la performance economique."; break
+    case "BATCH_MORTALITY_PREDICTIVE":
+      alertKind = "actionable"; signalLabel = "Risque mortalite"; signalTone = "critical"
+      consequence = "Une derive de mortalite peut detruire la marge du lot si rien n est corrige."; break
+    case "BATCH_MARGIN_PREDICTIVE":
+      alertKind = "actionable"; signalLabel = "Derive de marge"; signalTone = "critical"
+      consequence = "La marge projette une perte possible si le lot continue sur ce rythme."; break
+    case "INVOICE_OVERDUE":
+      alertKind = "actionable"; signalLabel = "Cash a risque"; signalTone = "warning"
+      consequence = "Un retard de paiement peut tendre la tresorerie et limiter les prochaines decisions."; break
+    default:
+      alertKind = "simple"; signalLabel = "Info"; signalTone = "neutral"; break
+  }
+
+  const priority = getNotificationPriority(alertKind, signalTone, notification.resourceType)
+  const actionInfo = getNotificationActionInfo(notification.resourceType, notification.resourceId, notification.metadata)
+
+  return {
+    ...notification,
+    alertKind,
+    signalLabel,
+    signalTone,
+    consequence,
+    priority,
+    ...actionInfo,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Adaptation du label d'action selon la tendance
+// ---------------------------------------------------------------------------
+
+/**
+ * Retourne un label d'action plus urgent quand le signal est worsening + high priority.
+ * L'objectif est de déclencher une action immédiate plutôt que de l'analyse.
+ * Retourne undefined pour les types sans surcharge prévue.
+ */
+function getWorseningActionLabel(resourceType: string | null): string | undefined {
+  switch (resourceType) {
+    case "BATCH_MORTALITY_PREDICTIVE": return "Corriger maintenant"
+    case "BATCH_MARGIN_PREDICTIVE":    return "Agir sur la marge"
+    case "FEED_STOCK_RUPTURE":         return "Réapprovisionner d'urgence"
+    case "MEDICINE_STOCK_RUPTURE":     return "Réapprovisionner d'urgence"
+    default:                           return undefined
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Calcul de tendance — fenêtre glissante (window-based)
+// ---------------------------------------------------------------------------
+
+/**
+ * Indique si une valeur plus haute est synonyme de dégradation pour ce resourceType.
+ *   true  → hausse = aggravation   (mortalité, risque)
+ *   false → hausse = amélioration  (stocks, jours restants, marge)
+ */
+const TREND_HIGHER_IS_WORSE: Record<string, boolean> = {
+  DAILY_RECORD:               true,   // mortalityRate : plus haut = pire
+  FEED_STOCK:                 false,  // quantityKg    : plus bas  = pire
+  MEDICINE_STOCK:             false,  // quantityOnHand: plus bas  = pire
+  FEED_STOCK_RUPTURE:         false,  // daysToStockout: plus bas  = pire
+  MEDICINE_STOCK_RUPTURE:     false,
+  BATCH_MORTALITY_PREDICTIVE: true,   // riskScore     : plus haut = pire
+  BATCH_MARGIN_PREDICTIVE:    false,  // projectedProfitFcfa : plus bas = pire
+  MEDICINE_STOCK_EXPIRY:      false,  // daysLeft      : plus bas  = pire
+}
+
+/**
+ * Seuil de variation relative pour sortir de la zone "stable".
+ * Calibré large pour éviter les faux signaux sur du bruit de mesure.
+ */
+const TREND_STABLE_THRESHOLD: Record<string, number> = {
+  DAILY_RECORD:               0.20,   // 20 % de variation relative du taux de mortalité
+  FEED_STOCK:                 0.15,   // 15 % de variation de stock aliment
+  MEDICINE_STOCK:             0.15,
+  FEED_STOCK_RUPTURE:         0.20,   // 20 % sur le délai avant rupture
+  MEDICINE_STOCK_RUPTURE:     0.20,
+  BATCH_MORTALITY_PREDICTIVE: 0.15,   // 15 % sur le score de risque
+  BATCH_MARGIN_PREDICTIVE:    0.15,   // 15 % sur la marge projetée
+  MEDICINE_STOCK_EXPIRY:      0.25,   // 25 % sur les jours restants
+}
+
+/**
+ * Extrait la métrique numérique pertinente d'un objet metadata pour le calcul de tendance.
+ * Retourne null si la métrique est absente ou invalide.
+ */
+function extractTrendMetric(resourceType: string, meta: Record<string, unknown>): number | null {
+  switch (resourceType) {
+    case "DAILY_RECORD":
+      return typeof meta.mortalityRate === "number" ? meta.mortalityRate : null
+    case "FEED_STOCK":
+      return typeof meta.quantityKg === "number" ? meta.quantityKg : null
+    case "MEDICINE_STOCK":
+      return typeof meta.quantityOnHand === "number" ? meta.quantityOnHand : null
+    case "FEED_STOCK_RUPTURE":
+    case "MEDICINE_STOCK_RUPTURE":
+      return typeof meta.daysToStockout === "number" ? meta.daysToStockout : null
+    case "BATCH_MORTALITY_PREDICTIVE":
+      return typeof meta.riskScore === "number" ? meta.riskScore : null
+    case "BATCH_MARGIN_PREDICTIVE":
+      return typeof meta.projectedProfitFcfa === "number" ? meta.projectedProfitFcfa : null
+    case "MEDICINE_STOCK_EXPIRY":
+      return typeof meta.daysLeft === "number" ? meta.daysLeft : null
+    default:
+      return null
+  }
+}
+
+/**
+ * Calcule la tendance d'un signal par comparaison de deux fenêtres temporelles.
+ *
+ * Algorithme :
+ *   - `priorSignalsMetas` contient les métadonnées des notifications antérieures triées par
+ *     date décroissante (la plus récente en premier), sur une fenêtre de 14 jours.
+ *   - On divise ces signaux en deux demi-fenêtres :
+ *       • Fenêtre récente  : première moitié (signaux les plus proches du présent)
+ *       • Fenêtre ancienne : deuxième moitié (référence de base)
+ *   - La notification courante est intégrée dans la fenêtre récente pour le calcul.
+ *   - Minimum requis : 2 signaux antérieurs avec métrique valide (au moins 1 par fenêtre).
+ *   - Si la variation relative entre les deux moyennes est inférieure au seuil → "stable".
+ *   - Pas de seuil absolu : tout est relatif à la valeur de référence pour rester agnostique
+ *     aux unités (FCFA, kg, %, jours).
+ *
+ * Robustesse :
+ *   - Si la moyenne de référence est 0 : cas traité explicitement.
+ *   - Si les métadonnées sont incomplètes sur certains signaux : valeurs ignorées (filter null).
+ *   - Résultat undefined si les données sont insuffisantes (pas de badge affiché).
+ */
+function calculateWindowTrend(
+  resourceType: string,
+  currentMeta: Record<string, unknown>,
+  priorSignalsMetas: Array<Record<string, unknown>>,
+): "worsening" | "stable" | "improving" | undefined {
+  if (priorSignalsMetas.length < 2) return undefined
+
+  const currentValue = extractTrendMetric(resourceType, currentMeta)
+  if (currentValue === null) return undefined
+
+  const priorValues = priorSignalsMetas
+    .map((m) => extractTrendMetric(resourceType, m))
+    .filter((v): v is number => v !== null)
+
+  if (priorValues.length < 2) return undefined
+
+  // Première moitié = plus récent (priorValues trié desc depuis la requête)
+  const splitIdx = Math.ceil(priorValues.length / 2)
+  const recentPriorValues = priorValues.slice(0, splitIdx)
+  const olderValues = priorValues.slice(splitIdx)
+
+  if (olderValues.length === 0) return undefined
+
+  // La notification courante rejoint la fenêtre récente
+  const recentValues = [currentValue, ...recentPriorValues]
+  const recentAvg = recentValues.reduce((s, v) => s + v, 0) / recentValues.length
+  const olderAvg  = olderValues.reduce((s, v) => s + v, 0) / olderValues.length
+
+  if (olderAvg === 0) {
+    // Référence nulle : dégradation si la valeur monte pour un indicateur "plus haut = pire"
+    if (recentAvg === 0) return "stable"
+    return (TREND_HIGHER_IS_WORSE[resourceType] ?? false) ? "worsening" : "improving"
+  }
+
+  const relativeDelta = (recentAvg - olderAvg) / Math.abs(olderAvg)
+  const threshold = TREND_STABLE_THRESHOLD[resourceType] ?? 0.15
+
+  if (Math.abs(relativeDelta) < threshold) return "stable"
+
+  const isIncreasing  = relativeDelta > 0
+  const higherIsWorse = TREND_HIGHER_IS_WORSE[resourceType] ?? false
+  return (isIncreasing === higherIsWorse) ? "worsening" : "improving"
+}
+
 interface NotificationCandidate {
   title: string
   message: string
@@ -162,21 +503,47 @@ interface NotificationCandidate {
 
 /**
  * Début du jour calendaire UTC pour une date donnée.
- * Anti-spam : la déduplication est basée sur ce jour, pas sur une fenêtre glissante.
+ * Utilisé uniquement pour construire des identifiants stables (ex: groupement journalier).
  */
 function calendarDayStart(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
 }
 
 /**
+ * Cooldowns par resourceType (fenêtre glissante en jours).
+ * Les alertes critiques gardent 1 jour. Les rappels à faible urgence ont un cooldown étendu
+ * pour éviter de polluer la liste avec des signaux qui ne changent pas rapidement.
+ */
+const NOTIFICATION_COOLDOWN_DAYS: Record<string, number> = {
+  FEED_STOCK:                   2,
+  MEDICINE_STOCK:               3,
+  MEDICINE_STOCK_EXPIRY:        7,
+  BATCH:                        2,
+  BATCH_VACCINATION_REMINDER:   3,
+  INVOICE_OVERDUE:              3,
+  FARM_WEATHER:                 1,
+  DAILY_RECORD_MISSING:         1,
+  DAILY_RECORD:                 1,
+  FEED_STOCK_RUPTURE:           1,
+  MEDICINE_STOCK_RUPTURE:       1,
+  BATCH_MORTALITY_PREDICTIVE:   1,
+  BATCH_MARGIN_PREDICTIVE:      1,
+}
+
+function getCooldownStart(resourceType: string): Date {
+  const days = NOTIFICATION_COOLDOWN_DAYS[resourceType] ?? 1
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+}
+
+/**
  * Crée une notification uniquement si aucune notification identique n'existe
- * déjà pour ce jour calendaire UTC.
+ * dans la fenêtre de cooldown propre au resourceType.
  *
- * Clé de déduplication : (type, resourceType, resourceId, userId, jour calendaire).
+ * Clé de déduplication : (type, resourceType, resourceId, userId) dans le cooldown.
  * L'inclusion de resourceType distingue les alertes AUTRE pour un même resourceId
  * (ex : stock bas ET péremption sur le même médicament).
  *
- * Retourne true si la notification a été créée, false si déjà existante.
+ * Retourne le nombre de notifications créées.
  */
 async function createNotificationsIfAbsent(params: {
   organizationId: string
@@ -189,7 +556,7 @@ async function createNotificationsIfAbsent(params: {
     return 0
   }
 
-  const todayStart = calendarDayStart(new Date())
+  const cooldownStart = getCooldownStart(params.resourceType)
   const resourceIds = [...new Set(params.candidates.map((candidate) => candidate.resourceId))]
 
   const existing = await prisma.notification.findMany({
@@ -200,7 +567,7 @@ async function createNotificationsIfAbsent(params: {
       resourceType:   params.resourceType,
       resourceId:     { in: resourceIds },
       status:         { in: [NotificationStatus.NON_LU, NotificationStatus.LU] },
-      createdAt:      { gte: todayStart },
+      createdAt:      { gte: cooldownStart },
     },
     select: { userId: true, resourceId: true },
   })
@@ -384,6 +751,12 @@ async function checkMedicineExpiryAlerts(
  *   strictement antérieure à aujourd'hui (entryDate < début du jour courant UTC).
  *   Un lot créé aujourd'hui ne peut pas avoir de saisie "manquante hier" —
  *   il n'existait pas encore.
+ *
+ * Regroupement (Ajustement 7) :
+ *   Si 1 seul lot manquant → notification individuelle (resourceId = batchId).
+ *   Si 2+ lots manquants → notification groupée unique (resourceId = "grouped-{date}").
+ *   Le groupement évite l'explosion du nombre de notifications quand plusieurs lots
+ *   sont actifs simultanément.
  */
 async function checkMissedDailyRecords(
   organizationId: string,
@@ -423,20 +796,47 @@ async function checkMissedDailyRecords(
     month:   "long",
   })
 
+  // Cas individuel (1 lot) : notification ciblée avec action directe vers le lot
+  if (missingBatches.length === 1) {
+    const batch = missingBatches[0]
+    return createNotificationsIfAbsent({
+      organizationId,
+      userIds,
+      type: NotificationType.AUTRE,
+      resourceType: "DAILY_RECORD_MISSING",
+      candidates: [{
+        title: "Saisie journaliere manquante",
+        message: `Aucune saisie enregistree pour le lot ${batch.number} le ${yesterdayLabel}.`,
+        resourceId: batch.id,
+        metadata: {
+          batchNumber: batch.number,
+          missingDate: yesterday.toISOString(),
+          batchCount: 1,
+        },
+      }],
+    })
+  }
+
+  // Cas groupé (2+ lots) : une seule notification pour éviter le bruit
+  const dateKey = `${yesterday.getUTCFullYear()}-${String(yesterday.getUTCMonth() + 1).padStart(2, "0")}-${String(yesterday.getUTCDate()).padStart(2, "0")}`
+  const batchList = missingBatches.map((b) => b.number).join(", ")
+  const groupedResourceId = `grouped-${dateKey}`
+
   return createNotificationsIfAbsent({
     organizationId,
     userIds,
     type: NotificationType.AUTRE,
     resourceType: "DAILY_RECORD_MISSING",
-    candidates: missingBatches.map((batch) => ({
-      title: "Saisie journaliere manquante",
-      message: `Aucune saisie enregistree pour le lot ${batch.number} le ${yesterdayLabel}.`,
-      resourceId: batch.id,
+    candidates: [{
+      title: `${missingBatches.length} lots sans saisie hier`,
+      message: `Aucune saisie enregistree pour ${missingBatches.length} lots le ${yesterdayLabel} : ${batchList}.`,
+      resourceId: groupedResourceId,
       metadata: {
-        batchNumber: batch.number,
+        batchCount: missingBatches.length,
+        batchNumbers: missingBatches.map((b) => b.number),
         missingDate: yesterday.toISOString(),
       },
-    })),
+    }],
   })
 }
 
@@ -600,6 +1000,7 @@ export async function getNotifications(
     if (!accessResult.success) return accessResult
     const userId = accessResult.data.session.user.id
 
+    const subscription = await getOrganizationSubscription(organizationId)
     const notifications = await prisma.notification.findMany({
       where: {
         userId,
@@ -612,7 +1013,135 @@ export async function getNotifications(
       take:    limit,
     })
 
-    return { success: true, data: notifications }
+    const decoratedNotifications = notifications.map((notification) => (
+      decorateNotification(notification)
+    ))
+
+    const canSeePredictiveStock = resolveEntitlementGate(
+      subscription,
+      "PREDICTIVE_STOCK_ALERTS",
+      { hasMinimumData: true, previewEnabled: true },
+    ).access === "full"
+    const canSeePredictiveHealth = resolveEntitlementGate(
+      subscription,
+      "PREDICTIVE_HEALTH_ALERTS",
+      { hasMinimumData: true, previewEnabled: true },
+    ).access === "full"
+    const canSeePredictiveMargin = resolveEntitlementGate(
+      subscription,
+      "PREDICTIVE_MARGIN_ALERTS",
+      { hasMinimumData: true, previewEnabled: true },
+    ).access === "full"
+
+    const filteredNotifications = decoratedNotifications.filter((notification) => {
+      if (notification.resourceType === "FEED_STOCK_RUPTURE" || notification.resourceType === "MEDICINE_STOCK_RUPTURE") {
+        return canSeePredictiveStock
+      }
+      if (notification.resourceType === "BATCH_MORTALITY_PREDICTIVE") {
+        return canSeePredictiveHealth
+      }
+      if (notification.resourceType === "BATCH_MARGIN_PREDICTIVE") {
+        return canSeePredictiveMargin
+      }
+      return true
+    })
+
+    // Tri par priorité : high → medium → low, puis par date décroissante
+    const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+    let sortedNotifications = [...filteredNotifications].sort((a, b) => {
+      const aOrder = priorityOrder[a.priority ?? "low"] ?? 2
+      const bOrder = priorityOrder[b.priority ?? "low"] ?? 2
+      if (aOrder !== bOrder) return aOrder - bOrder
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    })
+
+    // Détection de persistance (isRecurring) + calcul de tendance (window-based).
+    //
+    // Une seule requête Prisma sur 14 jours (hors dernières 24h) :
+    //   • isRecurring = vrai si au moins un signal apparaît dans la fenêtre 1–7 jours.
+    //   • trend       = comparaison de deux demi-fenêtres sur les signaux disponibles.
+    //     Requiert au moins 2 signaux antérieurs avec métrique valide pour chaque clé.
+    const resourceTypesInList = [...new Set(
+      sortedNotifications.map((n) => n.resourceType).filter((t): t is string => t !== null),
+    )]
+    const resourceIdsInList = [...new Set(
+      sortedNotifications.map((n) => n.resourceId).filter((id): id is string => id !== null),
+    )]
+
+    if (resourceTypesInList.length > 0 && resourceIdsInList.length > 0) {
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+      const sevenDaysAgo    = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000)
+      const oneDayAgo       = new Date(Date.now() -      24 * 60 * 60 * 1000)
+
+      // Fenêtre étendue à 14 jours pour accumuler assez de points de mesure par signal.
+      // orderBy desc → les signaux les plus récents arrivent en premier dans chaque groupe.
+      const allPriorSignals = await prisma.notification.findMany({
+        where: {
+          userId,
+          organizationId,
+          resourceType: { in: resourceTypesInList },
+          resourceId:   { in: resourceIdsInList },
+          createdAt:    { gte: fourteenDaysAgo, lt: oneDayAgo },
+        },
+        select:  { resourceType: true, resourceId: true, metadata: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+      })
+
+      // Grouper par clé (resourceType:resourceId), ordre décroissant préservé.
+      const priorSignalsByKey = new Map<string, Array<{ metadata: unknown; createdAt: Date }>>()
+      for (const s of allPriorSignals) {
+        const key = `${s.resourceType}:${s.resourceId}`
+        const bucket = priorSignalsByKey.get(key)
+        if (bucket) bucket.push(s)
+        else priorSignalsByKey.set(key, [s])
+      }
+
+      // isRecurring : au moins un signal dans la fenêtre 1–7 jours
+      const recurringKeys = new Set<string>()
+      for (const [key, signals] of priorSignalsByKey.entries()) {
+        if (signals.some((s) => new Date(s.createdAt) >= sevenDaysAgo)) {
+          recurringKeys.add(key)
+        }
+      }
+
+      sortedNotifications = sortedNotifications.map((n) => {
+        const key =
+          n.resourceType !== null && n.resourceId !== null
+            ? `${n.resourceType}:${n.resourceId}`
+            : null
+        const isRecurring = key !== null ? recurringKeys.has(key) : false
+
+        let trend: "worsening" | "stable" | "improving" | undefined
+        if (isRecurring && key !== null && n.resourceType !== null) {
+          const priorSignals = priorSignalsByKey.get(key) ?? []
+          const currentMetaObj =
+            n.metadata !== null && typeof n.metadata === "object"
+              ? (n.metadata as Record<string, unknown>)
+              : null
+          const priorMetaObjs = priorSignals
+            .map((s) => s.metadata)
+            .filter((m): m is Record<string, unknown> => m !== null && typeof m === "object")
+          if (currentMetaObj !== null) {
+            trend = calculateWindowTrend(n.resourceType, currentMetaObj, priorMetaObjs)
+          }
+        }
+
+        // Adapter le label d'action si le signal s'aggrave sur une alerte critique
+        const worseningLabel =
+          trend === "worsening" && n.priority === "high"
+            ? getWorseningActionLabel(n.resourceType)
+            : undefined
+
+        return {
+          ...n,
+          isRecurring,
+          trend,
+          ...(worseningLabel !== undefined ? { actionLabel: worseningLabel } : {}),
+        }
+      })
+    }
+
+    return { success: true, data: sortedNotifications }
   } catch {
     return { success: false, error: "Impossible de récupérer les notifications" }
   }
@@ -649,6 +1178,112 @@ export async function getUnreadCount(
     return { success: true, data: count }
   } catch {
     return { success: false, error: "Impossible de récupérer le compteur de notifications" }
+  }
+}
+
+export async function getNotificationTeasers(
+  data: unknown,
+): Promise<ActionResult<NotificationTeaser[]>> {
+  try {
+    const parsed = getUnreadCountSchema.safeParse(data)
+    if (!parsed.success) {
+      return { success: false, error: "Donnees invalides" }
+    }
+
+    const { organizationId } = parsed.data
+    const accessResult = await requireOrganizationModuleContext(organizationId, "DASHBOARD")
+    if (!accessResult.success) return accessResult
+
+    const subscription = await getOrganizationSubscription(organizationId)
+
+    const [activeBatches, feedStockCount, medicineStockCount] = await Promise.all([
+      prisma.batch.findMany({
+        where: {
+          organizationId,
+          status: BatchStatus.ACTIVE,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          number: true,
+          _count: { select: { dailyRecords: true } },
+        },
+        take: 10,
+      }),
+      prisma.feedStock.count({ where: { organizationId } }),
+      prisma.medicineStock.count({ where: { organizationId } }),
+    ])
+
+    const hasPredictiveBatchData = activeBatches.some((batch) => batch._count.dailyRecords >= 3)
+    const hasStockData = feedStockCount > 0 || medicineStockCount > 0
+
+    const mortalityGate = resolveEntitlementGate(subscription, "PREDICTIVE_HEALTH_ALERTS", {
+      hasMinimumData: hasPredictiveBatchData,
+      previewEnabled: hasPredictiveBatchData,
+    })
+    const marginGate = resolveEntitlementGate(subscription, "PREDICTIVE_MARGIN_ALERTS", {
+      hasMinimumData: hasPredictiveBatchData,
+      previewEnabled: hasPredictiveBatchData,
+    })
+    const stockGate = resolveEntitlementGate(subscription, "PREDICTIVE_STOCK_ALERTS", {
+      hasMinimumData: hasStockData,
+      previewEnabled: hasStockData,
+    })
+
+    const teasers: NotificationTeaser[] = []
+    if (mortalityGate.access !== "full") {
+      const copy = getPremiumSurfaceCopy("mortality", mortalityGate.access)
+      teasers.push({
+        id: "mortality-alert-teaser",
+        title: copy.title,
+        message: mortalityGate.reason,
+        access: mortalityGate.access,
+        priority: "high",
+        signalLabel: mortalityGate.access === "preview" ? "Risque mortalite" : "Preparation",
+        signalTone: "critical",
+        consequence: "Une derive de mortalite peut entamer rapidement la marge du lot.",
+        ctaLabel: copy.ctaLabel,
+        footerHint: copy.footerHint,
+      })
+    }
+
+    if (marginGate.access !== "full") {
+      const copy = getPremiumSurfaceCopy("margin", marginGate.access)
+      teasers.push({
+        id: "margin-alert-teaser",
+        title: copy.title,
+        message: marginGate.reason,
+        access: marginGate.access,
+        priority: "high",
+        signalLabel: marginGate.access === "preview" ? "Derive de marge" : "Preparation",
+        signalTone: "critical",
+        consequence: "Une projection negative aide a corriger avant que la perte soit reelle.",
+        ctaLabel: copy.ctaLabel,
+        footerHint: copy.footerHint,
+      })
+    }
+
+    if (stockGate.access !== "full") {
+      teasers.push({
+        id: "stock-alert-teaser",
+        title: "Eviter une rupture qui coute cher",
+        message: stockGate.reason,
+        access: stockGate.access,
+        priority: "high",
+        signalLabel: stockGate.access === "preview" ? "Rupture imminente" : "Preparation",
+        signalTone: "warning",
+        consequence: "Une rupture d aliment ou de medicament peut casser le rythme du lot et creer une perte evitable.",
+        ctaLabel:
+          stockGate.access === "blocked"
+            ? "Continuer la saisie pour activer cette lecture"
+            : "Passer a Pro pour anticiper la rupture",
+        footerHint: "Les rappels simples restent visibles. Pro debloque la lecture actionnable sur les ruptures.",
+      })
+    }
+
+    return { success: true, data: teasers.slice(0, 3) }
+  } catch {
+    return { success: false, error: "Impossible de preparer les teasers d alertes" }
   }
 }
 
@@ -844,10 +1479,36 @@ export async function generateNotificationsForOrganization(
 
   const userIds = targetMembers.map((m) => m.userId)
   let totalCreated = 0
+
+  // Auto-archival silencieux : archiver les notifications LU datant de plus de 14 jours
+  // pour garder la liste lisible sans intervention manuelle de l'utilisateur.
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+  try {
+    await prisma.notification.updateMany({
+      where: {
+        organizationId,
+        status:    NotificationStatus.LU,
+        createdAt: { lt: fourteenDaysAgo },
+      },
+      data: { status: NotificationStatus.ARCHIVE },
+    })
+  } catch {
+    // Silencieux — nettoyage non critique, ne bloque pas la génération
+  }
+
   const subscription = await getOrganizationSubscription(organizationId)
-  const canSeePredictiveStock = hasPlanFeature(subscription.plan, "PREDICTIVE_STOCK_ALERTS")
-  const canSeePredictiveHealth = hasPlanFeature(subscription.plan, "PREDICTIVE_HEALTH_ALERTS")
-  const canSeePredictiveMargin = hasPlanFeature(subscription.plan, "PREDICTIVE_MARGIN_ALERTS")
+  const canSeePredictiveStock = resolveEntitlementGate(subscription, "PREDICTIVE_STOCK_ALERTS", {
+    hasMinimumData: true,
+    previewEnabled: true,
+  }).access === "full"
+  const canSeePredictiveHealth = resolveEntitlementGate(subscription, "PREDICTIVE_HEALTH_ALERTS", {
+    hasMinimumData: true,
+    previewEnabled: true,
+  }).access === "full"
+  const canSeePredictiveMargin = resolveEntitlementGate(subscription, "PREDICTIVE_MARGIN_ALERTS", {
+    hasMinimumData: true,
+    previewEnabled: true,
+  }).access === "full"
 
   // Signal 1 — Stock aliment sous seuil (Ajustement 2 : try/catch indépendant)
   try {

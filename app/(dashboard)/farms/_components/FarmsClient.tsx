@@ -6,11 +6,11 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
 import { Plus, ChevronDown, ChevronUp, Pencil, Trash2, Warehouse, Building2 } from "lucide-react"
-import { type SubscriptionPlan } from "@/src/generated/prisma/client"
 import { Button } from "@/src/components/ui/button"
 import { Input } from "@/src/components/ui/input"
 import { Label } from "@/src/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
+import { FeatureGateCard } from "@/src/components/subscription/FeatureGateCard"
 import {
   getFarms,
   createFarm,
@@ -65,8 +65,8 @@ const BUILDING_TYPE_LABELS: Record<string, string> = {
 interface Props {
   organizationId: string
   userRole: string
-  subscriptionPlan: SubscriptionPlan
-  maxFarms: number
+  currentPlanLabel: string
+  maxFarms: number | null
   canCreateFarm: boolean
   initialFarms: FarmSummary[]
 }
@@ -78,7 +78,7 @@ interface Props {
 export function FarmsClient({
   organizationId,
   userRole,
-  subscriptionPlan,
+  currentPlanLabel,
   maxFarms,
   canCreateFarm,
   initialFarms,
@@ -291,16 +291,20 @@ export function FarmsClient({
       </div>
 
       {canEdit && !canCreateFarm && (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="py-4">
-            <p className="text-sm font-medium text-amber-800">
-              Plan actuel : {subscriptionPlan}. Cette organisation a atteint sa limite de {maxFarms} ferme.
-            </p>
-            <p className="mt-1 text-sm text-amber-700">
-              Passez au plan Business pour gerer plusieurs fermes.
-            </p>
-          </CardContent>
-        </Card>
+        <FeatureGateCard
+          title="Plusieurs fermes — plan Business"
+          message={`Cette organisation a atteint sa limite de ${maxFarms ?? 1} ferme. Passez au plan Business pour gérer plusieurs fermes et bâtiments sans limite.`}
+          currentPlanLabel={currentPlanLabel}
+          targetPlanLabel="Business"
+          access="locked"
+          highlights={[
+            "Fermes et bâtiments en nombre illimité",
+            "Dashboard global cross-fermes",
+            "Équipe, rôles et permissions par ferme",
+          ]}
+          ctaLabel="Passer à Business"
+          trackingSurface="farm_limit"
+        />
       )}
 
       {showFarmForm && canEdit && (

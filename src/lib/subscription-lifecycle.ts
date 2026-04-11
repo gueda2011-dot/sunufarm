@@ -1,6 +1,7 @@
 import type { Prisma } from "@/src/generated/prisma/client"
 import { SubscriptionPlan, SubscriptionStatus } from "@/src/generated/prisma/client"
 import { PLAN_DEFINITIONS, TRIAL_AI_CREDITS, TRIAL_DAYS, UNLIMITED_AI } from "@/src/lib/subscriptions"
+import { track } from "@/src/lib/analytics"
 
 type SubscriptionWriter = Prisma.TransactionClient
 
@@ -18,13 +19,17 @@ export async function activateOrganizationSubscription(
     amountFcfa?: number
     now?: Date
     periodStart?: Date
+    /** userId who triggered the activation (owner or admin). Used for analytics only. */
+    userId?: string
+    /** How the activation was triggered. Used for analytics only. */
+    triggeredBy?: "user_confirm" | "admin_direct" | "admin_wave"
   },
 ) {
   const now = input.now ?? new Date()
   const periodStart = input.periodStart ?? now
   const amountFcfa = input.amountFcfa ?? PLAN_DEFINITIONS[input.plan].monthlyPriceFcfa
 
-  return db.subscription.upsert({
+  const result = await db.subscription.upsert({
     where: { organizationId: input.organizationId },
     update: {
       plan: input.plan,
@@ -50,6 +55,21 @@ export async function activateOrganizationSubscription(
       aiCreditsUsed: 0,
     },
   })
+
+  // fire-and-forget — analytics must never block the activation path
+  void track({
+    userId: input.userId ?? null,
+    organizationId: input.organizationId,
+    event: "subscription_activated",
+    plan: input.plan,
+    properties: {
+      plan: input.plan,
+      triggeredBy: input.triggeredBy ?? "unknown",
+      amountFcfa,
+    },
+  })
+
+  return result
 }
 
 export async function startOrganizationTrial(
