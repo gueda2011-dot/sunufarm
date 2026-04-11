@@ -32,6 +32,16 @@ function formatDateTime(value: string | null | undefined) {
   }
 }
 
+function formatDebugPayload(value: unknown) {
+  if (value === null || value === undefined) return null
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
 export default function OfflinePage() {
   const { context } = useOfflineSessionContext()
   const {
@@ -47,7 +57,15 @@ export default function OfflinePage() {
   } = useOfflineSyncStatus()
   const [cachedKeys, setCachedKeys] = useState<string[]>([])
   const [bootstrapMeta, setBootstrapMeta] = useState<Awaited<ReturnType<typeof getOfflineBootstrapMeta>>>(null)
-  const [syncErrors, setSyncErrors] = useState<Array<{ id: string; message: string; scope: string; createdAt: string }>>([])
+  const [syncErrors, setSyncErrors] = useState<Array<{
+    id: string
+    message: string
+    backendReason?: string | null
+    scope: string
+    createdAt: string
+    payload?: unknown
+    mappedPayload?: unknown
+  }>>([])
   const [isPreparing, setIsPreparing] = useState(false)
   const organizationId = context?.organizationId
 
@@ -332,6 +350,31 @@ export default function OfflinePage() {
                   <p className="mt-1 text-xs text-red-700">
                     {formatDateTime(error.createdAt)}
                   </p>
+                  {error.backendReason ? (
+                    <p className="mt-2 text-xs text-red-800">
+                      Raison backend: {error.backendReason}
+                    </p>
+                  ) : null}
+                  {formatDebugPayload(error.payload) ? (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-white/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                        Payload envoye
+                      </p>
+                      <pre className="mt-2 overflow-x-auto text-[11px] text-red-900 whitespace-pre-wrap">
+                        {formatDebugPayload(error.payload)}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {formatDebugPayload(error.mappedPayload) ? (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-white/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                        Payload mappe
+                      </p>
+                      <pre className="mt-2 overflow-x-auto text-[11px] text-red-900 whitespace-pre-wrap">
+                        {formatDebugPayload(error.mappedPayload)}
+                      </pre>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>

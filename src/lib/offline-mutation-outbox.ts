@@ -401,7 +401,7 @@ export async function flushOfflineQueueByScope(scope: string) {
   const result = await runOfflineSync(context.organizationId, scope as OfflineModuleScope)
   writeOfflineDailySyncMeta({
     lastSyncedAt: new Date().toISOString(),
-    lastError: null,
+    lastError: result.lastError ?? null,
   })
   emitQueueChanged()
   return result
@@ -475,7 +475,7 @@ export async function flushOfflineDailyQueue(options?: { itemId?: string }) {
   const result = await runOfflineSync(context.organizationId, scope)
   writeOfflineDailySyncMeta({
     lastSyncedAt: new Date().toISOString(),
-    lastError: null,
+    lastError: result.lastError ?? null,
   })
   emitQueueChanged()
   return result

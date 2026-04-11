@@ -126,6 +126,9 @@ export interface OfflineSyncError {
   commandId?: string | null
   scope: OfflineModuleScope
   message: string
+  backendReason?: string | null
   conflict: boolean
+  payload?: unknown
+  mappedPayload?: unknown
   createdAt: string
 }

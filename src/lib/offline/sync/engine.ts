@@ -17,6 +17,7 @@ import {
   stockMovementRepository,
 } from "@/src/lib/offline/repositories"
 import { logSyncError } from "@/src/lib/offline/sync/errors"
+import { buildDailyServerPayload, type DailySyncDebugPayload } from "@/src/lib/offline/sync/daily"
 import { saveSyncMapping } from "@/src/lib/offline/sync/mappings"
 import {
   deleteSyncCommand,
@@ -38,11 +39,27 @@ function isConflictMessage(message?: string | null) {
 
 async function replayCommand(command: OfflineSyncCommand) {
   switch (command.action) {
-    case "CREATE_DAILY_RECORD":
-      return createDailyRecord({
-        ...(command.payload as Record<string, unknown>),
-        date: new Date((command.payload as { dateIso: string }).dateIso),
+    case "CREATE_DAILY_RECORD": {
+      const { serverPayload, debug } = await buildDailyServerPayload(
+        command.payload as Parameters<typeof buildDailyServerPayload>[0],
+      )
+
+      console.info("[offline-sync][daily] payload before mapping", {
+        commandId: command.id,
+        localId: command.localId,
+        payload: debug.originalPayload,
       })
+      console.info("[offline-sync][daily] payload after mapping", {
+        commandId: command.id,
+        localId: command.localId,
+        payload: debug.mappedPayload,
+      })
+
+      return {
+        debug,
+        result: await createDailyRecord(serverPayload),
+      }
+    }
     case "CREATE_EXPENSE":
       return createExpense(command.payload)
     case "CREATE_VACCINATION":
@@ -163,12 +180,22 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
   let processed = 0
   let synced = 0
   let failed = 0
+  let lastError: string | null = null
 
   for (const command of commands) {
     processed += 1
 
     try {
-      const result = await replayCommand(command)
+      const replayed = await replayCommand(command)
+      const result =
+        replayed && typeof replayed === "object" && "result" in replayed
+          ? replayed.result
+          : replayed
+      const debug =
+        replayed && typeof replayed === "object" && "debug" in replayed
+          ? (replayed.debug as DailySyncDebugPayload | undefined)
+          : undefined
+
       if (result && typeof result === "object" && "success" in result && result.success) {
         await markLocalRecordAfterSync(
           command,
@@ -199,8 +226,12 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
         commandId: command.id,
         scope: command.scope,
         message: errorMessage ?? "SYNC_FAILED",
+        backendReason: errorMessage ?? "SYNC_FAILED",
         conflict,
+        payload: debug?.originalPayload ?? command.payload,
+        mappedPayload: debug?.mappedPayload,
       })
+      lastError = errorMessage ?? "SYNC_FAILED"
       failed += 1
     } catch (error) {
       if (isTemporarySyncError(error)) {
@@ -223,12 +254,16 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
         commandId: command.id,
         scope: command.scope,
         message,
+        backendReason: null,
         conflict: false,
+        payload: command.payload,
+        mappedPayload: null,
       })
+      lastError = message
       failed += 1
     }
   }
 
   emitOfflineEvent(OFFLINE_EVENTS.syncChanged)
-  return { processed, synced, failed }
+  return { processed, synced, failed, lastError }
 }
