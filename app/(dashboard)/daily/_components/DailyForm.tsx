@@ -12,6 +12,7 @@ import {
   createDailyRecord,
   updateDailyRecord,
 } from "@/src/actions/daily-records"
+import { validateCreateDailyRecordInput } from "@/src/lib/daily-record-validation"
 import { fetchLocalWeather } from "@/src/lib/weather"
 import {
   clearFormDraft,
@@ -70,6 +71,12 @@ type ParsedValues = {
   humidity?: number
   observations?: string
   audioRecordUrl?: string | null
+}
+
+interface DailyActionFailure {
+  success: false
+  error: string
+  fieldErrors?: Record<string, string[]>
 }
 
 interface DailyFormProps {
@@ -132,6 +139,7 @@ export function DailyForm({
     ),
   )
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitFieldErrors, setSubmitFieldErrors] = useState<Record<string, string[]>>({})
   const [draftReady, setDraftReady] = useState(false)
   const [isFetchingWeather, setIsFetchingWeather] = useState(false)
 
@@ -297,6 +305,47 @@ export function DailyForm({
     await clearFormDraft({ formKey: draftFormKey, organizationId })
   }
 
+  function buildCreatePayload(data: ParsedValues) {
+    return {
+      clientMutationId: createClientMutationId("daily"),
+      organizationId,
+      batchId,
+      date: new Date(`${selectedDate}T00:00:00Z`),
+      mortality: data.mortality,
+      feedKg: data.feedKg,
+      feedStockId: data.feedStockId,
+      waterLiters: data.waterLiters,
+      avgWeightG: data.avgWeightG,
+      temperatureMin: data.temperatureMin,
+      temperatureMax: data.temperatureMax,
+      humidity: data.humidity,
+      observations: data.observations,
+      audioRecordUrl: data.audioRecordUrl,
+    }
+  }
+
+  function applyActionFailure(result: DailyActionFailure, payload: unknown) {
+    console.error("[daily-form] validation/action failure", {
+      payload,
+      error: result.error,
+      fieldErrors: result.fieldErrors ?? null,
+      criticalFields: {
+        organizationId,
+        batchId,
+        feedStockId: typeof payload === "object" && payload !== null && "feedStockId" in payload
+          ? (payload as { feedStockId?: string }).feedStockId ?? null
+          : null,
+        date: typeof payload === "object" && payload !== null && "date" in payload
+          ? (payload as { date?: Date }).date?.toISOString?.() ?? String((payload as { date?: unknown }).date)
+          : null,
+        userId: "derived-from-session-server-side",
+      },
+    })
+
+    setSubmitFieldErrors(result.fieldErrors ?? {})
+    setSubmitError(result.error)
+  }
+
   const queueCurrentEntry = async (data: ParsedValues) => {
     const clientMutationId = createClientMutationId("daily")
     const dateIso = new Date(`${selectedDate}T00:00:00Z`).toISOString()
@@ -325,6 +374,7 @@ export function DailyForm({
 
   const onSubmit = async (data: ParsedValues) => {
     setSubmitError(null)
+    setSubmitFieldErrors({})
 
     if (isEditMode && editingRecordId) {
       const result = await updateDailyRecord({
@@ -358,29 +408,49 @@ export function DailyForm({
         return
       }
 
-      const result = await createDailyRecord({
-        clientMutationId: createClientMutationId("daily"),
-        organizationId,
-        batchId,
-        date: new Date(`${selectedDate}T00:00:00Z`),
-        mortality: data.mortality,
-        feedKg: data.feedKg,
-        feedStockId: data.feedStockId,
-        waterLiters: data.waterLiters,
-        avgWeightG: data.avgWeightG,
-        temperatureMin: data.temperatureMin,
-        temperatureMax: data.temperatureMax,
-        humidity: data.humidity,
-        observations: data.observations,
-        audioRecordUrl: data.audioRecordUrl,
+      const payload = buildCreatePayload(data)
+      const localValidation = validateCreateDailyRecordInput(payload)
+
+      if (!localValidation.success) {
+        console.error("[daily-form] local validation failed", {
+          payload,
+          fieldErrors: localValidation.fieldErrors,
+          issues: localValidation.issues,
+          criticalFields: {
+            organizationId,
+            batchId,
+            feedStockId: payload.feedStockId ?? null,
+            date: payload.date.toISOString(),
+            userId: "derived-from-session-server-side",
+          },
+        })
+        setSubmitFieldErrors(localValidation.fieldErrors)
+        setSubmitError(localValidation.message)
+        return
+      }
+
+      console.info("[daily-form] local validation passed", {
+        payload: {
+          ...payload,
+          date: payload.date.toISOString(),
+        },
+        criticalFields: {
+          organizationId,
+          batchId,
+          feedStockId: payload.feedStockId ?? null,
+          date: payload.date.toISOString(),
+          userId: "derived-from-session-server-side",
+        },
       })
+
+      const result = await createDailyRecord(localValidation.data)
 
       if (result.success) {
         await clearDrafts()
         toast.success("Saisie enregistree")
         onSuccess()
       } else {
-        setSubmitError(result.error)
+        applyActionFailure(result as DailyActionFailure, payload)
       }
     } catch (error) {
       if (!isOfflineFailure(error)) {
@@ -398,7 +468,16 @@ export function DailyForm({
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
           role="alert"
         >
-          {submitError}
+          <p>{submitError}</p>
+          {Object.keys(submitFieldErrors).length > 0 ? (
+            <div className="mt-2 space-y-1 text-xs">
+              {Object.entries(submitFieldErrors).map(([field, messages]) => (
+                <p key={field}>
+                  <span className="font-semibold">{field}</span>: {messages.join(", ")}
+                </p>
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -452,6 +531,11 @@ export function DailyForm({
             La quantite distribuee sera automatiquement sortie du stock choisi.
           </p>
         )}
+        {submitFieldErrors.feedStockId ? (
+          <p className="text-sm text-red-600" role="alert">
+            {submitFieldErrors.feedStockId.join(", ")}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50/50 p-4">

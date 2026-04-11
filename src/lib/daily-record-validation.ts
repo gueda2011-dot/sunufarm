@@ -49,3 +49,30 @@ export function formatFieldErrors(fieldErrors: Record<string, string[] | undefin
 export function buildInvalidInputMessage(fieldErrors: Record<string, string[] | undefined>) {
   return formatFieldErrors(fieldErrors) ?? "Donnees invalides"
 }
+
+export function validateCreateDailyRecordInput(payload: unknown) {
+  const parsed = createDailyRecordSchema.safeParse(payload)
+
+  if (parsed.success) {
+    return {
+      success: true as const,
+      data: parsed.data,
+      fieldErrors: {} as Record<string, string[]>,
+      message: null,
+    }
+  }
+
+  const fieldErrors = flattenZodFieldErrors(parsed.error)
+
+  return {
+    success: false as const,
+    fieldErrors,
+    message: buildInvalidInputMessage(fieldErrors),
+    issues: parsed.error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+      code: issue.code,
+      input: "input" in issue ? issue.input : undefined,
+    })),
+  }
+}

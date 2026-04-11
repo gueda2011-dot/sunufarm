@@ -28,7 +28,10 @@ import {
 import {
   createDailyRecordSchema,
   dailyMortalityDetailSchema,
+  flattenZodFieldErrors,
+  buildInvalidInputMessage,
 } from "@/src/lib/daily-record-validation"
+import { invalidInput } from "@/src/lib/action-result"
 import {
   Prisma,
   UserRole,
@@ -487,7 +490,8 @@ export async function createDailyRecord(
   try {
     const parsed = createDailyRecordSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
+      const fieldErrors = flattenZodFieldErrors(parsed.error)
+      return invalidInput(buildInvalidInputMessage(fieldErrors), fieldErrors)
     }
 
     const {
@@ -858,3 +862,5 @@ export async function updateDailyRecord(
     return { success: false, error: "Impossible de mettre à jour la saisie" }
   }
 }
+
+
