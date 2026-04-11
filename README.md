@@ -145,7 +145,7 @@ Pour decouvrir SunuFarm sans engagement. Inclut 1 ferme, 1 lot actif, la saisie 
 
 Pour organiser l'exploitation au quotidien. Inclut les lots illimites, les ventes, depenses, stock basique, historique complet et export PDF avec watermark.
 
-### Pro - 8 000 FCFA / mois
+### Pro - 10 000 FCFA / mois
 
 Notre offre recommandee pour les elevages qui veulent proteger leur marge. Inclut en plus :
 
@@ -156,7 +156,7 @@ Notre offre recommandee pour les elevages qui veulent proteger leur marge. Inclu
 - projection marge finale
 - export PDF sans watermark
 
-### Business - 20 000 FCFA / mois
+### Business - 25 000 FCFA / mois
 
 Pour les structures multi-sites ou les equipes de production qui ont besoin d'un pilotage global. Inclut tout le plan Pro, plus :
 

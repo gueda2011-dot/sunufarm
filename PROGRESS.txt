@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-11 (Session 70)
+> Derniere mise a jour : 2026-04-11 (Session 71)
 
 ---
 
@@ -65,6 +65,68 @@
 | Admin plateforme | Fonctionnel, avec supervision de base et integrite stock V1 |
 | Emails transactionnels | Fonctionnels si Resend est correctement configure |
 | Offline / sync terrain | V1 operationnelle sur shell critique, lectures locales et creations critiques |
+
+---
+
+## Session 71 - 2026-04-11
+
+### Travail effectue
+
+**Revue securite acces paywall + ajustement tarifaire**
+
+#### Audit securite acces control
+
+Objectif : s'assurer qu'un appel direct aux Server Actions ou aux routes API ne peut jamais debloquer gratuitement une fonctionnalite STARTER / PRO / BUSINESS.
+
+**Vulnerabilite critique corrigee — `src/actions/organizations.ts`**
+
+Les 5 mutations de gestion d'equipe (`addUserToOrganization`, `updateUserRole`, `updateUserModulePermissions`, `updateUserNotificationPreference`, `removeUserFromOrganization`) verifiaient l'appartenance a l'org et le role OWNER mais pas l'entitlement `TEAM_ROLES` (BUSINESS uniquement). Un OWNER sur un plan inferieur pouvait appeler ces actions directement (DevTools / curl) et gerer des membres sans souscrire.
+
+Correctif : ajout du gate `resolveEntitlementGate(subscription, "TEAM_ROLES")` dans chacune des 5 fonctions, apres `requireOrganizationModuleContext`.
+
+**Vulnerabilite haute corrigee — `src/actions/predictive.ts` (fonctions Internal)**
+
+`getStockPredictionsInternal`, `getBatchMortalityPredictionsInternal`, `getBatchMarginPredictionsInternal` etaient exportees depuis un fichier `"use server"`. En Next.js 14, tout export d'un tel fichier est une Server Action callable via POST sans les gates d'abonnement et de membership. N'importe quel utilisateur authentifie pouvait appeler ces fonctions avec l'`organizationId` d'une org tierce.
+
+Correctif : extraction des 3 fonctions de calcul dans `src/lib/predictive-compute.ts` (sans `"use server"`). Suppression des exports Internal de `predictive.ts`. `notifications.ts` et `business.ts` importent desormais depuis le nouveau module lib.
+
+**Vulnerabilite moyenne corrigee — `getStockTrends`**
+
+Verifiait l'acces module STOCK mais pas l'entitlement `PREDICTIVE_STOCK_ALERTS` (PRO+). La page stock gatait correctement au niveau UI, mais un appel direct a la Server Action contournait ce controle.
+
+Correctif : ajout du gate `PREDICTIVE_STOCK_ALERTS` dans `getStockTrends`, identique au pattern de `getStockPredictions`.
+
+**Points confirmes sains lors de l'audit**
+
+- `getOrganizationSubscription` : toujours DB-fetched, jamais de confiance client
+- `gateHasFullAccess` : retourne `true` uniquement si `access === "full"`, "preview" est bloque
+- `profitability.ts` : gate avant tout calcul
+- Les 3 routes API `/api/reports/*` : auth + membership + module + subscription gate a chaque niveau
+- Server Components : donnees financieres jamais serialisees vers le client
+
+#### Ajustement tarifaire
+
+- **PRO** : 8 000 → 10 000 FCFA / mois (modifie dans `offer-catalog.ts` et `README.md`)
+- **BUSINESS** : 20 000 → 25 000 FCFA / mois (modifie dans `offer-catalog.ts` et `README.md`)
+- `subscriptions.ts` avait deja les nouveaux prix, seul `offer-catalog.ts` etait decale.
+
+#### Correctif build Vercel
+
+Turbopack traitait `export type { StockPredictionsResult }` dans `predictive.ts` comme une valeur d'action exportee et echouait a en creer un proxy runtime. Suppression de cette re-export de type — les types ne doivent pas etre exportes depuis des fichiers `"use server"`.
+
+**Regle retenue** : dans un fichier `"use server"`, n'exporter que des fonctions async. Jamais de types, interfaces ou valeurs non-action.
+
+### Resultat
+
+- Aucune fonctionnalite STARTER / PRO / BUSINESS n'est deblocable par appel direct aux Server Actions
+- `tsc --noEmit` : OK
+- `next build` : OK (Turbopack)
+- Prix PRO et BUSINESS mis a jour dans le catalogue et le README
+
+### Prochaine session recommandee
+
+- Appliquer la meme discipline de gate dans tout futur Server Action manipulant des donnees premium
+- Surveiller les exports des fichiers `"use server"` : uniquement des fonctions async
 
 ---
 
