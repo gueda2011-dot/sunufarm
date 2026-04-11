@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 import { writeOfflineSessionContext } from "@/src/lib/offline-session"
+import { prepareOfflineWorkspace } from "@/src/lib/offline/bootstrap"
 
 export function OfflineSessionBootstrap() {
   useEffect(() => {
@@ -13,7 +14,8 @@ export function OfflineSessionBootstrap() {
       .then(async (response) => {
         if (!response.ok) return
         const payload = await response.json()
-        writeOfflineSessionContext(payload)
+        await writeOfflineSessionContext(payload)
+        await prepareOfflineWorkspace(payload.organizationId)
       })
       .catch(() => undefined)
   }, [])

@@ -1,21 +1,26 @@
 "use client"
 
-import { createDailyRecord } from "@/src/actions/daily-records"
-import { createExpense } from "@/src/actions/expenses"
-import { createEggRecord } from "@/src/actions/eggs"
-import { createTreatment, createVaccination } from "@/src/actions/health"
-import { createPurchase } from "@/src/actions/purchases"
-import { createSale } from "@/src/actions/sales"
-import { createFeedMovement, createMedicineMovement } from "@/src/actions/stock"
-import { markOptimisticItemFailed, markOptimisticItemSynced, removeOptimisticItem } from "@/src/lib/offline-optimistic"
+import { emitOfflineEvent, OFFLINE_EVENTS, subscribeOfflineEvent } from "@/src/lib/offline/events"
 import {
-  openOfflineDb,
-  requestToPromise,
-} from "@/src/lib/offline-cache"
-import { OFFLINE_QUEUE_STORE } from "@/src/lib/offline-keys"
+  dailyRepository,
+  eggProductionRepository,
+  healthRepository,
+  purchasesRepository,
+  salesRepository,
+  stockMovementRepository,
+} from "@/src/lib/offline/repositories"
+import { createOfflineCommand } from "@/src/lib/offline/sync/commands"
+import { runOfflineSync } from "@/src/lib/offline/sync/engine"
+import {
+  deleteSyncCommand,
+  enqueueSyncCommand,
+  getSyncCommand,
+  listPendingSyncCommands,
+  updateSyncCommandStatus,
+} from "@/src/lib/offline/sync/queue"
+import type { OfflineModuleScope } from "@/src/lib/offline/types"
 
 const SYNC_META_KEY = "sunufarm:offline-sync-meta"
-const QUEUE_EVENT = "sunufarm:offline-outbox-changed"
 
 export interface OfflineDailyQueuePayload {
   clientMutationId: string
@@ -34,16 +39,6 @@ export interface OfflineDailyQueuePayload {
   audioRecordUrl?: string | null
 }
 
-export interface OfflineExpenseQueuePayload {
-  clientMutationId: string
-  organizationId: string
-  date: string
-  description: string
-  amountFcfa: number
-  reference?: string
-  notes?: string
-}
-
 export interface OfflineVaccinationQueuePayload {
   clientMutationId: string
   organizationId: string
@@ -55,6 +50,16 @@ export interface OfflineVaccinationQueuePayload {
   countVaccinated: number
   medicineStockId?: string
   medicineQuantity?: number
+  notes?: string
+}
+
+export interface OfflineExpenseQueuePayload {
+  clientMutationId: string
+  organizationId: string
+  date: string
+  description: string
+  amountFcfa: number
+  reference?: string
   notes?: string
 }
 
@@ -182,21 +187,13 @@ export interface OfflineQueueItem {
   lastError?: string
 }
 
-export interface OfflineDailyQueueItem extends OfflineQueueItem {
-  type: "CREATE_DAILY_RECORD"
-  payload: OfflineDailyQueuePayload
-}
-
 export interface OfflineDailySyncMeta {
   lastSyncedAt: string | null
   lastError: string | null
 }
 
-export type OfflineSyncMeta = OfflineDailySyncMeta
-
 function emitQueueChanged() {
-  if (typeof window === "undefined") return
-  window.dispatchEvent(new CustomEvent(QUEUE_EVENT))
+  emitOfflineEvent(OFFLINE_EVENTS.syncChanged)
 }
 
 function getDefaultSyncMeta(): OfflineDailySyncMeta {
@@ -228,26 +225,6 @@ function writeOfflineDailySyncMeta(meta: OfflineDailySyncMeta) {
   window.localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta))
 }
 
-function withStore<T>(
-  mode: IDBTransactionMode,
-  handler: (store: IDBObjectStore) => Promise<T>,
-): Promise<T> {
-  return openOfflineDb().then((db) => new Promise<T>((resolve, reject) => {
-    const transaction = db.transaction(OFFLINE_QUEUE_STORE, mode)
-    const store = transaction.objectStore(OFFLINE_QUEUE_STORE)
-
-    transaction.onerror = () => reject(transaction.error ?? new Error("INDEXED_DB_TX_FAILED"))
-    transaction.onabort = () => reject(transaction.error ?? new Error("INDEXED_DB_TX_ABORTED"))
-    transaction.addEventListener("complete", () => db.close())
-
-    void handler(store).then(resolve).catch(reject)
-  }))
-}
-
-function createQueueKey(parts: string[]) {
-  return parts.join(":")
-}
-
 export function createClientMutationId(prefix: string) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${prefix}:${crypto.randomUUID()}`
@@ -256,55 +233,31 @@ export function createClientMutationId(prefix: string) {
   return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`
 }
 
-function buildQueueLabel(item: {
-  type: OfflineQueueItemType
-  payload: OfflineQueuePayload
-}) {
-  switch (item.type) {
-    case "CREATE_DAILY_RECORD": {
-      const payload = item.payload as OfflineDailyQueuePayload
-      return `Saisie journaliere ${payload.batchId} - ${payload.dateIso.slice(0, 10)}`
-    }
-    case "CREATE_EXPENSE": {
-      const payload = item.payload as OfflineExpenseQueuePayload
-      return `Depense - ${payload.description}`
-    }
-    case "CREATE_VACCINATION": {
-      const payload = item.payload as OfflineVaccinationQueuePayload
-      return `Vaccination ${payload.vaccineName}`
-    }
-    case "CREATE_TREATMENT": {
-      const payload = item.payload as OfflineTreatmentQueuePayload
-      return `Traitement ${payload.medicineName}`
-    }
-    case "CREATE_SALE": {
-      const payload = item.payload as OfflineSaleQueuePayload
-      return `Vente ${payload.productType} - ${payload.saleDate}`
-    }
-    case "CREATE_FEED_MOVEMENT": {
-      const payload = item.payload as OfflineFeedMovementQueuePayload
-      return `Mouvement aliment ${payload.type} - ${payload.date}`
-    }
-    case "CREATE_MEDICINE_MOVEMENT": {
-      const payload = item.payload as OfflineMedicineMovementQueuePayload
-      return `Mouvement medicament ${payload.type} - ${payload.date}`
-    }
-    case "CREATE_EGG_RECORD": {
-      const payload = item.payload as OfflineEggRecordQueuePayload
-      return `Production oeufs - ${payload.date.slice(0, 10)}`
-    }
-    case "CREATE_PURCHASE": {
-      const payload = item.payload as OfflinePurchaseQueuePayload
-      return `Achat fournisseur - ${payload.purchaseDate.slice(0, 10)}`
-    }
+function buildQueueLabel(type: OfflineQueueItemType, payload: OfflineQueuePayload) {
+  switch (type) {
+    case "CREATE_DAILY_RECORD":
+      return `Saisie journaliere ${(payload as OfflineDailyQueuePayload).dateIso.slice(0, 10)}`
+    case "CREATE_EXPENSE":
+      return `Depense ${(payload as OfflineExpenseQueuePayload).description}`
+    case "CREATE_VACCINATION":
+      return `Vaccination ${(payload as OfflineVaccinationQueuePayload).vaccineName}`
+    case "CREATE_TREATMENT":
+      return `Traitement ${(payload as OfflineTreatmentQueuePayload).medicineName}`
+    case "CREATE_SALE":
+      return `Vente ${(payload as OfflineSaleQueuePayload).saleDate}`
+    case "CREATE_FEED_MOVEMENT":
+      return `Mouvement aliment ${(payload as OfflineFeedMovementQueuePayload).type}`
+    case "CREATE_MEDICINE_MOVEMENT":
+      return `Mouvement medicament ${(payload as OfflineMedicineMovementQueuePayload).type}`
+    case "CREATE_EGG_RECORD":
+      return `Production oeufs ${(payload as OfflineEggRecordQueuePayload).date}`
+    case "CREATE_PURCHASE":
+      return `Achat ${(payload as OfflinePurchaseQueuePayload).purchaseDate}`
   }
 }
 
-function buildQueueScope(item: {
-  type: OfflineQueueItemType
-  payload: OfflineQueuePayload
-}) {
-  switch (item.type) {
+function buildQueueScope(type: OfflineQueueItemType): OfflineModuleScope {
+  switch (type) {
     case "CREATE_DAILY_RECORD":
       return "daily"
     case "CREATE_EXPENSE":
@@ -324,47 +277,112 @@ function buildQueueScope(item: {
   }
 }
 
-function isLikelyOfflineError(error: unknown) {
-  if (typeof navigator !== "undefined" && !navigator.onLine) return true
-  if (!(error instanceof Error)) return false
-  return /fetch|network|offline|failed to fetch/i.test(error.message)
-}
-
-function isAlreadyCreatedError(message: string | undefined) {
-  return !!message && /Une saisie existe deja pour ce lot a cette date/i.test(message)
-}
-
-function isAlreadyHandledError(item: OfflineQueueItem, message: string | undefined) {
-  if (!message) return false
-
-  if (item.type === "CREATE_DAILY_RECORD") {
-    return isAlreadyCreatedError(message)
+async function createLocalShadow(type: OfflineQueueItemType, payload: OfflineQueuePayload) {
+  switch (type) {
+    case "CREATE_DAILY_RECORD":
+      await dailyRepository.createLocal({
+        localId: (payload as OfflineDailyQueuePayload).clientMutationId,
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
+    case "CREATE_EXPENSE":
+      await purchasesRepository.createLocal({
+        localId: (payload as OfflineExpenseQueuePayload).clientMutationId,
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
+    case "CREATE_VACCINATION":
+    case "CREATE_TREATMENT":
+      await healthRepository.createLocal({
+        localId:
+          "clientMutationId" in payload ? payload.clientMutationId : createClientMutationId("health"),
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
+    case "CREATE_SALE":
+      await salesRepository.createLocal({
+        localId: (payload as OfflineSaleQueuePayload).clientMutationId,
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
+    case "CREATE_FEED_MOVEMENT":
+    case "CREATE_MEDICINE_MOVEMENT":
+      await stockMovementRepository.createLocal({
+        localId:
+          "clientMutationId" in payload ? payload.clientMutationId : createClientMutationId("stock"),
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
+    case "CREATE_EGG_RECORD":
+      await eggProductionRepository.createLocal({
+        localId: (payload as OfflineEggRecordQueuePayload).clientMutationId,
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
+    case "CREATE_PURCHASE":
+      await purchasesRepository.createLocal({
+        localId: (payload as OfflinePurchaseQueuePayload).clientMutationId,
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
   }
-
-  if (item.type === "CREATE_EGG_RECORD") {
-    return /record.*oeufs.*existe.*deja|un record d.?oeufs existe/i.test(message)
-  }
-
-  return false
 }
 
-function getOptimisticId(item: OfflineQueueItem): string | null {
-  const payload = item.payload as { clientMutationId?: string }
-  return payload.clientMutationId ?? null
-}
-
-async function listOfflineQueueItems(): Promise<OfflineQueueItem[]> {
-  return withStore<OfflineQueueItem[]>("readonly", async (store) => {
-    const request = store.getAll()
-    return requestToPromise(request)
+async function enqueueOfflineItem(
+  type: OfflineQueueItemType,
+  payload: OfflineQueuePayload,
+) {
+  const localId =
+    "clientMutationId" in payload ? payload.clientMutationId : createClientMutationId(type.toLowerCase())
+  const scope = buildQueueScope(type)
+  const command = createOfflineCommand({
+    organizationId: payload.organizationId,
+    entityType: scope,
+    scope,
+    action: type,
+    localId,
+    payload,
+    label: buildQueueLabel(type, payload),
   })
+
+  await createLocalShadow(type, payload)
+  await enqueueSyncCommand(command)
+  emitQueueChanged()
+  return command
 }
 
 export async function listPendingOfflineDailyQueueItems(): Promise<OfflineQueueItem[]> {
-  const items = await listOfflineQueueItems()
-  return items
-    .filter((item) => item.status === "pending" || item.status === "failed")
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const context = await import("@/src/lib/offline-session").then((module) =>
+    module.readOfflineSessionContext({ allowExpired: true }),
+  )
+  if (!context?.organizationId) return []
+
+  const items = await listPendingSyncCommands(context.organizationId)
+  return items.map((item) => ({
+    id: item.id,
+    type: item.action as OfflineQueueItemType,
+    status: item.status === "pending" ? "pending" : "failed",
+    payload: item.payload as unknown as OfflineQueuePayload,
+    label: item.label ?? item.id,
+    scope: item.scope,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    lastError: item.error ?? undefined,
+  }))
 }
 
 export const listPendingOfflineQueueItems = listPendingOfflineDailyQueueItems
@@ -375,392 +393,98 @@ export async function listPendingOfflineQueueItemsByScope(scope: string) {
 }
 
 export async function flushOfflineQueueByScope(scope: string) {
-  const items = await listPendingOfflineQueueItemsByScope(scope)
-  let processed = 0
-  let synced = 0
+  const context = await import("@/src/lib/offline-session").then((module) =>
+    module.readOfflineSessionContext({ allowExpired: true }),
+  )
+  if (!context?.organizationId) return { processed: 0, synced: 0, failed: 0 }
 
-  for (const item of items) {
-    const result = await flushOfflineDailyQueue({ itemId: item.id })
-    processed += result.processed
-    synced += result.synced
-  }
-
-  const remainingItems = await listPendingOfflineQueueItemsByScope(scope)
-
-  return {
-    processed,
-    synced,
-    failed: remainingItems.length,
-  }
-}
-
-async function getOfflineQueueItem(id: string): Promise<OfflineQueueItem | undefined> {
-  return withStore<OfflineQueueItem | undefined>("readonly", async (store) => {
-    const request = store.get(id)
-    return requestToPromise(request)
+  const result = await runOfflineSync(context.organizationId, scope as OfflineModuleScope)
+  writeOfflineDailySyncMeta({
+    lastSyncedAt: new Date().toISOString(),
+    lastError: null,
   })
-}
-
-async function putQueueItem(item: OfflineQueueItem) {
-  await withStore<void>("readwrite", (store) => requestToPromise(store.put(item)).then(() => undefined))
   emitQueueChanged()
+  return result
 }
 
 export async function deleteOfflineDailyQueueItem(id: string) {
-  const item = await getOfflineQueueItem(id)
-  await withStore<void>("readwrite", (store) => requestToPromise(store.delete(id)).then(() => undefined))
-  const optimisticId = item ? getOptimisticId(item) : null
-  if (optimisticId) {
-    await removeOptimisticItem(optimisticId)
-  }
+  await deleteSyncCommand(id)
   emitQueueChanged()
 }
 
 export const deleteOfflineQueueItem = deleteOfflineDailyQueueItem
 
 export async function retryOfflineDailyQueueItem(id: string) {
-  const item = await getOfflineQueueItem(id)
-  if (!item) return null
+  const current = await getSyncCommand(id)
+  if (!current) return null
 
-  const nextItem: OfflineQueueItem = {
-    ...item,
-    status: "pending",
-    updatedAt: new Date().toISOString(),
-    lastError: undefined,
-  }
-
-  await putQueueItem(nextItem)
-  return nextItem
+  const next = await updateSyncCommandStatus(id, "pending", {
+    error: null,
+  })
+  emitQueueChanged()
+  return next
 }
 
 export const retryOfflineQueueItem = retryOfflineDailyQueueItem
 
-async function enqueueOfflineItem(
-  type: OfflineQueueItemType,
-  payload: OfflineQueuePayload,
-  id: string,
-): Promise<OfflineQueueItem> {
-  const now = new Date().toISOString()
-  const item: OfflineQueueItem = {
-    id,
-    type,
-    status: "pending",
-    payload,
-    label: buildQueueLabel({ type, payload }),
-    scope: buildQueueScope({ type, payload }),
-    createdAt: now,
-    updatedAt: now,
-  }
-
-  await putQueueItem(item)
-  return item
-}
-
-export async function enqueueOfflineDailyRecord(
-  payload: OfflineDailyQueuePayload,
-): Promise<OfflineDailyQueueItem> {
-  return enqueueOfflineItem(
-    "CREATE_DAILY_RECORD",
-    payload,
-    createQueueKey(["daily", payload.organizationId, payload.batchId, payload.dateIso]),
-  ) as Promise<OfflineDailyQueueItem>
+export async function enqueueOfflineDailyRecord(payload: OfflineDailyQueuePayload) {
+  return enqueueOfflineItem("CREATE_DAILY_RECORD", payload)
 }
 
 export async function enqueueOfflineExpense(payload: OfflineExpenseQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_EXPENSE",
-    payload,
-    createQueueKey(["expense", payload.organizationId, payload.date, payload.description]),
-  )
+  return enqueueOfflineItem("CREATE_EXPENSE", payload)
 }
 
 export async function enqueueOfflineVaccination(payload: OfflineVaccinationQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_VACCINATION",
-    payload,
-    createQueueKey(["vaccination", payload.organizationId, payload.batchId, payload.date, payload.vaccineName]),
-  )
+  return enqueueOfflineItem("CREATE_VACCINATION", payload)
 }
 
 export async function enqueueOfflineTreatment(payload: OfflineTreatmentQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_TREATMENT",
-    payload,
-    createQueueKey(["treatment", payload.organizationId, payload.batchId, payload.startDate, payload.medicineName]),
-  )
+  return enqueueOfflineItem("CREATE_TREATMENT", payload)
 }
 
 export async function enqueueOfflineSale(payload: OfflineSaleQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_SALE",
-    payload,
-    payload.clientMutationId,
-  )
+  return enqueueOfflineItem("CREATE_SALE", payload)
 }
 
 export async function enqueueOfflineFeedMovement(payload: OfflineFeedMovementQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_FEED_MOVEMENT",
-    payload,
-    payload.clientMutationId,
-  )
+  return enqueueOfflineItem("CREATE_FEED_MOVEMENT", payload)
 }
 
 export async function enqueueOfflineMedicineMovement(payload: OfflineMedicineMovementQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_MEDICINE_MOVEMENT",
-    payload,
-    payload.clientMutationId,
-  )
+  return enqueueOfflineItem("CREATE_MEDICINE_MOVEMENT", payload)
 }
 
 export async function enqueueOfflineEggRecord(payload: OfflineEggRecordQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_EGG_RECORD",
-    payload,
-    createQueueKey(["egg", payload.organizationId, payload.batchId, payload.date]),
-  )
+  return enqueueOfflineItem("CREATE_EGG_RECORD", payload)
 }
 
 export async function enqueueOfflinePurchase(payload: OfflinePurchaseQueuePayload) {
-  return enqueueOfflineItem(
-    "CREATE_PURCHASE",
-    payload,
-    payload.clientMutationId,
-  )
-}
-
-async function replayQueueItem(item: OfflineQueueItem) {
-  switch (item.type) {
-    case "CREATE_DAILY_RECORD": {
-      const payload = item.payload as OfflineDailyQueuePayload
-      return createDailyRecord({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        batchId: payload.batchId,
-        date: new Date(payload.dateIso),
-        mortality: payload.mortality,
-        feedKg: payload.feedKg,
-        feedStockId: payload.feedStockId,
-        waterLiters: payload.waterLiters,
-        avgWeightG: payload.avgWeightG,
-        observations: payload.observations,
-        temperatureMin: payload.temperatureMin,
-        temperatureMax: payload.temperatureMax,
-        humidity: payload.humidity,
-        audioRecordUrl: payload.audioRecordUrl,
-      })
-    }
-    case "CREATE_EXPENSE": {
-      const payload = item.payload as OfflineExpenseQueuePayload
-      return createExpense({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        description: payload.description,
-        amountFcfa: payload.amountFcfa,
-        date: payload.date,
-        reference: payload.reference,
-        notes: payload.notes,
-      })
-    }
-    case "CREATE_VACCINATION": {
-      const payload = item.payload as OfflineVaccinationQueuePayload
-      return createVaccination({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        batchId: payload.batchId,
-        date: new Date(payload.date),
-        vaccineName: payload.vaccineName,
-        route: payload.route,
-        dose: payload.dose,
-        countVaccinated: payload.countVaccinated,
-        medicineStockId: payload.medicineStockId,
-        medicineQuantity: payload.medicineQuantity,
-        notes: payload.notes,
-      })
-    }
-    case "CREATE_TREATMENT": {
-      const payload = item.payload as OfflineTreatmentQueuePayload
-      return createTreatment({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        batchId: payload.batchId,
-        startDate: new Date(payload.startDate),
-        medicineName: payload.medicineName,
-        dose: payload.dose,
-        durationDays: payload.durationDays,
-        countTreated: payload.countTreated,
-        medicineStockId: payload.medicineStockId,
-        medicineQuantity: payload.medicineQuantity,
-        indication: payload.indication,
-        notes: payload.notes,
-      })
-    }
-    case "CREATE_SALE": {
-      const payload = item.payload as OfflineSaleQueuePayload
-      return createSale({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        customerId: payload.customerId,
-        saleDate: payload.saleDate,
-        productType: payload.productType,
-        notes: payload.notes,
-        items: payload.items,
-      })
-    }
-    case "CREATE_FEED_MOVEMENT": {
-      const payload = item.payload as OfflineFeedMovementQueuePayload
-      return createFeedMovement({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        feedStockId: payload.feedStockId,
-        type: payload.type,
-        quantityKg: payload.quantityKg,
-        unitPriceFcfa: payload.unitPriceFcfa,
-        batchId: payload.batchId,
-        reference: payload.reference,
-        notes: payload.notes,
-        date: new Date(payload.date),
-      })
-    }
-    case "CREATE_MEDICINE_MOVEMENT": {
-      const payload = item.payload as OfflineMedicineMovementQueuePayload
-      return createMedicineMovement({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        medicineStockId: payload.medicineStockId,
-        type: payload.type,
-        quantity: payload.quantity,
-        unitPriceFcfa: payload.unitPriceFcfa,
-        batchId: payload.batchId,
-        reference: payload.reference,
-        notes: payload.notes,
-        date: new Date(payload.date),
-      })
-    }
-    case "CREATE_EGG_RECORD": {
-      const payload = item.payload as OfflineEggRecordQueuePayload
-      return createEggRecord({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        batchId: payload.batchId,
-        date: new Date(payload.date),
-        totalEggs: payload.totalEggs,
-        sellableEggs: payload.sellableEggs,
-        brokenEggs: payload.brokenEggs ?? 0,
-        dirtyEggs: payload.dirtyEggs ?? 0,
-        smallEggs: payload.smallEggs ?? 0,
-        passageCount: payload.passageCount ?? 1,
-        observations: payload.observations,
-      })
-    }
-    case "CREATE_PURCHASE": {
-      const payload = item.payload as OfflinePurchaseQueuePayload
-      return createPurchase({
-        clientMutationId: payload.clientMutationId,
-        organizationId: payload.organizationId,
-        supplierId: payload.supplierId,
-        purchaseDate: payload.purchaseDate,
-        reference: payload.reference,
-        notes: payload.notes,
-        items: payload.items,
-      })
-    }
-  }
+  return enqueueOfflineItem("CREATE_PURCHASE", payload)
 }
 
 export async function flushOfflineDailyQueue(options?: { itemId?: string }) {
-  const targetItem = options?.itemId ? await getOfflineQueueItem(options.itemId) : null
-  const items = targetItem
-    ? [targetItem]
-    : options?.itemId
-      ? []
-      : await listPendingOfflineDailyQueueItems()
+  const context = await import("@/src/lib/offline-session").then((module) =>
+    module.readOfflineSessionContext({ allowExpired: true }),
+  )
+  if (!context?.organizationId) return { processed: 0, synced: 0, failed: 0 }
 
-  if (items.length === 0) {
-    const previous = readOfflineDailySyncMeta()
-    writeOfflineDailySyncMeta({
-      lastSyncedAt: previous.lastSyncedAt ?? new Date().toISOString(),
-      lastError: null,
-    })
-    emitQueueChanged()
-    return { processed: 0, synced: 0, failed: 0 }
-  }
-
-  let synced = 0
-
-  for (const item of items) {
-    try {
-      const result = await replayQueueItem(item)
-
-      if (result.success || isAlreadyHandledError(item, result.error)) {
-        const optimisticId = getOptimisticId(item)
-        if (optimisticId) {
-          await markOptimisticItemSynced(optimisticId)
-        }
-        await deleteOfflineDailyQueueItem(item.id)
-        synced += 1
-        continue
-      }
-
-      await putQueueItem({
-        ...item,
-        status: "failed",
-        updatedAt: new Date().toISOString(),
-        lastError: result.error,
-      })
-      const optimisticId = getOptimisticId(item)
-      if (optimisticId) {
-        await markOptimisticItemFailed(optimisticId, result.error)
-      }
-    } catch (error) {
-      if (isLikelyOfflineError(error)) {
-        break
-      }
-
-      await putQueueItem({
-        ...item,
-        status: "failed",
-        updatedAt: new Date().toISOString(),
-        lastError: error instanceof Error ? error.message : "SYNC_FAILED",
-      })
-      const optimisticId = getOptimisticId(item)
-      if (optimisticId) {
-        await markOptimisticItemFailed(
-          optimisticId,
-          error instanceof Error ? error.message : "SYNC_FAILED",
-        )
-      }
-    }
-  }
-
-  const remainingItems = await listPendingOfflineDailyQueueItems()
+  const scope = options?.itemId
+    ? (await getSyncCommand(options.itemId))?.scope as OfflineModuleScope | undefined
+    : undefined
+  const result = await runOfflineSync(context.organizationId, scope)
   writeOfflineDailySyncMeta({
     lastSyncedAt: new Date().toISOString(),
-    lastError: remainingItems[0]?.lastError ?? null,
+    lastError: null,
   })
   emitQueueChanged()
-
-  return {
-    processed: items.length,
-    synced,
-    failed: remainingItems.length,
-  }
+  return result
 }
 
 export const flushOfflineMutationOutbox = flushOfflineDailyQueue
 
 export function subscribeToOfflineDailyQueue(callback: () => void) {
-  if (typeof window === "undefined") {
-    return () => {}
-  }
-
-  const handler = () => callback()
-  window.addEventListener(QUEUE_EVENT, handler)
-
-  return () => {
-    window.removeEventListener(QUEUE_EVENT, handler)
-  }
+  return subscribeOfflineEvent(OFFLINE_EVENTS.syncChanged, callback)
 }
 
 export const subscribeToOfflineMutationOutbox = subscribeToOfflineDailyQueue

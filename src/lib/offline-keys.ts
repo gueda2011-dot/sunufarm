@@ -1,9 +1,10 @@
-export const OFFLINE_DB_NAME = "sunufarm-offline"
-export const OFFLINE_DB_VERSION = 2
+import { OFFLINE_DB_NAME, OFFLINE_DB_VERSION, OFFLINE_STORE_NAMES } from "@/src/lib/offline/schema"
 
-export const OFFLINE_QUEUE_STORE = "mutation-outbox"
-export const OFFLINE_RESOURCE_STORE = "resource-cache"
-export const OFFLINE_OPTIMISTIC_STORE = "optimistic-items"
+export { OFFLINE_DB_NAME, OFFLINE_DB_VERSION }
+
+export const OFFLINE_QUEUE_STORE = OFFLINE_STORE_NAMES.syncQueue
+export const OFFLINE_RESOURCE_STORE = OFFLINE_STORE_NAMES.legacyResourceCache
+export const OFFLINE_OPTIMISTIC_STORE = OFFLINE_STORE_NAMES.legacyOptimistic
 
 export const OFFLINE_CACHE_EVENT = "sunufarm:offline-cache-changed"
 export const OFFLINE_SESSION_STORAGE_KEY = "sunufarm:offline-session-context"

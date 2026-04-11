@@ -12,7 +12,7 @@ export interface RecentRecordRow {
   audioRecordUrl?: string | null
   isLocked?: boolean
   isOptimistic?: boolean
-  syncStatus?: "pending" | "failed" | "synced"
+  syncStatus?: "pending" | "failed" | "synced" | "conflict"
   syncError?: string
 }
 
@@ -101,10 +101,16 @@ export function RecentRecords({ records, isLoading, selectedDate }: RecentRecord
                             "ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold",
                             record.syncStatus === "failed"
                               ? "bg-red-100 text-red-700"
+                              : record.syncStatus === "conflict"
+                                ? "bg-orange-100 text-orange-700"
                               : "bg-amber-100 text-amber-700",
                           )}
                         >
-                          {record.syncStatus === "failed" ? "Erreur sync" : "En attente de sync"}
+                          {record.syncStatus === "failed"
+                            ? "Erreur sync"
+                            : record.syncStatus === "conflict"
+                              ? "Conflit sync"
+                              : "En attente de sync"}
                         </span>
                       ) : null}
                     </td>

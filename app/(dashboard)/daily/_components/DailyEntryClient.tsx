@@ -8,11 +8,16 @@ import { useOfflineData } from "@/src/hooks/useOfflineData"
 import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
 import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
 import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
-import { setCachedResource } from "@/src/lib/offline-cache"
+import { subscribeOfflineEvent, OFFLINE_EVENTS } from "@/src/lib/offline/events"
 import {
-  listOptimisticItems,
-  subscribeToOptimisticItems,
-} from "@/src/lib/offline-optimistic"
+  loadDailyBatchesFromLocal,
+  loadDailyFeedStocksFromLocal,
+  loadDailyRecordsFromLocal,
+  loadPendingDailyRecordsFromLocal,
+  saveDailyBatchesToLocal,
+  saveDailyFeedStocksToLocal,
+  saveDailyRecordsToLocal,
+} from "@/src/lib/offline/repositories/dailyRepository"
 import { DailyForm } from "./DailyForm"
 import { OfflineSyncCard } from "./OfflineSyncCard"
 import { RecentRecords, type RecentRecordRow } from "./RecentRecords"
@@ -83,12 +88,16 @@ export function DailyEntryClient({
     organizationId,
     initialData: initialBatches,
     ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: () => loadDailyBatchesFromLocal(organizationId),
+    localSaver: (data) => saveDailyBatchesToLocal(organizationId, data),
   })
   const { data: feedStocks = initialFeedStocks } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.dailyFeedStocks,
     organizationId,
     initialData: initialFeedStocks,
     ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: () => loadDailyFeedStocksFromLocal(organizationId),
+    localSaver: (data) => saveDailyFeedStocksToLocal(organizationId, data),
   })
 
   const [selectedBatchId, setSelectedBatchId] = useState<string>(() => {
@@ -112,6 +121,16 @@ export function DailyEntryClient({
     organizationId,
     ttlMs: OFFLINE_TTL_MS.records,
     enabled: !!selectedBatchId,
+    localLoader: () => (
+      selectedBatchId
+        ? loadDailyRecordsFromLocal(organizationId, selectedBatchId)
+        : Promise.resolve(undefined)
+    ),
+    localSaver: (data) => (
+      selectedBatchId
+        ? saveDailyRecordsToLocal(organizationId, data)
+        : Promise.resolve()
+    ),
   })
 
   const { data: onlineRecentRecords = [], isLoading: loadingRecords } = useQuery({
@@ -132,17 +151,9 @@ export function DailyEntryClient({
   })
 
   useEffect(() => {
-    if (!selectedBatchId || !isOnline) return
-
-    void setCachedResource({
-      key: OFFLINE_RESOURCE_KEYS.dailyRecords(selectedBatchId),
-      organizationId,
-      version: 1,
-      savedAt: new Date().toISOString(),
-      ttlMs: OFFLINE_TTL_MS.records,
-      data: onlineRecentRecords,
-    })
-  }, [isOnline, onlineRecentRecords, organizationId, selectedBatchId])
+    if (!selectedBatchId || onlineRecentRecords.length === 0) return
+    void saveDailyRecordsToLocal(organizationId, onlineRecentRecords)
+  }, [onlineRecentRecords, organizationId, selectedBatchId])
 
   const onlineRecordRows: RecentRecordRow[] = onlineRecentRecords.map((record) => ({
     ...record,
@@ -154,45 +165,36 @@ export function DailyEntryClient({
   }))
 
   useEffect(() => {
+    let cancelled = false
     async function refreshOptimisticRows() {
-      const items = await listOptimisticItems<{
-        batchId: string
-        dateIso: string
-        mortality: number
-        feedKg: number
-        waterLiters?: number
-        audioRecordUrl?: string | null
-      }>(organizationId, "daily")
-
-      setOptimisticRows(
-        items
-          .filter((item) => item.status !== "synced")
-          .filter((item) => item.data.batchId === selectedBatchId)
-          .map((item) => ({
-            id: item.id,
-            date: item.data.dateIso,
-            mortality: item.data.mortality,
-            feedKg: item.data.feedKg,
-            waterLiters: item.data.waterLiters,
-            audioRecordUrl: item.data.audioRecordUrl,
-            isOptimistic: true,
-            syncStatus: item.status,
-            syncError: item.error,
-          })),
-      )
+      if (!selectedBatchId) {
+        if (!cancelled) {
+          setOptimisticRows([])
+        }
+        return
+      }
+      const rows = await loadPendingDailyRecordsFromLocal(organizationId, selectedBatchId)
+      if (!cancelled) {
+        setOptimisticRows(rows)
+      }
     }
 
     void refreshOptimisticRows()
-    const unsubscribe = subscribeToOptimisticItems(() => {
+    const unsubscribeStorage = subscribeOfflineEvent(OFFLINE_EVENTS.storageChanged, () => {
+      void refreshOptimisticRows()
+    })
+    const unsubscribeSync = subscribeOfflineEvent(OFFLINE_EVENTS.syncChanged, () => {
       void refreshOptimisticRows()
     })
 
     return () => {
-      unsubscribe()
+      cancelled = true
+      unsubscribeStorage()
+      unsubscribeSync()
     }
   }, [organizationId, selectedBatchId])
 
-  const baseRows = isOnline ? onlineRecordRows : cachedRecordRows
+  const baseRows = cachedRecordRows.length > 0 ? cachedRecordRows : onlineRecordRows
   const mergedRecentRows = useMemo(() => {
     const nonDuplicateOptimisticRows = optimisticRows.filter((optimistic) => !baseRows.some((record) => (
       recordMatchesDate(record.date, new Date(optimistic.date).toISOString().substring(0, 10))

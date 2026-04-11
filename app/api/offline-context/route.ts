@@ -16,11 +16,16 @@ export async function GET() {
   return NextResponse.json({
     userId: session.user.id,
     organizationId: activeMembership.organizationId,
-    userRole: activeMembership.role,
-    farmPermissions: activeMembership.farmPermissions ?? [],
-    modulePermissions: activeMembership.modulePermissions ?? null,
+    displayName: session.user.name ?? activeMembership.organization.name,
+    role: activeMembership.role,
+    permissions: {
+      farmPermissions: activeMembership.farmPermissions ?? [],
+      modulePermissions: activeMembership.modulePermissions ?? null,
+    },
     organizationName: activeMembership.organization.name,
+    lastValidatedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(),
+    devicePrepared: false,
     savedAt: new Date().toISOString(),
   })
 }
-

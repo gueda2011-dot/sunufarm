@@ -11,7 +11,7 @@ interface OfflineSyncCardProps {
     id: string
     label: string
     createdAt: string
-    status: "pending" | "failed"
+    status: "pending" | "failed" | "conflict"
     lastError?: string
   }>
   onSync: () => void
@@ -97,10 +97,17 @@ export function OfflineSyncCard({
                   className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
                     item.status === "failed"
                       ? "bg-red-100 text-red-700"
-                      : "bg-amber-100 text-amber-700"
+                      : item.status === "conflict"
+                        ? "bg-orange-100 text-orange-700"
+                        :
+                          "bg-amber-100 text-amber-700"
                   }`}
                 >
-                  {item.status === "failed" ? "Erreur" : "En attente"}
+                  {item.status === "failed"
+                    ? "Erreur"
+                    : item.status === "conflict"
+                      ? "Conflit"
+                      : "En attente"}
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-gray-500">
@@ -111,7 +118,7 @@ export function OfflineSyncCard({
               )}
               {(onRetryItem || onRemoveItem) && (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {item.status === "failed" && onRetryItem ? (
+                  {(item.status === "failed" || item.status === "conflict") && onRetryItem ? (
                     <button
                       type="button"
                       onClick={() => onRetryItem(item.id)}

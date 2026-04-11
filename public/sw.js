@@ -1,5 +1,6 @@
-const CACHE_NAME = "sunufarm-v3"
+const CACHE_NAME = "sunufarm-app-shell-v4"
 const OFFLINE_URL = "/offline"
+const OFFLINE_FALLBACK_URL = "/offline?fallback=1"
 const CRITICAL_ROUTES = [
   "/dashboard",
   "/daily",
@@ -10,12 +11,18 @@ const CRITICAL_ROUTES = [
   "/eggs",
   "/purchases",
   "/batches",
+  "/sales",
   OFFLINE_URL,
+  OFFLINE_FALLBACK_URL,
 ]
 const APP_SHELL = [
+  "/",
   "/icon",
   "/apple-icon",
   "/manifest.webmanifest",
+  "/favicon.ico",
+  "/branding/icon-android-192.png",
+  "/branding/icon-flat-square-192.png",
 ]
 
 const OFFLINE_HTML = `<!doctype html>
@@ -119,6 +126,7 @@ async function precacheCriticalRoutes(cache) {
     [...APP_SHELL, ...CRITICAL_ROUTES].map((resource) => cache.add(resource)),
   )
   await cache.put(OFFLINE_URL, createOfflineResponse())
+  await cache.put(OFFLINE_FALLBACK_URL, createOfflineResponse())
 }
 
 self.addEventListener("install", (event) => {
@@ -163,23 +171,22 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME)
-      const cachedPage = await cache.match(event.request)
+      const cachedPage = await cache.match(event.request) || await cache.match(requestUrl.pathname)
 
       const networkUpdate = fetch(event.request)
         .then((response) => cacheNetworkResponse(event.request, response))
         .catch(() => null)
-
-      if (cachedPage) {
-        event.waitUntil(networkUpdate)
-        return cachedPage
-      }
 
       const networkResponse = await networkUpdate
       if (networkResponse) {
         return networkResponse
       }
 
-      const fallback = await cache.match(OFFLINE_URL)
+      if (cachedPage) {
+        return cachedPage
+      }
+
+      const fallback = await cache.match(OFFLINE_FALLBACK_URL) || await cache.match(OFFLINE_URL)
       return fallback || createOfflineResponse()
     })())
     return
@@ -201,6 +208,17 @@ self.addEventListener("fetch", (event) => {
       try {
         const networkResponse = await fetch(event.request)
         return await cacheNetworkResponse(event.request, networkResponse)
+      } catch {
+        return Response.error()
+      }
+    })())
+    return
+  }
+
+  if (requestUrl.pathname.startsWith("/api/")) {
+    event.respondWith((async () => {
+      try {
+        return await fetch(event.request)
       } catch {
         return Response.error()
       }

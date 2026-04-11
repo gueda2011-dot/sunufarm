@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import {
   readOfflineSessionContext,
+  writeOfflineSessionContext,
   type OfflineSessionContext,
 } from "@/src/lib/offline-session"
 
@@ -14,7 +15,7 @@ export function useOfflineSessionContext() {
     let cancelled = false
 
     async function loadContext() {
-      const cached = readOfflineSessionContext()
+      const cached = await readOfflineSessionContext()
       if (!cancelled) {
         setContext(cached)
       }
@@ -28,6 +29,7 @@ export function useOfflineSessionContext() {
           }
 
           const payload = (await response.json()) as OfflineSessionContext
+          await writeOfflineSessionContext(payload)
           if (!cancelled) {
             setContext(payload)
           }
@@ -50,4 +52,3 @@ export function useOfflineSessionContext() {
 
   return { context, isLoading }
 }
-

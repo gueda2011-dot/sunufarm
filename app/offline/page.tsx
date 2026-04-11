@@ -3,7 +3,9 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { listCachedResources } from "@/src/lib/offline-cache"
-import { listOptimisticItems } from "@/src/lib/offline-optimistic"
+import { getOfflineBootstrapMeta, prepareOfflineWorkspace } from "@/src/lib/offline/bootstrap"
+import { subscribeOfflineEvent, OFFLINE_EVENTS } from "@/src/lib/offline/events"
+import { listSyncErrors } from "@/src/lib/offline/sync/errors"
 import { useOfflineSessionContext } from "@/src/hooks/useOfflineSessionContext"
 import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
 import { OfflineScopeBadge } from "@/src/components/offline/OfflineScopeBadge"
@@ -17,7 +19,7 @@ const OFFLINE_SHORTCUTS = [
   { href: "/purchases", label: "Achats" },
 ]
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null | undefined) {
   if (!value) return "Jamais"
 
   try {
@@ -32,46 +34,83 @@ function formatDateTime(value: string | null) {
 
 export default function OfflinePage() {
   const { context } = useOfflineSessionContext()
-  const { isOnline, pendingCount, failedCount, groupedCounts, lastSyncedAt, lastError } = useOfflineSyncStatus()
+  const {
+    isOnline,
+    pendingCount,
+    failedCount,
+    groupedCounts,
+    lastSyncedAt,
+    lastError,
+    items,
+    sync,
+    isSyncing,
+  } = useOfflineSyncStatus()
   const [cachedKeys, setCachedKeys] = useState<string[]>([])
-  const [localEntries, setLocalEntries] = useState<Array<{ id: string; label?: string; updatedAt?: string }>>([])
+  const [bootstrapMeta, setBootstrapMeta] = useState<Awaited<ReturnType<typeof getOfflineBootstrapMeta>>>(null)
+  const [syncErrors, setSyncErrors] = useState<Array<{ id: string; message: string; scope: string; createdAt: string }>>([])
+  const [isPreparing, setIsPreparing] = useState(false)
+  const organizationId = context?.organizationId
 
   useEffect(() => {
-    async function refreshOfflineHub() {
-      if (context?.organizationId) {
-        const [resources, optimistic] = await Promise.all([
-          listCachedResources(context.organizationId),
-          listOptimisticItems(context.organizationId),
-        ])
+    if (!organizationId) return
+    const orgId = organizationId
 
-        setCachedKeys(resources.slice(0, 8).map((entry) => entry.key))
-        setLocalEntries(
-          optimistic.slice(0, 6).map((item) => ({
-            id: item.id,
-            label: item.label,
-            updatedAt: item.updatedAt,
-          })),
-        )
-      }
+    async function refreshHub() {
+      const [resources, bootstrap, errors] = await Promise.all([
+        listCachedResources(orgId),
+        getOfflineBootstrapMeta(orgId),
+        listSyncErrors(orgId),
+      ])
+
+      setCachedKeys(resources.slice(0, 12).map((entry) => entry.key))
+      setBootstrapMeta(bootstrap)
+      setSyncErrors(errors.slice(0, 10))
     }
 
-    void refreshOfflineHub()
-  }, [context?.organizationId])
+    void refreshHub()
+    const unsubStorage = subscribeOfflineEvent(OFFLINE_EVENTS.storageChanged, () => {
+      void refreshHub()
+    })
+    const unsubBootstrap = subscribeOfflineEvent(OFFLINE_EVENTS.bootstrapChanged, () => {
+      void refreshHub()
+    })
+    const unsubSync = subscribeOfflineEvent(OFFLINE_EVENTS.syncChanged, () => {
+      void refreshHub()
+    })
+
+    return () => {
+      unsubStorage()
+      unsubBootstrap()
+      unsubSync()
+    }
+  }, [organizationId])
 
   const statusLabel = useMemo(() => (
     isOnline ? "Connexion active" : "Mode hors ligne actif"
   ), [isOnline])
 
+  const modulesReady = bootstrapMeta?.modulesReady ?? []
+
+  async function handlePrepare() {
+    if (!organizationId) return
+    setIsPreparing(true)
+    try {
+      await prepareOfflineWorkspace(organizationId)
+    } finally {
+      setIsPreparing(false)
+    }
+  }
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
       <div className="rounded-3xl border border-orange-200 bg-orange-50 p-6 shadow-sm">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-700">
           Hors ligne
         </p>
-        <h1 className="mt-3 text-3xl font-bold text-gray-900">Hub offline SunuFarm</h1>
-        <p className="mt-3 max-w-2xl text-sm text-gray-600">
-          Retrouvez votre contexte local, vos saisies en attente et les ecrans critiques
-          qui restent exploitables sur cet appareil.
+        <h1 className="mt-3 text-3xl font-bold text-gray-900">Centre de controle offline</h1>
+        <p className="mt-3 max-w-3xl text-sm text-gray-600">
+          Prepare l&apos;appareil, suis la synchronisation, controle les elements en attente
+          et verifie quels modules terrain sont vraiment prets sans reseau.
         </p>
       </div>
 
@@ -83,12 +122,12 @@ export default function OfflinePage() {
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Organisation active</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Preparation appareil</p>
           <p className="mt-2 text-xl font-bold text-gray-900">
-            {context?.organizationName ?? "Non disponible hors ligne"}
+            {bootstrapMeta?.status ?? "idle"}
           </p>
           <p className="mt-1 text-xs text-gray-500">
-            Role: {context?.userRole ?? "Inconnu"}
+            Dernier bootstrap: {formatDateTime(bootstrapMeta?.lastBootstrapAt)}
           </p>
         </div>
 
@@ -99,17 +138,56 @@ export default function OfflinePage() {
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Derniere erreur</p>
-          <p className="mt-2 text-sm font-semibold text-gray-900">{lastError ?? "Aucune"}</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Session locale</p>
+          <p className="mt-2 text-xl font-bold text-gray-900">
+            {context?.devicePrepared ? "Preparee" : "A preparer"}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            Validee: {formatDateTime(context?.lastValidatedAt)}
+          </p>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            void handlePrepare()
+          }}
+          disabled={!context?.organizationId || isPreparing}
+          className="rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-green-300"
+        >
+          {isPreparing ? "Preparation..." : "Preparer pour le hors ligne"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void sync()
+          }}
+          disabled={!isOnline || isSyncing}
+          className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSyncing ? "Synchronisation..." : "Forcer la synchronisation"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void handlePrepare()
+          }}
+          disabled={!isOnline || isPreparing}
+          className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Actualiser les donnees locales
+        </button>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Raccourcis utilisables offline</h2>
+            <h2 className="text-base font-semibold text-gray-900">Modules disponibles offline</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Ces pages sont prioritaires pour le terrain et peuvent se rouvrir sans reseau apres une visite online.
+              Les raccourcis ci-dessous n&apos;ont plus besoin d&apos;une visite page par page
+              apres bootstrap.
             </p>
           </div>
 
@@ -124,19 +202,36 @@ export default function OfflinePage() {
               </Link>
             ))}
           </div>
+
+          <div className="flex flex-wrap gap-2">
+            {modulesReady.length > 0 ? (
+              modulesReady.map((module) => (
+                <span
+                  key={module}
+                  className="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700"
+                >
+                  {module}
+                </span>
+              ))
+            ) : (
+              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
+                Aucun module prepare
+              </span>
+            )}
+          </div>
         </section>
 
         <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">References en cache</h2>
+            <h2 className="text-base font-semibold text-gray-900">References locales</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Dernieres ressources locales detectees pour votre organisation.
+              Apercu du contenu deja present en local.
             </p>
           </div>
 
           {cachedKeys.length === 0 ? (
             <p className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500">
-              Aucune reference n&apos;a encore ete mise en cache sur cet appareil.
+              Aucune ressource locale detectee.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -156,9 +251,9 @@ export default function OfflinePage() {
       {Object.keys(groupedCounts).length > 0 ? (
         <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">File de synchro par module</h2>
+            <h2 className="text-base font-semibold text-gray-900">File de sync par module</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Repartition des elements encore presents dans l&apos;outbox locale.
+              Repartition actuelle des commandes pending, failed ou conflict.
             </p>
           </div>
 
@@ -170,31 +265,79 @@ export default function OfflinePage() {
         </section>
       ) : null}
 
-      <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Dernieres saisies locales</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Elements optimistes ou en attente de resynchronisation sur cet appareil.
-          </p>
-        </div>
-
-        {localEntries.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500">
-            Aucune saisie locale recente.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {localEntries.map((entry) => (
-              <div key={entry.id} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                <p className="text-sm font-medium text-gray-900">{entry.label ?? entry.id}</p>
-                <p className="mt-1 text-xs text-gray-500">
-                  Mise a jour: {formatDateTime(entry.updatedAt ?? null)}
-                </p>
-              </div>
-            ))}
+      <div className="grid gap-6 xl:grid-cols-2">
+        <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Elements en attente</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Les creations locales sont visibles ici avec leur statut de synchro.
+            </p>
           </div>
-        )}
-      </section>
+
+          {items.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500">
+              Aucun element pending ou failed.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {items.slice(0, 12).map((item) => (
+                <div key={item.id} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-gray-900">{item.label}</p>
+                    <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700">
+                      {item.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {item.scope} - {formatDateTime(item.updatedAt)}
+                  </p>
+                  {item.lastError ? (
+                    <p className="mt-1 text-xs text-red-700">{item.lastError}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Erreurs et diagnostics</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Derniere erreur sync: {lastError ?? "Aucune"}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+            <p>Reseau: {isOnline ? "online" : "offline"}</p>
+            <p>Bootstrap: {bootstrapMeta?.status ?? "idle"}</p>
+            <p>Dernier bootstrap: {formatDateTime(bootstrapMeta?.lastBootstrapAt)}</p>
+            <p>Erreur bootstrap: {bootstrapMeta?.error ?? "Aucune"}</p>
+          </div>
+
+          {syncErrors.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500">
+              Aucun journal d&apos;erreur.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {syncErrors.map((error) => (
+                <div key={error.id} className="rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-red-900">{error.message}</p>
+                    <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-red-700">
+                      {error.scope}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-red-700">
+                    {formatDateTime(error.createdAt)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   )
 }

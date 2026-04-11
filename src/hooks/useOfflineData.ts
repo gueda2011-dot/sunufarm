@@ -15,6 +15,8 @@ interface UseOfflineDataOptions<T> {
   ttlMs: number
   version?: number
   enabled?: boolean
+  localLoader?: () => Promise<T | undefined>
+  localSaver?: (data: T) => Promise<void>
 }
 
 export function useOfflineData<T>({
@@ -24,6 +26,8 @@ export function useOfflineData<T>({
   ttlMs,
   version = 1,
   enabled = true,
+  localLoader,
+  localSaver,
 }: UseOfflineDataOptions<T>) {
   const [data, setData] = useState<T | undefined>(initialData)
   const [isOfflineFallback, setIsOfflineFallback] = useState(false)
@@ -37,30 +41,46 @@ export function useOfflineData<T>({
   useEffect(() => {
     if (!enabled || typeof window === "undefined" || initialData === undefined) return
 
-    void setCachedResource({
-      key,
-      organizationId,
-      version,
-      savedAt: new Date().toISOString(),
-      ttlMs,
-      data: initialData,
-    })
-  }, [enabled, initialData, key, organizationId, ttlMs, version])
+    void (async () => {
+      await setCachedResource({
+        key,
+        organizationId,
+        version,
+        savedAt: new Date().toISOString(),
+        ttlMs,
+        data: initialData,
+      })
+
+      if (localSaver) {
+        await localSaver(initialData)
+      }
+    })()
+  }, [enabled, initialData, key, localSaver, organizationId, ttlMs, version])
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return
-
-    if (navigator.onLine && initialData !== undefined) {
-      setIsOfflineFallback(false)
-      setIsLoading(false)
-      setIsStale(false)
-      return
-    }
 
     let cancelled = false
 
     async function loadCachedValue() {
       setIsLoading(true)
+      const localData = localLoader ? await localLoader() : undefined
+      if (!cancelled && localData !== undefined) {
+        setData(localData)
+        setIsOfflineFallback(true)
+        setIsStale(false)
+        setIsLoading(false)
+        return
+      }
+
+      if (!cancelled && initialData !== undefined) {
+        setData(initialData)
+        setIsOfflineFallback(false)
+        setIsStale(false)
+        setIsLoading(false)
+        return
+      }
+
       const entry = await getCachedResource<T>(key, organizationId)
 
       if (cancelled) return
@@ -81,7 +101,7 @@ export function useOfflineData<T>({
     return () => {
       cancelled = true
     }
-  }, [enabled, initialData, key, organizationId])
+  }, [enabled, initialData, key, localLoader, organizationId])
 
   const cacheEntryToMeta = async (): Promise<OfflineCacheEntry<T> | null> => (
     getCachedResource<T>(key, organizationId)
@@ -95,4 +115,3 @@ export function useOfflineData<T>({
     readCacheMeta: cacheEntryToMeta,
   }
 }
-

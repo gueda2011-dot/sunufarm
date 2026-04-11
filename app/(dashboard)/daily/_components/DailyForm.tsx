@@ -22,7 +22,6 @@ import {
   createClientMutationId,
   enqueueOfflineDailyRecord,
 } from "@/src/lib/offline-mutation-outbox"
-import { addOptimisticItem } from "@/src/lib/offline-optimistic"
 import { cn } from "@/src/lib/utils"
 import { AudioRecorder } from "./AudioRecorder"
 
@@ -301,22 +300,6 @@ export function DailyForm({
   const queueCurrentEntry = async (data: ParsedValues) => {
     const clientMutationId = createClientMutationId("daily")
     const dateIso = new Date(`${selectedDate}T00:00:00Z`).toISOString()
-
-    await addOptimisticItem({
-      id: clientMutationId,
-      organizationId,
-      scope: "daily",
-      type: "CREATE_DAILY_RECORD",
-      label: `Saisie journaliere ${selectedDate}`,
-      data: {
-        batchId,
-        dateIso,
-        mortality: data.mortality,
-        feedKg: data.feedKg,
-        waterLiters: data.waterLiters,
-        audioRecordUrl: data.audioRecordUrl,
-      },
-    })
 
     await enqueueOfflineDailyRecord({
       clientMutationId,
