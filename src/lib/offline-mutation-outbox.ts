@@ -1,6 +1,9 @@
 "use client"
 
 import { emitOfflineEvent, OFFLINE_EVENTS, subscribeOfflineEvent } from "@/src/lib/offline/events"
+import { requestToPromise, withStores } from "@/src/lib/offline/db"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_STORE_NAMES } from "@/src/lib/offline/schema"
 import {
   dailyRepository,
   eggProductionRepository,
@@ -10,7 +13,7 @@ import {
   stockMovementRepository,
 } from "@/src/lib/offline/repositories"
 import { createOfflineCommand } from "@/src/lib/offline/sync/commands"
-import { clearSyncErrors } from "@/src/lib/offline/sync/errors"
+import { clearSyncErrors, listSyncErrors } from "@/src/lib/offline/sync/errors"
 import { runOfflineSync } from "@/src/lib/offline/sync/engine"
 import {
   deleteSyncCommand,
@@ -226,6 +229,18 @@ function writeOfflineDailySyncMeta(meta: OfflineDailySyncMeta) {
   window.localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta))
 }
 
+function toDateKey(value: string) {
+  return new Date(value).toISOString().slice(0, 10)
+}
+
+function buildDailyDraftStorageKey(organizationId: string, batchId: string, dateIso: string) {
+  return `sunufarm:draft:daily:${organizationId}:${batchId}:${toDateKey(dateIso)}`
+}
+
+function buildDailyDraftFormKey(organizationId: string, batchId: string, dateIso: string) {
+  return `daily:${organizationId}:${batchId}:${toDateKey(dateIso)}`
+}
+
 async function clearOfflineShadow(scope: OfflineModuleScope, localId: string) {
   switch (scope) {
     case "daily":
@@ -247,6 +262,134 @@ async function clearOfflineShadow(scope: OfflineModuleScope, localId: string) {
     case "expenses":
       await purchasesRepository.delete(localId)
       break
+  }
+}
+
+async function purgeDailyIndexedDbArtifacts(command: NonNullable<Awaited<ReturnType<typeof getSyncCommand>>>) {
+  const payload = command.payload as Partial<OfflineDailyQueuePayload>
+  const batchId = payload.batchId
+  const dateIso = payload.dateIso
+  const targetCacheKey = batchId ? OFFLINE_RESOURCE_KEYS.dailyRecords(batchId) : null
+
+  return withStores(
+    [
+      OFFLINE_STORE_NAMES.syncQueue,
+      OFFLINE_STORE_NAMES.dailyEntries,
+      OFFLINE_STORE_NAMES.syncErrors,
+      OFFLINE_STORE_NAMES.legacyOptimistic,
+      OFFLINE_STORE_NAMES.legacyResourceCache,
+    ],
+    "readwrite",
+    async (stores) => {
+      await requestToPromise(stores[OFFLINE_STORE_NAMES.syncQueue].delete(command.id))
+      await requestToPromise(stores[OFFLINE_STORE_NAMES.dailyEntries].delete(command.localId))
+
+      const syncErrors = await requestToPromise<Array<Record<string, unknown>>>(
+        stores[OFFLINE_STORE_NAMES.syncErrors].getAll(),
+      )
+      const matchingErrors = syncErrors.filter((item) => (
+        item.organizationId === command.organizationId &&
+        item.localId === command.localId &&
+        item.commandId === command.id &&
+        item.scope === command.scope
+      ))
+      await Promise.all(
+        matchingErrors.map((item) =>
+          requestToPromise(stores[OFFLINE_STORE_NAMES.syncErrors].delete(String(item.id)))),
+      )
+
+      const optimisticItems = await requestToPromise<Array<Record<string, unknown>>>(
+        stores[OFFLINE_STORE_NAMES.legacyOptimistic].getAll(),
+      )
+      const matchingOptimistic = optimisticItems.filter((item) => {
+        if (item.organizationId !== command.organizationId || item.scope !== command.scope) {
+          return false
+        }
+        if (item.id === command.localId) return true
+
+        const data = (item.data ?? null) as Record<string, unknown> | null
+        if (!data || !batchId || !dateIso) return false
+        const itemBatchId = typeof data.batchId === "string" ? data.batchId : undefined
+        const itemDateIso =
+          typeof data.dateIso === "string"
+            ? data.dateIso
+            : typeof data.date === "string"
+              ? data.date
+              : undefined
+
+        return itemBatchId === batchId && itemDateIso !== undefined && toDateKey(itemDateIso) === toDateKey(dateIso)
+      })
+      await Promise.all(
+        matchingOptimistic.map((item) =>
+          requestToPromise(stores[OFFLINE_STORE_NAMES.legacyOptimistic].delete(String(item.id)))),
+      )
+
+      const cacheEntries = await requestToPromise<Array<Record<string, unknown>>>(
+        stores[OFFLINE_STORE_NAMES.legacyResourceCache].getAll(),
+      )
+      const matchingCacheEntries = cacheEntries.filter((item) => (
+        item.organizationId === command.organizationId &&
+        targetCacheKey !== null &&
+        item.key === targetCacheKey
+      ))
+      await Promise.all(
+        matchingCacheEntries.map((item) =>
+          requestToPromise(stores[OFFLINE_STORE_NAMES.legacyResourceCache].delete(String(item.id)))),
+      )
+
+      return {
+        deletedQueueId: command.id,
+        deletedDailyEntryId: command.localId,
+        deletedSyncErrorIds: matchingErrors.map((item) => String(item.id)),
+        deletedLegacyOptimisticIds: matchingOptimistic.map((item) => String(item.id)),
+        deletedLegacyCacheIds: matchingCacheEntries.map((item) => String(item.id)),
+      }
+    },
+  )
+}
+
+async function clearDailyDraftArtifacts(payload: OfflineDailyQueuePayload) {
+  const dateIso = payload.dateIso
+  const formKey = buildDailyDraftFormKey(payload.organizationId, payload.batchId, dateIso)
+  const storageKey = buildDailyDraftStorageKey(payload.organizationId, payload.batchId, dateIso)
+
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(storageKey)
+  }
+
+  try {
+    const { clearFormDraft } = await import("@/src/actions/form-drafts")
+    await clearFormDraft({
+      formKey,
+      organizationId: payload.organizationId,
+    })
+  } catch (error) {
+    console.warn("[offline-delete][daily] failed to clear server draft", {
+      formKey,
+      organizationId: payload.organizationId,
+      error,
+    })
+  }
+
+  return { formKey, storageKey }
+}
+
+async function purgeDailyOfflineArtifacts(command: Awaited<ReturnType<typeof getSyncCommand>>) {
+  if (!command || command.scope !== "daily") {
+    return null
+  }
+
+  const payload = command.payload as Partial<OfflineDailyQueuePayload>
+  const indexedDbPurge = await purgeDailyIndexedDbArtifacts(command)
+
+  const draftArtifacts =
+    payload.organizationId && payload.batchId && payload.dateIso
+      ? await clearDailyDraftArtifacts(payload as OfflineDailyQueuePayload)
+      : null
+
+  return {
+    indexedDbPurge,
+    draftArtifacts,
   }
 }
 
@@ -434,24 +577,68 @@ export async function flushOfflineQueueByScope(scope: string) {
 
 export async function deleteOfflineDailyQueueItem(id: string) {
   const current = await getSyncCommand(id)
-  await deleteSyncCommand(id)
+  console.info("[offline-delete] start", {
+    commandId: id,
+    current,
+  })
+  let purgeDetails = null
   if (current) {
-    await clearOfflineShadow(current.scope, current.localId)
-    await clearSyncErrors({
-      organizationId: current.organizationId,
-      localId: current.localId,
-      commandId: current.id,
-      scope: current.scope,
-    })
+    if (current.scope === "daily") {
+      purgeDetails = await purgeDailyOfflineArtifacts(current)
+    } else {
+      await deleteSyncCommand(id)
+      await clearOfflineShadow(current.scope, current.localId)
+      await clearSyncErrors({
+        organizationId: current.organizationId,
+        localId: current.localId,
+        commandId: current.id,
+        scope: current.scope,
+      })
+    }
+  } else {
+    await deleteSyncCommand(id)
   }
   writeOfflineDailySyncMeta({
     lastSyncedAt: readOfflineDailySyncMeta().lastSyncedAt,
     lastError: null,
   })
+  const verification = current
+    ? {
+        queue: await getSyncCommand(id),
+        dailyRecord: current.scope === "daily" ? await dailyRepository.getById(current.localId) : null,
+        remainingErrorsCount: (await listSyncErrors(current.organizationId)).filter((item) => (
+          item.localId === current.localId &&
+          item.commandId === current.id &&
+          item.scope === current.scope
+        )).length,
+      }
+    : null
+  console.info("[offline-delete] completed", {
+    commandId: id,
+    purgeDetails,
+    verification,
+    storesTouched: [
+      OFFLINE_STORE_NAMES.syncQueue,
+      current?.scope === "daily" ? OFFLINE_STORE_NAMES.dailyEntries : null,
+      OFFLINE_STORE_NAMES.syncErrors,
+      current?.scope === "daily" ? OFFLINE_STORE_NAMES.legacyOptimistic : null,
+      current?.scope === "daily" ? OFFLINE_STORE_NAMES.legacyResourceCache : null,
+    ].filter(Boolean),
+  })
   emitQueueChanged()
 }
 
 export const deleteOfflineQueueItem = deleteOfflineDailyQueueItem
+
+export async function purgeOfflineDailyItemLocally(id: string) {
+  const current = await getSyncCommand(id)
+  if (!current) {
+    return { success: false, reason: "COMMAND_NOT_FOUND" }
+  }
+
+  await deleteOfflineDailyQueueItem(id)
+  return { success: true, localId: current.localId }
+}
 
 export async function retryOfflineDailyQueueItem(id: string) {
   const current = await getSyncCommand(id)

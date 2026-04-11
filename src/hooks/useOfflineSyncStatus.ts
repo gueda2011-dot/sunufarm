@@ -7,6 +7,7 @@ import {
   flushOfflineQueueByScope,
   listPendingOfflineQueueItems,
   listPendingOfflineQueueItemsByScope,
+  purgeOfflineDailyItemLocally,
   readOfflineSyncMeta,
   retryOfflineQueueItem,
   subscribeToOfflineMutationOutbox,
@@ -73,6 +74,11 @@ export function useOfflineSyncStatus(options: UseOfflineSyncStatusOptions = {}) 
     await refresh()
   }, [refresh])
 
+  const purgeItem = useCallback(async (itemId: string) => {
+    await purgeOfflineDailyItemLocally(itemId)
+    await refresh()
+  }, [refresh])
+
   useEffect(() => {
     void refresh()
 
@@ -122,5 +128,6 @@ export function useOfflineSyncStatus(options: UseOfflineSyncStatusOptions = {}) 
     sync,
     retryItem,
     removeItem,
+    purgeItem,
   }
 }

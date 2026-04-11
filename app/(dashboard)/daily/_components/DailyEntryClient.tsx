@@ -78,6 +78,7 @@ export function DailyEntryClient({
     sync: syncOfflineQueue,
     retryItem: retryOfflineItem,
     removeItem: removeOfflineItem,
+    purgeItem: purgeOfflineItem,
   } = useOfflineSyncStatus({ scope: "daily" })
 
   const {
@@ -289,6 +290,9 @@ export function DailyEntryClient({
         }}
         onRemoveItem={(itemId) => {
           void removeOfflineItem(itemId)
+        }}
+        onPurgeItem={(itemId) => {
+          void purgeOfflineItem(itemId)
         }}
       />
 

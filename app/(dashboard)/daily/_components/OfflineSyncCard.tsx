@@ -17,6 +17,7 @@ interface OfflineSyncCardProps {
   onSync: () => void
   onRetryItem?: (itemId: string) => void
   onRemoveItem?: (itemId: string) => void
+  onPurgeItem?: (itemId: string) => void
 }
 
 function formatLastSync(value: string | null) {
@@ -43,6 +44,7 @@ export function OfflineSyncCard({
   onSync,
   onRetryItem,
   onRemoveItem,
+  onPurgeItem,
 }: OfflineSyncCardProps) {
   if (pendingCount === 0 && !lastError) {
     return null
@@ -116,7 +118,7 @@ export function OfflineSyncCard({
               {item.lastError && (
                 <p className="mt-1 text-[11px] text-red-700">{item.lastError}</p>
               )}
-              {(onRetryItem || onRemoveItem) && (
+              {(onRetryItem || onRemoveItem || onPurgeItem) && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(item.status === "failed" || item.status === "conflict") && onRetryItem ? (
                     <button
@@ -135,6 +137,15 @@ export function OfflineSyncCard({
                       className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50"
                     >
                       Supprimer
+                    </button>
+                  ) : null}
+                  {(item.status === "failed" || item.status === "conflict") && onPurgeItem ? (
+                    <button
+                      type="button"
+                      onClick={() => onPurgeItem(item.id)}
+                      className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-semibold text-red-700 transition hover:bg-red-100"
+                    >
+                      Purger localement
                     </button>
                   ) : null}
                 </div>
