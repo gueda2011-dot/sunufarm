@@ -19,8 +19,6 @@ import type {
   StockTrendResult,
 } from "@/src/lib/predictive-snapshots"
 
-export type { StockPredictionsResult }
-
 export interface StockTrendsResult {
   feed: Record<string, StockTrendResult>
   medicine: Record<string, StockTrendResult>
