@@ -75,4 +75,28 @@ describe("buildDailyServerPayload", () => {
       feedKg: 12.5,
     })).rejects.toThrow()
   })
+
+  it("accepte un ancien payload sans clientMutationId ni dateIso", async () => {
+    findServerIdMock.mockImplementation(async (entityType: string, localId: string) => {
+      if (entityType === "batch" && localId === "batch:legacy-1") {
+        return "cm9s8w0m50003abcd1234efg"
+      }
+
+      return null
+    })
+
+    const { serverPayload } = await buildDailyServerPayload({
+      organizationId: "org-1",
+      batchId: "batch:legacy-1",
+      date: "2026-04-10T00:00:00.000Z",
+      mortality: 1,
+      feedKg: 8,
+    }, {
+      fallbackLocalId: "cmnn428ci000ixov3yh5imo0p",
+    })
+
+    expect(serverPayload.clientMutationId).toBe("cmnn428ci000ixov3yh5imo0p")
+    expect(serverPayload.batchId).toBe("cm9s8w0m50003abcd1234efg")
+    expect(serverPayload.date.toISOString()).toBe("2026-04-10T00:00:00.000Z")
+  })
 })

@@ -50,6 +50,13 @@ export class OfflineRepository<TData = unknown> {
     await this.upsertMany([record])
   }
 
+  async delete(localId: string) {
+    await withStore<void>(this.storeName, "readwrite", async (store) => {
+      await requestToPromise(store.delete(localId))
+    })
+    emitOfflineEvent(OFFLINE_EVENTS.storageChanged)
+  }
+
   async createLocal(params: {
     localId: string
     organizationId: string

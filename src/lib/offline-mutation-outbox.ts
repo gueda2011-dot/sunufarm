@@ -10,6 +10,7 @@ import {
   stockMovementRepository,
 } from "@/src/lib/offline/repositories"
 import { createOfflineCommand } from "@/src/lib/offline/sync/commands"
+import { clearSyncErrors } from "@/src/lib/offline/sync/errors"
 import { runOfflineSync } from "@/src/lib/offline/sync/engine"
 import {
   deleteSyncCommand,
@@ -225,6 +226,30 @@ function writeOfflineDailySyncMeta(meta: OfflineDailySyncMeta) {
   window.localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta))
 }
 
+async function clearOfflineShadow(scope: OfflineModuleScope, localId: string) {
+  switch (scope) {
+    case "daily":
+      await dailyRepository.delete(localId)
+      break
+    case "health":
+      await healthRepository.delete(localId)
+      break
+    case "stock":
+      await stockMovementRepository.delete(localId)
+      break
+    case "eggs":
+      await eggProductionRepository.delete(localId)
+      break
+    case "sales":
+      await salesRepository.delete(localId)
+      break
+    case "purchases":
+    case "expenses":
+      await purchasesRepository.delete(localId)
+      break
+  }
+}
+
 export function createClientMutationId(prefix: string) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${prefix}:${crypto.randomUUID()}`
@@ -408,7 +433,21 @@ export async function flushOfflineQueueByScope(scope: string) {
 }
 
 export async function deleteOfflineDailyQueueItem(id: string) {
+  const current = await getSyncCommand(id)
   await deleteSyncCommand(id)
+  if (current) {
+    await clearOfflineShadow(current.scope, current.localId)
+    await clearSyncErrors({
+      organizationId: current.organizationId,
+      localId: current.localId,
+      commandId: current.id,
+      scope: current.scope,
+    })
+  }
+  writeOfflineDailySyncMeta({
+    lastSyncedAt: readOfflineDailySyncMeta().lastSyncedAt,
+    lastError: null,
+  })
   emitQueueChanged()
 }
 

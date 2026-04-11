@@ -2,7 +2,6 @@
 
 import { z } from "zod"
 import { findServerId } from "@/src/lib/offline/sync/mappings"
-import type { OfflineDailyQueuePayload } from "@/src/lib/offline-mutation-outbox"
 
 const optionalStringSchema = z.preprocess((value) => {
   if (value === "" || value === null || value === undefined) {
@@ -22,10 +21,11 @@ const optionalNumberSchema = z.preprocess((value) => {
 }, z.number().finite().optional())
 
 const dailySyncPayloadSchema = z.object({
-  clientMutationId: z.string().trim().min(1),
+  clientMutationId: z.string().trim().min(1).optional(),
   organizationId: z.string().trim().min(1),
   batchId: z.string().trim().min(1),
-  dateIso: z.string().trim().min(1),
+  dateIso: z.string().trim().min(1).optional(),
+  date: z.union([z.string().trim().min(1), z.date()]).optional(),
   mortality: z.preprocess((value) => Number(value), z.number().int().min(0)),
   feedKg: z.preprocess((value) => Number(value), z.number().finite().min(0)),
   feedStockId: optionalStringSchema,
@@ -78,7 +78,7 @@ export interface DailyServerPayload {
 }
 
 export interface DailySyncDebugPayload {
-  originalPayload: OfflineDailyQueuePayload
+  originalPayload: Record<string, unknown>
   mappedPayload: Record<string, unknown>
 }
 
@@ -95,7 +95,10 @@ async function resolveRelationId(entityType: string, value: string | undefined) 
 }
 
 export async function buildDailyServerPayload(
-  payload: OfflineDailyQueuePayload,
+  payload: Record<string, unknown>,
+  options?: {
+    fallbackLocalId?: string
+  },
 ): Promise<{
   serverPayload: DailyServerPayload
   debug: DailySyncDebugPayload
@@ -105,9 +108,19 @@ export async function buildDailyServerPayload(
     throw new Error(parsed.error.issues.map((issue) => issue.message).join(", "))
   }
 
-  const normalizedDate = new Date(parsed.data.dateIso)
+  const rawDate = parsed.data.dateIso ?? parsed.data.date
+  if (!rawDate) {
+    throw new Error("dateIso manquant")
+  }
+
+  const normalizedDate = rawDate instanceof Date ? rawDate : new Date(rawDate)
   if (Number.isNaN(normalizedDate.getTime())) {
     throw new Error("dateIso invalide")
+  }
+
+  const clientMutationId = parsed.data.clientMutationId ?? options?.fallbackLocalId
+  if (!clientMutationId) {
+    throw new Error("clientMutationId manquant")
   }
 
   const batchId = await resolveRelationId("batch", parsed.data.batchId)
@@ -121,7 +134,7 @@ export async function buildDailyServerPayload(
   }
 
   const mappedPayload: DailyServerPayload = {
-    clientMutationId: parsed.data.clientMutationId,
+    clientMutationId,
     organizationId: parsed.data.organizationId,
     batchId,
     date: normalizedDate,

@@ -42,6 +42,7 @@ async function replayCommand(command: OfflineSyncCommand) {
     case "CREATE_DAILY_RECORD": {
       const { serverPayload, debug } = await buildDailyServerPayload(
         command.payload as Parameters<typeof buildDailyServerPayload>[0],
+        { fallbackLocalId: command.localId },
       )
 
       console.info("[offline-sync][daily] payload before mapping", {

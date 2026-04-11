@@ -32,3 +32,27 @@ export async function listSyncErrors(organizationId: string) {
     .filter((item) => item.organizationId === organizationId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
 }
+
+export async function clearSyncErrors(params: {
+  organizationId: string
+  localId?: string | null
+  commandId?: string | null
+  scope?: string
+}) {
+  const items = await listSyncErrors(params.organizationId)
+  const matches = items.filter((item) => (
+    (params.localId ? item.localId === params.localId : true) &&
+    (params.commandId ? item.commandId === params.commandId : true) &&
+    (params.scope ? item.scope === params.scope : true)
+  ))
+
+  if (matches.length === 0) {
+    return 0
+  }
+
+  await withStore<void>(OFFLINE_STORE_NAMES.syncErrors, "readwrite", async (store) => {
+    await Promise.all(matches.map((item) => requestToPromise(store.delete(item.id))))
+  })
+  emitOfflineEvent(OFFLINE_EVENTS.syncChanged)
+  return matches.length
+}
