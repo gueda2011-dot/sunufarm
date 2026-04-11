@@ -41,7 +41,7 @@ export const COMMERCIAL_PLAN_CATALOG: Record<CommercialPlan, CommercialPlanDefin
   PRO: {
     code: "PRO",
     label: "Pro",
-    monthlyPriceFcfa: 8_000,
+    monthlyPriceFcfa: 10_000,
     promise: "Prendre les bonnes decisions economiques au bon moment.",
     audience: "Eleveurs qui veulent proteger leur marge",
     valueHeadline: "Voir la vraie rentabilite et agir avant la perte",
@@ -55,7 +55,7 @@ export const COMMERCIAL_PLAN_CATALOG: Record<CommercialPlan, CommercialPlanDefin
   BUSINESS: {
     code: "BUSINESS",
     label: "Business",
-    monthlyPriceFcfa: 20_000,
+    monthlyPriceFcfa: 25_000,
     promise: "Piloter toute l'exploitation avec une lecture dirigeant.",
     audience: "Structures multi-sites ou equipes de production",
     valueHeadline: "Arbitrer vite avec une vue globale de l'exploitation",
