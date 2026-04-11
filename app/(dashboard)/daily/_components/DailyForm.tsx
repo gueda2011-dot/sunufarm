@@ -56,7 +56,10 @@ function buildFormSchema(entryCount: number) {
     temperatureMax: z.preprocess(emptyToUndefined, z.coerce.number().optional()),
     humidity: z.preprocess(emptyToUndefined, z.coerce.number().min(0).max(100).optional()),
     observations: z.string().max(2000, "Maximum 2 000 caracteres").optional(),
-    audioRecordUrl: z.string().url().optional().nullable(),
+    audioRecordUrl: z.preprocess(
+      emptyToUndefined,
+      z.string().url().optional().nullable(),
+    ),
   })
 }
 

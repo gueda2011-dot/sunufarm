@@ -7,6 +7,14 @@ import {
   requiredIdSchema,
 } from "@/src/lib/validators"
 
+const optionalUrlSchema = z.preprocess((value) => {
+  if (value === null || value === undefined || value === "") {
+    return undefined
+  }
+
+  return value
+}, z.string().url().max(1000).optional())
+
 export const dailyClientMutationIdSchema = z.string().trim().min(1).max(100)
 
 export const dailyMortalityDetailSchema = z.object({
@@ -29,7 +37,7 @@ export const createDailyRecordSchema = z.object({
   humidity: z.number().min(0).max(100).optional(),
   avgWeightG: z.number().int().positive().optional(),
   observations: z.string().max(2000).optional(),
-  audioRecordUrl: z.string().url().max(1000).optional(),
+  audioRecordUrl: optionalUrlSchema,
   mortalityDetails: z.array(dailyMortalityDetailSchema).optional(),
 })
 

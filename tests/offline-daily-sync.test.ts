@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { buildDailyServerPayload } from "@/src/lib/offline/sync/daily"
+import { validateCreateDailyRecordInput } from "@/src/lib/daily-record-validation"
 
 const { findServerIdMock } = vi.hoisted(() => ({
   findServerIdMock: vi.fn(),
@@ -101,5 +102,22 @@ describe("buildDailyServerPayload", () => {
     expect(serverPayload.clientMutationId).toBe("cmnn428ci000ixov3yh5imo0p")
     expect(serverPayload.batchId).toBe("cm9s8w0m50003abcd1234efg")
     expect(serverPayload.date.toISOString()).toBe("2026-04-10T00:00:00.000Z")
+  })
+
+  it("accepte audioRecordUrl a null dans la validation partagee", () => {
+    const result = validateCreateDailyRecordInput({
+      organizationId,
+      batchId: "cm9s8w0m50003abcd1234efg",
+      clientMutationId: "daily:local-null-audio",
+      date: new Date("2026-04-10T00:00:00.000Z"),
+      mortality: 0,
+      feedKg: 8,
+      audioRecordUrl: null,
+    })
+
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.audioRecordUrl).toBeUndefined()
+    }
   })
 })
