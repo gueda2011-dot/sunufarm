@@ -85,10 +85,10 @@ import {
 } from "@/src/lib/validators"
 import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
 import {
-  getBatchMarginPredictionsInternal,
-  getBatchMortalityPredictionsInternal,
-  getStockPredictionsInternal,
-} from "@/src/actions/predictive"
+  computeOrganizationBatchMarginPredictions as getBatchMarginPredictionsInternal,
+  computeOrganizationBatchMortalityPredictions as getBatchMortalityPredictionsInternal,
+  computeOrganizationStockPredictions as getStockPredictionsInternal,
+} from "@/src/lib/predictive-compute"
 import {
   upsertOrganizationBatchMarginSnapshots,
   upsertOrganizationBatchMortalitySnapshots,

@@ -9,10 +9,10 @@ import {
 } from "@/src/lib/business-dashboard"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import {
-  getBatchMarginPredictionsInternal,
-  getBatchMortalityPredictionsInternal,
-  getStockPredictionsInternal,
-} from "@/src/actions/predictive"
+  computeOrganizationBatchMarginPredictions as getBatchMarginPredictionsInternal,
+  computeOrganizationBatchMortalityPredictions as getBatchMortalityPredictionsInternal,
+  computeOrganizationStockPredictions as getStockPredictionsInternal,
+} from "@/src/lib/predictive-compute"
 import {
   getBatchMarginTrend,
   getBatchMortalityTrend,
