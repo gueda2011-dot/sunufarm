@@ -1,85 +1,23 @@
 "use client"
 
-import { z } from "zod"
+import { createDailyRecordSchema, buildInvalidInputMessage } from "@/src/lib/daily-record-validation"
 import { findServerId } from "@/src/lib/offline/sync/mappings"
 
-const optionalStringSchema = z.preprocess((value) => {
+function normalizeOptionalString(value: unknown) {
   if (value === "" || value === null || value === undefined) {
     return undefined
   }
 
-  return value
-}, z.string().trim().min(1).optional())
+  return String(value).trim()
+}
 
-const optionalNumberSchema = z.preprocess((value) => {
+function normalizeOptionalNumber(value: unknown) {
   if (value === "" || value === null || value === undefined) {
     return undefined
   }
 
   const normalized = typeof value === "string" ? Number(value) : value
-  return normalized
-}, z.number().finite().optional())
-
-const dailySyncPayloadSchema = z.object({
-  clientMutationId: z.string().trim().min(1).optional(),
-  organizationId: z.string().trim().min(1),
-  batchId: z.string().trim().min(1),
-  dateIso: z.string().trim().min(1).optional(),
-  date: z.union([z.string().trim().min(1), z.date()]).optional(),
-  mortality: z.preprocess((value) => Number(value), z.number().int().min(0)),
-  feedKg: z.preprocess((value) => Number(value), z.number().finite().min(0)),
-  feedStockId: optionalStringSchema,
-  waterLiters: optionalNumberSchema.refine(
-    (value) => value === undefined || value >= 0,
-    "waterLiters doit etre >= 0",
-  ),
-  avgWeightG: optionalNumberSchema.refine(
-    (value) => value === undefined || (Number.isInteger(value) && value > 0),
-    "avgWeightG doit etre un entier > 0",
-  ),
-  observations: z.preprocess((value) => {
-    if (value === null || value === undefined) {
-      return undefined
-    }
-
-    const normalized = String(value).trim()
-    return normalized === "" ? undefined : normalized
-  }, z.string().max(2000).optional()),
-  temperatureMin: optionalNumberSchema,
-  temperatureMax: optionalNumberSchema,
-  humidity: optionalNumberSchema.refine(
-    (value) => value === undefined || (value >= 0 && value <= 100),
-    "humidity doit etre comprise entre 0 et 100",
-  ),
-  audioRecordUrl: z.preprocess((value) => {
-    if (value === "" || value === null || value === undefined) {
-      return undefined
-    }
-
-    return value
-  }, z.string().url().max(1000).optional()),
-})
-
-export interface DailyServerPayload {
-  clientMutationId: string
-  organizationId: string
-  batchId: string
-  date: Date
-  mortality: number
-  feedKg: number
-  feedStockId?: string
-  waterLiters?: number
-  avgWeightG?: number
-  observations?: string
-  temperatureMin?: number
-  temperatureMax?: number
-  humidity?: number
-  audioRecordUrl?: string
-}
-
-export interface DailySyncDebugPayload {
-  originalPayload: Record<string, unknown>
-  mappedPayload: Record<string, unknown>
+  return typeof normalized === "number" && Number.isFinite(normalized) ? normalized : normalized
 }
 
 function looksLikeServerId(value: string) {
@@ -94,70 +32,113 @@ async function resolveRelationId(entityType: string, value: string | undefined) 
   return mapped ?? value
 }
 
+export class DailySyncValidationError extends Error {
+  constructor(
+    message: string,
+    readonly fieldErrors?: Record<string, string[]>,
+    readonly originalPayload?: unknown,
+    readonly mappedPayload?: unknown,
+    readonly finalPayload?: unknown,
+  ) {
+    super(message)
+    this.name = "DailySyncValidationError"
+  }
+}
+
+export interface DailySyncDebugPayload {
+  originalPayload: Record<string, unknown>
+  mappedPayload: Record<string, unknown>
+  finalPayload: Record<string, unknown>
+}
+
 export async function buildDailyServerPayload(
   payload: Record<string, unknown>,
   options?: {
     fallbackLocalId?: string
   },
-): Promise<{
-  serverPayload: DailyServerPayload
-  debug: DailySyncDebugPayload
-}> {
-  const parsed = dailySyncPayloadSchema.safeParse(payload)
-  if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => issue.message).join(", "))
-  }
+) {
+  const originalPayload = payload
+  const rawDate = payload.dateIso ?? payload.date
+  const clientMutationId = normalizeOptionalString(payload.clientMutationId) ?? options?.fallbackLocalId
+  const batchInputId = normalizeOptionalString(payload.batchId)
+  const feedStockInputId = normalizeOptionalString(payload.feedStockId)
 
-  const rawDate = parsed.data.dateIso ?? parsed.data.date
   if (!rawDate) {
-    throw new Error("dateIso manquant")
+    throw new DailySyncValidationError(
+      "date invalide",
+      { date: ["Date requise"] },
+      originalPayload,
+    )
   }
 
-  const normalizedDate = rawDate instanceof Date ? rawDate : new Date(rawDate)
-  if (Number.isNaN(normalizedDate.getTime())) {
-    throw new Error("dateIso invalide")
-  }
-
-  const clientMutationId = parsed.data.clientMutationId ?? options?.fallbackLocalId
   if (!clientMutationId) {
-    throw new Error("clientMutationId manquant")
+    throw new DailySyncValidationError(
+      "clientMutationId manquant",
+      { clientMutationId: ["Client mutation id requis"] },
+      originalPayload,
+    )
   }
 
-  const batchId = await resolveRelationId("batch", parsed.data.batchId)
-  if (!batchId || !looksLikeServerId(batchId)) {
-    throw new Error("batchId non mappe vers un id serveur valide")
+  if (!batchInputId) {
+    throw new DailySyncValidationError(
+      "batchId manquant",
+      { batchId: ["Lot requis"] },
+      originalPayload,
+    )
   }
 
-  const feedStockId = await resolveRelationId("stock_item", parsed.data.feedStockId)
-  if (feedStockId !== undefined && !looksLikeServerId(feedStockId)) {
-    throw new Error("feedStockId non mappe vers un id serveur valide")
-  }
+  const batchId = await resolveRelationId("batch", batchInputId)
+  const feedStockId = await resolveRelationId("stock_item", feedStockInputId)
 
-  const mappedPayload: DailyServerPayload = {
+  const mappedPayload = {
+    ...originalPayload,
     clientMutationId,
-    organizationId: parsed.data.organizationId,
     batchId,
-    date: normalizedDate,
-    mortality: parsed.data.mortality,
-    feedKg: parsed.data.feedKg,
-    ...(feedStockId ? { feedStockId } : {}),
-    ...(parsed.data.waterLiters !== undefined ? { waterLiters: parsed.data.waterLiters } : {}),
-    ...(parsed.data.avgWeightG !== undefined ? { avgWeightG: parsed.data.avgWeightG } : {}),
-    ...(parsed.data.observations !== undefined ? { observations: parsed.data.observations } : {}),
-    ...(parsed.data.temperatureMin !== undefined ? { temperatureMin: parsed.data.temperatureMin } : {}),
-    ...(parsed.data.temperatureMax !== undefined ? { temperatureMax: parsed.data.temperatureMax } : {}),
-    ...(parsed.data.humidity !== undefined ? { humidity: parsed.data.humidity } : {}),
-    ...(parsed.data.audioRecordUrl !== undefined ? { audioRecordUrl: parsed.data.audioRecordUrl } : {}),
+    ...(feedStockId !== undefined ? { feedStockId } : {}),
+    date: rawDate instanceof Date ? rawDate.toISOString() : String(rawDate),
+  }
+
+  const finalPayload = {
+    organizationId: normalizeOptionalString(payload.organizationId),
+    batchId,
+    clientMutationId,
+    date: rawDate instanceof Date ? rawDate : new Date(String(rawDate)),
+    mortality: Number(payload.mortality),
+    feedKg: Number(payload.feedKg),
+    ...(feedStockId !== undefined ? { feedStockId } : {}),
+    ...(normalizeOptionalNumber(payload.waterLiters) !== undefined ? { waterLiters: normalizeOptionalNumber(payload.waterLiters) } : {}),
+    ...(normalizeOptionalNumber(payload.avgWeightG) !== undefined ? { avgWeightG: normalizeOptionalNumber(payload.avgWeightG) } : {}),
+    ...(normalizeOptionalString(payload.observations) !== undefined ? { observations: normalizeOptionalString(payload.observations) } : {}),
+    ...(normalizeOptionalNumber(payload.temperatureMin) !== undefined ? { temperatureMin: normalizeOptionalNumber(payload.temperatureMin) } : {}),
+    ...(normalizeOptionalNumber(payload.temperatureMax) !== undefined ? { temperatureMax: normalizeOptionalNumber(payload.temperatureMax) } : {}),
+    ...(normalizeOptionalNumber(payload.humidity) !== undefined ? { humidity: normalizeOptionalNumber(payload.humidity) } : {}),
+    ...(normalizeOptionalString(payload.audioRecordUrl) !== undefined ? { audioRecordUrl: normalizeOptionalString(payload.audioRecordUrl) } : {}),
+  }
+
+  const parsed = createDailyRecordSchema.safeParse(finalPayload)
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors
+    throw new DailySyncValidationError(
+      buildInvalidInputMessage(fieldErrors),
+      fieldErrors,
+      originalPayload,
+      mappedPayload,
+      {
+        ...finalPayload,
+        date: finalPayload.date instanceof Date ? finalPayload.date.toISOString() : finalPayload.date,
+      },
+    )
   }
 
   return {
-    serverPayload: mappedPayload,
+    serverPayload: parsed.data,
     debug: {
-      originalPayload: payload,
-      mappedPayload: {
-        ...mappedPayload,
-        date: mappedPayload.date.toISOString(),
+      originalPayload,
+      mappedPayload,
+      finalPayload: {
+        ...parsed.data,
+        date: parsed.data.date.toISOString(),
       },
-    },
+    } satisfies DailySyncDebugPayload,
   }
 }

@@ -10,6 +10,8 @@ vi.mock("@/src/lib/offline/sync/mappings", () => ({
 }))
 
 describe("buildDailyServerPayload", () => {
+  const organizationId = "cm9s8w0m50000abcd1234efg"
+
   beforeEach(() => {
     findServerIdMock.mockReset()
   })
@@ -29,7 +31,7 @@ describe("buildDailyServerPayload", () => {
 
     const { serverPayload, debug } = await buildDailyServerPayload({
       clientMutationId: "daily:local-1",
-      organizationId: "org-1",
+      organizationId,
       batchId: "batch:local-1",
       dateIso: "2026-04-11T00:00:00.000Z",
       mortality: 3,
@@ -45,7 +47,7 @@ describe("buildDailyServerPayload", () => {
 
     expect(serverPayload).toMatchObject({
       clientMutationId: "daily:local-1",
-      organizationId: "org-1",
+      organizationId,
       batchId: "cm9s8w0m50001abcd1234efg",
       feedStockId: "cm9s8w0m50002abcd1234efg",
       mortality: 3,
@@ -61,6 +63,7 @@ describe("buildDailyServerPayload", () => {
     expect(serverPayload.date.toISOString()).toBe("2026-04-11T00:00:00.000Z")
     expect(debug.originalPayload.batchId).toBe("batch:local-1")
     expect(debug.mappedPayload.batchId).toBe("cm9s8w0m50001abcd1234efg")
+    expect(debug.finalPayload.organizationId).toBe(organizationId)
   })
 
   it("rejette un payload invalide avant l'appel serveur", async () => {
@@ -68,7 +71,7 @@ describe("buildDailyServerPayload", () => {
 
     await expect(buildDailyServerPayload({
       clientMutationId: "daily:local-1",
-      organizationId: "org-1",
+      organizationId,
       batchId: "batch:local-1",
       dateIso: "not-a-date",
       mortality: -1,
@@ -86,7 +89,7 @@ describe("buildDailyServerPayload", () => {
     })
 
     const { serverPayload } = await buildDailyServerPayload({
-      organizationId: "org-1",
+      organizationId,
       batchId: "batch:legacy-1",
       date: "2026-04-10T00:00:00.000Z",
       mortality: 1,

@@ -61,10 +61,15 @@ export default function OfflinePage() {
     id: string
     message: string
     backendReason?: string | null
+    backendStatus?: number | null
+    backendCode?: string | null
     scope: string
     createdAt: string
     payload?: unknown
     mappedPayload?: unknown
+    finalPayload?: unknown
+    backendResponse?: unknown
+    fieldErrors?: Record<string, string[]>
   }>>([])
   const [isPreparing, setIsPreparing] = useState(false)
   const organizationId = context?.organizationId
@@ -355,10 +360,30 @@ export default function OfflinePage() {
                       Raison backend: {error.backendReason}
                     </p>
                   ) : null}
+                  {error.backendStatus ? (
+                    <p className="mt-1 text-xs text-red-800">
+                      Status: {error.backendStatus}
+                      {error.backendCode ? ` - ${error.backendCode}` : ""}
+                    </p>
+                  ) : null}
+                  {error.fieldErrors && Object.keys(error.fieldErrors).length > 0 ? (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-white/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                        Champs invalides
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        {Object.entries(error.fieldErrors).map(([field, messages]) => (
+                          <p key={field} className="text-[11px] text-red-900">
+                            <span className="font-semibold">{field}</span>: {messages.join(", ")}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   {formatDebugPayload(error.payload) ? (
                     <div className="mt-3 rounded-lg border border-red-200 bg-white/70 p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700">
-                        Payload envoye
+                        Payload original
                       </p>
                       <pre className="mt-2 overflow-x-auto text-[11px] text-red-900 whitespace-pre-wrap">
                         {formatDebugPayload(error.payload)}
@@ -372,6 +397,26 @@ export default function OfflinePage() {
                       </p>
                       <pre className="mt-2 overflow-x-auto text-[11px] text-red-900 whitespace-pre-wrap">
                         {formatDebugPayload(error.mappedPayload)}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {formatDebugPayload(error.finalPayload) ? (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-white/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                        Payload final API
+                      </p>
+                      <pre className="mt-2 overflow-x-auto text-[11px] text-red-900 whitespace-pre-wrap">
+                        {formatDebugPayload(error.finalPayload)}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {formatDebugPayload(error.backendResponse) ? (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-white/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                        Reponse backend
+                      </p>
+                      <pre className="mt-2 overflow-x-auto text-[11px] text-red-900 whitespace-pre-wrap">
+                        {formatDebugPayload(error.backendResponse)}
                       </pre>
                     </div>
                   ) : null}

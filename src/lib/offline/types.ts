@@ -127,8 +127,13 @@ export interface OfflineSyncError {
   scope: OfflineModuleScope
   message: string
   backendReason?: string | null
+  backendStatus?: number | null
+  backendCode?: string | null
   conflict: boolean
   payload?: unknown
   mappedPayload?: unknown
+  finalPayload?: unknown
+  backendResponse?: unknown
+  fieldErrors?: Record<string, string[]>
   createdAt: string
 }

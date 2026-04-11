@@ -1,6 +1,5 @@
 "use client"
 
-import { createDailyRecord } from "@/src/actions/daily-records"
 import { createEggRecord } from "@/src/actions/eggs"
 import { createExpense } from "@/src/actions/expenses"
 import { createPurchase } from "@/src/actions/purchases"
@@ -17,7 +16,11 @@ import {
   stockMovementRepository,
 } from "@/src/lib/offline/repositories"
 import { logSyncError } from "@/src/lib/offline/sync/errors"
-import { buildDailyServerPayload, type DailySyncDebugPayload } from "@/src/lib/offline/sync/daily"
+import {
+  buildDailyServerPayload,
+  DailySyncValidationError,
+  type DailySyncDebugPayload,
+} from "@/src/lib/offline/sync/daily"
 import { saveSyncMapping } from "@/src/lib/offline/sync/mappings"
 import {
   deleteSyncCommand,
@@ -55,10 +58,32 @@ async function replayCommand(command: OfflineSyncCommand) {
         localId: command.localId,
         payload: debug.mappedPayload,
       })
+      console.info("[offline-sync][daily] final payload sent to api", {
+        commandId: command.id,
+        localId: command.localId,
+        payload: debug.finalPayload,
+      })
+
+      const response = await fetch("/api/offline/daily-sync", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(serverPayload),
+      })
+      const responseBody = await response.json()
+
+      console.info("[offline-sync][daily] backend response", {
+        commandId: command.id,
+        localId: command.localId,
+        status: response.status,
+        body: responseBody,
+      })
 
       return {
         debug,
-        result: await createDailyRecord(serverPayload),
+        result: responseBody,
+        responseStatus: response.status,
       }
     }
     case "CREATE_EXPENSE":
@@ -192,6 +217,10 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
         replayed && typeof replayed === "object" && "result" in replayed
           ? replayed.result
           : replayed
+      const responseStatus =
+        replayed && typeof replayed === "object" && "responseStatus" in replayed
+          ? replayed.responseStatus
+          : null
       const debug =
         replayed && typeof replayed === "object" && "debug" in replayed
           ? (replayed.debug as DailySyncDebugPayload | undefined)
@@ -228,9 +257,20 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
         scope: command.scope,
         message: errorMessage ?? "SYNC_FAILED",
         backendReason: errorMessage ?? "SYNC_FAILED",
+        backendStatus: typeof responseStatus === "number" ? responseStatus : null,
+        backendCode:
+          result && typeof result === "object" && "code" in result && typeof result.code === "string"
+            ? result.code
+            : null,
         conflict,
         payload: debug?.originalPayload ?? command.payload,
         mappedPayload: debug?.mappedPayload,
+        finalPayload: debug?.finalPayload,
+        backendResponse: result,
+        fieldErrors:
+          result && typeof result === "object" && "fieldErrors" in result && typeof result.fieldErrors === "object"
+            ? (result.fieldErrors as Record<string, string[]>)
+            : undefined,
       })
       lastError = errorMessage ?? "SYNC_FAILED"
       failed += 1
@@ -256,9 +296,26 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
         scope: command.scope,
         message,
         backendReason: null,
+        backendStatus: error instanceof DailySyncValidationError ? 400 : null,
+        backendCode: error instanceof DailySyncValidationError ? "CLIENT_VALIDATION_FAILED" : null,
         conflict: false,
-        payload: command.payload,
-        mappedPayload: null,
+        payload:
+          error instanceof DailySyncValidationError
+            ? error.originalPayload ?? command.payload
+            : command.payload,
+        mappedPayload:
+          error instanceof DailySyncValidationError
+            ? error.mappedPayload ?? null
+            : null,
+        finalPayload:
+          error instanceof DailySyncValidationError
+            ? error.finalPayload ?? null
+            : null,
+        backendResponse: null,
+        fieldErrors:
+          error instanceof DailySyncValidationError
+            ? error.fieldErrors
+            : undefined,
       })
       lastError = message
       failed += 1
