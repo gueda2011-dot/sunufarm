@@ -20,6 +20,7 @@ const PUBLIC_PATHS: RegExp[] = [
   /^\/api\/track\//,
   /^\/sw\.js$/,
   /^\/manifest\.json$/,
+  /^\/manifest\.webmanifest$/,
   /^\/icons\//,
   /^\/images\//,
 ]
@@ -36,6 +37,7 @@ export default async function middleware(req: NextRequest) {
   const token = await getToken({
     req,
     secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+    secureCookie: req.nextUrl.protocol === "https:",
   })
 
   if (!token?.sub) {
