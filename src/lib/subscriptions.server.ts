@@ -27,6 +27,7 @@ import {
   getCommercialPlanDefinition,
   type CommercialPlan,
 } from "@/src/lib/offer-catalog"
+import { getPlanEntitlements } from "@/src/lib/entitlements"
 
 // ---------------------------------------------------------------------------
 // Type retourné
@@ -49,8 +50,10 @@ export interface OrganizationSubscriptionSummary {
   promise:            string
   audience:           string
   valueHeadline:      string
-  maxActiveBatches:   number
-  maxFarms:           number
+  /** null = illimité */
+  maxActiveBatches:   number | null
+  /** null = illimité */
+  maxFarms:           number | null
   recommended?:       boolean
   highlights:         string[]
 
@@ -181,6 +184,7 @@ export async function getOrganizationSubscription(
     now,
   })
   const commercialDefinition = getCommercialPlanDefinition(commercialPlan)
+  const commercialEntitlements = getPlanEntitlements(commercialPlan)
 
   // ── Calcul crédits IA ─────────────────────────────────────────────────
   const aiCreditsTotal = subscription?.aiCreditsTotal ?? TRIAL_AI_CREDITS
@@ -223,8 +227,8 @@ export async function getOrganizationSubscription(
     promise:            commercialDefinition.promise,
     audience:           commercialDefinition.audience,
     valueHeadline:      commercialDefinition.valueHeadline,
-    maxActiveBatches:   definition.maxActiveBatches,
-    maxFarms:           definition.maxFarms,
+    maxActiveBatches:   commercialEntitlements.limits.activeBatchLimit,
+    maxFarms:           commercialEntitlements.limits.farmLimit,
     recommended:        commercialDefinition.recommended,
     highlights:         commercialDefinition.highlights,
     isTrialActive,

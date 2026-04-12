@@ -129,6 +129,40 @@ export function resolveEntitlementGate(
         watermark: false,
       })
     }
+    case "SALES_ACCESS": {
+      const hasAccess = planEntitlements.flags.SALES_ACCESS
+      return buildGateResolution(subscription, entitlement, {
+        access: hasAccess ? "full" : "locked",
+        upgradePlan: hasAccess ? null : "STARTER",
+        requiredPlanLabel: hasAccess ? null : getUpgradeLabel("STARTER"),
+        reason:
+          reason ??
+          (hasAccess
+            ? "Ventes et depenses disponibles."
+            : "Les ventes et depenses sont disponibles a partir du plan Starter."),
+        cta: hasAccess ? "Acces disponible" : "Debloquer ventes et depenses",
+        usage: null,
+        limit: null,
+        watermark: false,
+      })
+    }
+    case "PDF_EXPORT": {
+      const hasAccess = planEntitlements.flags.PDF_EXPORT
+      return buildGateResolution(subscription, entitlement, {
+        access: hasAccess ? "full" : "locked",
+        upgradePlan: hasAccess ? null : "STARTER",
+        requiredPlanLabel: hasAccess ? null : getUpgradeLabel("STARTER"),
+        reason:
+          reason ??
+          (hasAccess
+            ? "Export PDF disponible."
+            : "L export PDF est disponible a partir du plan Starter."),
+        cta: hasAccess ? "Acces disponible" : "Debloquer l export PDF",
+        usage: null,
+        limit: null,
+        watermark: false,
+      })
+    }
     case "ADVANCED_REPORTS": {
       const hasAccess = planEntitlements.flags.ADVANCED_REPORTS
       if (!hasMinimumData) {

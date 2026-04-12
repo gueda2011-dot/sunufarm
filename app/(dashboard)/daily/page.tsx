@@ -17,6 +17,8 @@ import { getBatches }        from "@/src/actions/batches"
 import { getFeedStocks } from "@/src/actions/stock"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { FREE_HISTORY_LIMIT } from "@/src/lib/entitlements"
 import { DailyEntryClient }  from "./_components/DailyEntryClient"
 
 export const metadata: Metadata = {
@@ -41,7 +43,7 @@ export default async function DailyPage({
   const { batchId: defaultBatchId } = await searchParams
 
   // Lots actifs chargés en SSR — disponibles immédiatement, sans flash côté client
-  const [batchesResult, feedStocksResult] = await Promise.all([
+  const [batchesResult, feedStocksResult, subscription] = await Promise.all([
     getBatches({
       organizationId,
       status: "ACTIVE",
@@ -51,7 +53,9 @@ export default async function DailyPage({
       organizationId,
       limit: 100,
     }),
+    getOrganizationSubscription(organizationId),
   ])
+  const historyLimit = subscription.commercialPlan === "FREE" ? FREE_HISTORY_LIMIT : 14
   const initialBatches = batchesResult.success ? batchesResult.data : []
   const initialFeedStocks = feedStocksResult.success
     ? feedStocksResult.data.map((stock) => ({
@@ -69,6 +73,7 @@ export default async function DailyPage({
       initialBatches={initialBatches}
       initialFeedStocks={initialFeedStocks}
       defaultBatchId={defaultBatchId}
+      historyLimit={historyLimit}
     />
   )
 }

@@ -47,6 +47,9 @@ import {
   optionalDateSchema,
 } from "@/src/lib/validators"
 import { UserRole } from "@/src/generated/prisma/client"
+import { forbidden } from "@/src/lib/action-result"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { resolveEntitlementGate, gateHasFullAccess } from "@/src/lib/gate-resolver"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -257,6 +260,10 @@ export async function getExpenses(
       "Accès aux données financières refusé",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les dépenses sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     const expenses = await prisma.expense.findMany({
       where: {
@@ -312,6 +319,10 @@ export async function getExpense(
       "Accès aux données financières refusé",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les dépenses sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     const expense = await prisma.expense.findFirst({
       where:  { id: expenseId, organizationId },
@@ -360,6 +371,10 @@ export async function createExpense(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les dépenses sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     if (clientMutationId) {
       const existingExpense = await prisma.expense.findFirst({
@@ -445,6 +460,10 @@ export async function updateExpense(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les dépenses sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     const existing = await prisma.expense.findFirst({
       where:  { id: expenseId, organizationId },
@@ -510,6 +529,10 @@ export async function deleteExpense(
     "Permission refusée",
   )
   if (!roleResult.success) return roleResult
+  const subscription = await getOrganizationSubscription(organizationId)
+  if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+    return forbidden("Les dépenses sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+  }
 
   const existing = await prisma.expense.findFirst({
     where:  { id: expenseId, organizationId },

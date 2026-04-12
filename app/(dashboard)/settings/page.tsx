@@ -62,6 +62,10 @@ const BUSINESS_VALUE_POINTS = [
   "Multi-fermes, equipe et arbitrage transverse dans une seule lecture",
 ] as const
 
+function formatLimit(value: number | null): string {
+  return value === null ? "Illimité" : String(value)
+}
+
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   ESPECES: "Especes",
   VIREMENT: "Virement",
@@ -200,14 +204,14 @@ export default async function SettingsPage() {
           <div className="rounded-2xl bg-white/12 px-4 py-4 backdrop-blur-sm">
             <p className="text-xs uppercase tracking-wide text-green-100">Usage fermes</p>
             <p className="mt-1 text-xl font-semibold">
-              {farmCount} / {subscription.maxFarms}
+              {farmCount} / {formatLimit(subscription.maxFarms)}
             </p>
             <p className="mt-1 text-sm text-green-50">Nombre de fermes actives</p>
           </div>
           <div className="rounded-2xl bg-white/12 px-4 py-4 backdrop-blur-sm">
             <p className="text-xs uppercase tracking-wide text-green-100">Usage lots</p>
             <p className="mt-1 text-xl font-semibold">
-              {activeBatchCount} / {subscription.maxActiveBatches}
+              {activeBatchCount} / {formatLimit(subscription.maxActiveBatches)}
             </p>
             <p className="mt-1 text-sm text-green-50">Lots actifs en cours</p>
           </div>

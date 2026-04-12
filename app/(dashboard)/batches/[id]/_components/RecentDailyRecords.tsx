@@ -10,6 +10,7 @@ import Link                      from "next/link"
 import { Lock }                  from "lucide-react"
 import { formatDate, formatWeight } from "@/src/lib/formatters"
 import type { DailyRecordDetail } from "@/src/actions/daily-records"
+import { COMMERCIAL_PLAN_CATALOG } from "@/src/lib/offer-catalog"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -134,7 +135,8 @@ export function RecentDailyRecords({
             </p>
             <p className="mt-0.5 text-xs text-amber-700">
               L&apos;historique complet est disponible à partir du plan{" "}
-              <span className="font-semibold">Starter</span> — 3 500 FCFA / mois.
+              <span className="font-semibold">Starter</span> —{" "}
+              {COMMERCIAL_PLAN_CATALOG.STARTER.monthlyPriceFcfa.toLocaleString("fr-SN")} FCFA / mois.
             </p>
           </div>
           <Link

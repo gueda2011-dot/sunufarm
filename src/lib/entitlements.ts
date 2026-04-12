@@ -4,6 +4,8 @@ export type SubscriptionEntitlement =
   | "ACTIVE_BATCH_LIMIT"
   | "FARM_LIMIT"
   | "FULL_HISTORY"
+  | "SALES_ACCESS"
+  | "PDF_EXPORT"
   | "ADVANCED_REPORTS"
   | "REAL_PROFITABILITY"
   | "BREAK_EVEN_PRICE"
@@ -37,6 +39,8 @@ export const PLAN_ENTITLEMENTS: Record<CommercialPlan, PlanEntitlements> = {
     },
     flags: {
       FULL_HISTORY: false,
+      SALES_ACCESS: false,
+      PDF_EXPORT: false,
       ADVANCED_REPORTS: false,
       REAL_PROFITABILITY: false,
       BREAK_EVEN_PRICE: false,
@@ -59,6 +63,8 @@ export const PLAN_ENTITLEMENTS: Record<CommercialPlan, PlanEntitlements> = {
     },
     flags: {
       FULL_HISTORY: true,
+      SALES_ACCESS: true,
+      PDF_EXPORT: true,
       ADVANCED_REPORTS: false,
       REAL_PROFITABILITY: false,
       BREAK_EVEN_PRICE: false,
@@ -81,6 +87,8 @@ export const PLAN_ENTITLEMENTS: Record<CommercialPlan, PlanEntitlements> = {
     },
     flags: {
       FULL_HISTORY: true,
+      SALES_ACCESS: true,
+      PDF_EXPORT: true,
       ADVANCED_REPORTS: true,
       REAL_PROFITABILITY: true,
       BREAK_EVEN_PRICE: true,
@@ -103,6 +111,8 @@ export const PLAN_ENTITLEMENTS: Record<CommercialPlan, PlanEntitlements> = {
     },
     flags: {
       FULL_HISTORY: true,
+      SALES_ACCESS: true,
+      PDF_EXPORT: true,
       ADVANCED_REPORTS: true,
       REAL_PROFITABILITY: true,
       BREAK_EVEN_PRICE: true,
