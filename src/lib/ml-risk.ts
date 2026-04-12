@@ -42,6 +42,14 @@ export interface ModelMeta {
   dataSource: ModelDataSource
   sampleSize: number
   accuracy: number
+  /** Score qualité 0–1 produit par validate_real_data.py. null si source synthétique. */
+  qualityScore: number | null
+  /**
+   * true si les features J14 sont des approximations reconstruites depuis les
+   * agrégats du snapshot (source "real"). false si mesurées directement (source "synthetic").
+   * L'UI devrait afficher une note de précision moindre quand true.
+   */
+  featuresAreApproximate: boolean
   trainedAt: string  // ISO date
 }
 
@@ -57,6 +65,8 @@ interface ModelPayload {
   dataSource: ModelDataSource
   sampleSize: number
   accuracy: number
+  qualityScore: number | null
+  featuresAreApproximate: boolean
   trainedAt: string
   feature_cols: string[]
   scaler_mean: number[]
@@ -180,6 +190,8 @@ export function predictLotRisk(data: LotJ14Data): PredictionResult {
       dataSource: model.dataSource,
       sampleSize: model.sampleSize,
       accuracy: model.accuracy,
+      qualityScore: model.qualityScore ?? null,
+      featuresAreApproximate: model.featuresAreApproximate ?? false,
       trainedAt: model.trainedAt,
     },
   }

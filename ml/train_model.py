@@ -13,12 +13,21 @@ SÉPARATION DES SOURCES — RÈGLE FONDAMENTALE :
   Le model.json exporté porte la mention explicite de sa source (dataSource,
   sampleSize, trainedAt) — l'API Next.js la retourne au client pour affichage.
 
+PASSAGE À --source real :
+  Deux conditions doivent être remplies (vérifiées automatiquement) :
+    1. Quantité  : >= 30 lots réels dans ml/data/real/ml_features_j14.csv
+    2. Qualité   : validation_report.json produit par validate_real_data.py
+                   doit avoir ready_for_training = true
+
+  Le script appelle validate_real_data.py automatiquement avant d'entraîner.
+  Si la validation échoue, le script refuse et explique pourquoi.
+
 Ce script :
-  1. Lit daily_records.csv + outcomes.csv depuis le bon répertoire source
-  2. Construit ml_features_j14.csv (1 ligne / lot, snapshot à J14)
+  1. (real uniquement) Vérifie la qualité via validate_real_data.py
+  2. Lit les features depuis le bon répertoire source
   3. Entraîne un RandomForestClassifier (ou LogisticRegression)
   4. Affiche les métriques (accuracy, confusion matrix, importance)
-  5. Exporte model.json — utilisable directement en TypeScript
+  5. Exporte model.json avec métadonnées de provenance
 
 Usage :
   pip install scikit-learn pandas
@@ -29,6 +38,7 @@ Usage :
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -118,6 +128,8 @@ def build_features_from_real(data_dir: str) -> pd.DataFrame:
 
     Format attendu : mêmes colonnes que le synthétique + target_lot_a_risque.
     Aucune ligne synthétique ne doit figurer dans ce fichier.
+
+    La validation qualité est gérée en amont par _assert_real_quality_gate().
     """
     features_path = os.path.join(data_dir, "ml_features_j14.csv")
 
@@ -129,20 +141,52 @@ def build_features_from_real(data_dir: str) -> pd.DataFrame:
 
     df = pd.read_csv(features_path)
 
-    # Vérification de sécurité : refus d'un fichier mal formé
     missing = [c for c in FEATURE_COLS + [TARGET] if c not in df.columns]
     if missing:
         raise ValueError(f"Colonnes manquantes dans le fichier réel : {missing}")
 
-    # Contrôle de taille
-    if len(df) < MIN_REAL_LOTS:
-        raise ValueError(
-            f"Pas assez de lots réels ({len(df)} < {MIN_REAL_LOTS} minimum).\n"
-            "Attendez d'avoir suffisamment de données terrain ou "
-            "utilisez --source synthetic pour le développement."
-        )
-
     return df
+
+
+def _assert_real_quality_gate(data_dir: str):
+    """
+    Vérifie que les données réelles passent les deux gates avant entraînement :
+      - Gate quantité  : >= MIN_REAL_LOTS lots
+      - Gate qualité   : validate_real_data.py doit avoir validé le fichier
+
+    Lève SystemExit avec un message clair si un gate échoue.
+    """
+    # Import du validateur (même package ml/)
+    validate_module_path = os.path.join(ML_DIR, "validate_real_data.py")
+    if not os.path.exists(validate_module_path):
+        print("AVERTISSEMENT : validate_real_data.py introuvable, gate qualité ignorée.")
+        return
+
+    # Import dynamique pour éviter les dépendances circulaires
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("validate_real_data", validate_module_path)
+    validator = importlib.util.module_from_spec(spec)  # type: ignore
+    spec.loader.exec_module(validator)  # type: ignore
+
+    print("Verification de la qualite des donnees reelles...")
+    report = validator.check_readiness()
+    validator._print_report(report)
+
+    if not report["ready_for_training"]:
+        print()
+        print("ENTRAINEMENT REFUSE sur donnees reelles.")
+        print("Raisons :")
+        for b in report.get("blockers", []):
+            print(f"  - {b}")
+        print()
+        print("Options :")
+        print("  1. Corriger les problemes et relancer export_real_data.py + validate_real_data.py")
+        print("  2. Utiliser --source synthetic (bootstrap) en attendant")
+        sys.exit(1)
+
+    score = report.get("quality_score", 0)
+    print(f"Gate qualite OK (score {score*100:.0f}/100) — entrainement autorise.")
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +241,8 @@ def train(df: pd.DataFrame, model_type: str = "lr"):
 # ---------------------------------------------------------------------------
 
 def export_model_json(clf, scaler, model_type: str, source: str,
-                      sample_size: int, accuracy: float):
+                      sample_size: int, accuracy: float,
+                      quality_score: float | None = None):
     """
     Sérialise le modèle + métadonnées de source.
 
@@ -211,10 +256,13 @@ def export_model_json(clf, scaler, model_type: str, source: str,
         "modelAlgorithm": model_type,
 
         # --- Provenance — NE PAS MÉLANGER ---
-        "dataSource": source,           # "synthetic" | "real"
+        "dataSource": source,                    # "synthetic" | "real"
         "sampleSize": sample_size,
         "accuracy": round(accuracy, 4),
+        "qualityScore": quality_score,           # score validate_real_data (null si synthetic)
         "trainedAt": datetime.now(timezone.utc).isoformat(),
+        # Avertissement explicite si features approximées (source réelle)
+        "featuresAreApproximate": source == "real",
 
         # --- Paramètres d'inférence ---
         "feature_cols": FEATURE_COLS,
@@ -277,14 +325,24 @@ def main():
         # Sauvegarde des features dans le bon sous-répertoire
         df.to_csv(os.path.join(data_dir, "ml_features_j14.csv"), index=False)
     else:
+        # GATE QUANTITÉ + QUALITÉ — obligatoire avant tout entraînement sur réel
+        _assert_real_quality_gate(data_dir)
         print("Chargement des features J14 (source reelle)...")
         df = build_features_from_real(data_dir)
 
     n_risque = int(df[TARGET].sum())
     print(f"  {len(df)} lots, {n_risque} a risque ({100*n_risque/len(df):.1f}%)")
 
+    # Récupère le quality_score du rapport si disponible (source real uniquement)
+    quality_score = None
+    if args.source == "real":
+        report_path = os.path.join(data_dir, "validation_report.json")
+        if os.path.exists(report_path):
+            with open(report_path, encoding="utf-8") as f:
+                quality_score = json.load(f).get("quality_score")
+
     clf, scaler, accuracy = train(df, args.model)
-    export_model_json(clf, scaler, args.model, args.source, len(df), accuracy)
+    export_model_json(clf, scaler, args.model, args.source, len(df), accuracy, quality_score)
 
 
 if __name__ == "__main__":
