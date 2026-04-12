@@ -4,7 +4,9 @@
   "dataSource": "synthetic",
   "sampleSize": 300,
   "accuracy": 0.75,
-  "trainedAt": "2026-04-12T10:50:36.106999+00:00",
+  "qualityScore": null,
+  "trainedAt": "2026-04-12T17:06:54.587333+00:00",
+  "featuresAreApproximate": false,
   "feature_cols": [
     "effectif_initial",
     "mortalite_cumulee_j14",
