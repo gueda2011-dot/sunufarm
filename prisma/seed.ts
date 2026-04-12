@@ -14,6 +14,7 @@ import {
   SubscriptionStatus,
   UserRole,
 } from "../src/generated/prisma"
+import { ensureSenegalBreedCatalog } from "../src/lib/breed-catalog"
 
 const adapter = new PrismaPg({
   connectionString: process.env.SUNUFARM_DATABASE_URL,
@@ -77,19 +78,14 @@ async function clearAll() {
 }
 
 async function createReferenceData() {
-  const species = await prisma.species.create({
-    data: {
-      name: "Poulet",
-      code: "POULET",
-    },
+  await ensureSenegalBreedCatalog(prisma)
+
+  const species = await prisma.species.findUniqueOrThrow({
+    where: { code: "POULET" },
   })
 
-  const breed = await prisma.breed.create({
-    data: {
-      name: "Cobb 500",
-      code: "COBB500",
-      speciesId: species.id,
-    },
+  const breed = await prisma.breed.findUniqueOrThrow({
+    where: { code: "COBB500" },
   })
 
   const [feedGrowth, feedFinish] = await Promise.all([
@@ -615,6 +611,16 @@ async function createDemoWorkspace(passwordHash: string) {
 
 async function main() {
   console.log("Initializing SunuFarm demo seed...")
+
+  if (process.env.SEED_FORCE_RESET !== "true") {
+    console.error("")
+    console.error("ERROR: This seed deletes ALL data before recreating it.")
+    console.error("To confirm you want to wipe the database, run:")
+    console.error("")
+    console.error("  SEED_FORCE_RESET=true npx prisma db seed")
+    console.error("")
+    process.exit(1)
+  }
 
   await clearAll()
 

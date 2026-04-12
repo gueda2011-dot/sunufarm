@@ -22,11 +22,16 @@ import {
 } from "@/src/lib/permissions"
 import {
   requiredIdSchema,
-  optionalIdSchema,
   nonNegativeIntSchema,
   nonNegativeNumberSchema,
-  dateSchema,
 } from "@/src/lib/validators"
+import {
+  createDailyRecordSchema,
+  dailyMortalityDetailSchema,
+  flattenZodFieldErrors,
+  buildInvalidInputMessage,
+} from "@/src/lib/daily-record-validation"
+import { invalidInput } from "@/src/lib/action-result"
 import {
   Prisma,
   UserRole,
@@ -42,8 +47,6 @@ import { hasPlanFeature } from "@/src/lib/subscriptions"
 // Schémas Zod
 // ---------------------------------------------------------------------------
 
-const clientMutationIdSchema = z.string().trim().min(1).max(100)
-
 const getDailyRecordsSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,
@@ -55,30 +58,6 @@ const getDailyRecordSchema = z.object({
   organizationId: requiredIdSchema,
   batchId:        requiredIdSchema,
   dailyRecordId:  requiredIdSchema,
-})
-
-const mortalityDetailSchema = z.object({
-  mortalityReasonId: optionalIdSchema,
-  count:             nonNegativeIntSchema,
-  notes:             z.string().max(500).optional(),
-})
-
-const createDailyRecordSchema = z.object({
-  organizationId: requiredIdSchema,
-  batchId:        requiredIdSchema,
-  clientMutationId: clientMutationIdSchema.optional(),
-  date:           dateSchema,
-  mortality:      nonNegativeIntSchema,
-  feedKg:         nonNegativeNumberSchema,
-  feedStockId:    optionalIdSchema,
-  waterLiters:    nonNegativeNumberSchema.optional(),
-  temperatureMin: z.number().optional(),
-  temperatureMax: z.number().optional(),
-  humidity:       z.number().min(0).max(100).optional(),
-  avgWeightG:     z.number().int().positive().optional(),
-  observations:   z.string().max(2000).optional(),
-  audioRecordUrl: z.string().url().max(1000).optional(),
-  mortalityDetails: z.array(mortalityDetailSchema).optional(),
 })
 
 const updateDailyRecordSchema = z.object({
@@ -95,7 +74,7 @@ const updateDailyRecordSchema = z.object({
   avgWeightG:      z.number().int().positive().optional(),
   observations:    z.string().max(2000).optional(),
   audioRecordUrl:  z.string().url().max(1000).optional().nullable(),
-  mortalityDetails: z.array(mortalityDetailSchema).optional(),
+  mortalityDetails: z.array(dailyMortalityDetailSchema).optional(),
 })
 
 // ---------------------------------------------------------------------------
@@ -511,7 +490,8 @@ export async function createDailyRecord(
   try {
     const parsed = createDailyRecordSchema.safeParse(data)
     if (!parsed.success) {
-      return { success: false, error: "Données invalides" }
+      const fieldErrors = flattenZodFieldErrors(parsed.error)
+      return invalidInput(buildInvalidInputMessage(fieldErrors), fieldErrors)
     }
 
     const {
@@ -882,3 +862,5 @@ export async function updateDailyRecord(
     return { success: false, error: "Impossible de mettre à jour la saisie" }
   }
 }
+
+

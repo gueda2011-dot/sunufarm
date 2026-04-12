@@ -31,16 +31,17 @@ const getEggRecordsSchema = z.object({
 })
 
 const createEggRecordSchema = z.object({
-  organizationId: requiredIdSchema,
-  batchId:        requiredIdSchema,
-  date:           dateSchema,
-  totalEggs:      nonNegativeIntSchema,
-  sellableEggs:   nonNegativeIntSchema,
-  brokenEggs:     nonNegativeIntSchema.default(0),
-  dirtyEggs:      nonNegativeIntSchema.default(0),
-  smallEggs:      nonNegativeIntSchema.default(0),
-  passageCount:   z.number().int().min(1).max(10).default(1),
-  observations:   z.string().max(1000).optional(),
+  organizationId:  requiredIdSchema,
+  batchId:         requiredIdSchema,
+  date:            dateSchema,
+  totalEggs:       nonNegativeIntSchema,
+  sellableEggs:    nonNegativeIntSchema,
+  brokenEggs:      nonNegativeIntSchema.default(0),
+  dirtyEggs:       nonNegativeIntSchema.default(0),
+  smallEggs:       nonNegativeIntSchema.default(0),
+  passageCount:    z.number().int().min(1).max(10).default(1),
+  observations:    z.string().max(1000).optional(),
+  clientMutationId: z.string().trim().min(1).max(100).optional(),
 })
 
 const updateEggRecordSchema = z.object({
@@ -173,7 +174,7 @@ export async function createEggRecord(
     const parsed = createEggRecordSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: "Données invalides" }
 
-    const { organizationId, batchId, ...recordData } = parsed.data
+    const { organizationId, batchId, clientMutationId, ...recordData } = parsed.data
     const accessResult = await requireOrganizationModuleContext(organizationId, "EGGS")
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
@@ -183,6 +184,15 @@ export async function createEggRecord(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+
+    // Idempotence : si clientMutationId déjà connu, retourner le record existant
+    if (clientMutationId) {
+      const existingByMutation = await prisma.eggProductionRecord.findUnique({
+        where: { clientMutationId },
+        select: eggRecordSelect,
+      })
+      if (existingByMutation) return { success: true, data: existingByMutation }
+    }
 
     // Valider que le lot appartient à l'org, est actif, et est de type PONDEUSE
     const batch = await prisma.batch.findFirst({
@@ -206,6 +216,7 @@ export async function createEggRecord(
         organizationId,
         batchId,
         recordedById: actorId,
+        clientMutationId: clientMutationId ?? null,
         ...recordData,
       },
       select: eggRecordSelect,

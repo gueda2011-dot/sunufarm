@@ -4,6 +4,8 @@ import { useEffect, useState, useSyncExternalStore } from "react"
 import { Download, Share2 } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
 
+const DISMISS_KEY = "sunufarm:pwa-install-dismissed"
+
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>
@@ -22,9 +24,20 @@ function getIosInstallHintSnapshot() {
   return isIos && !isStandalone
 }
 
+function isAlreadyInstalled() {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    ("standalone" in window.navigator &&
+      Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone))
+  )
+}
+
 export function InstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
-  const [dismissed, setDismissed] = useState(false)
+  const [dismissed, setDismissed] = useState(() => {
+    if (typeof window === "undefined") return false
+    return localStorage.getItem(DISMISS_KEY) === "1"
+  })
   const showIosHint = useSyncExternalStore(
     subscribeToInstallAvailability,
     getIosInstallHintSnapshot,
@@ -32,6 +45,9 @@ export function InstallPrompt() {
   )
 
   useEffect(() => {
+    // Ne rien faire si déjà installé ou si l'utilisateur a dismissé
+    if (isAlreadyInstalled() || dismissed) return
+
     const handler = (event: Event) => {
       event.preventDefault()
       setDeferredPrompt(event as BeforeInstallPromptEvent)
@@ -39,7 +55,12 @@ export function InstallPrompt() {
 
     window.addEventListener("beforeinstallprompt", handler)
     return () => window.removeEventListener("beforeinstallprompt", handler)
-  }, [])
+  }, [dismissed])
+
+  function handleDismiss() {
+    setDismissed(true)
+    localStorage.setItem(DISMISS_KEY, "1")
+  }
 
   if (dismissed) {
     return null
@@ -63,7 +84,7 @@ export function InstallPrompt() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setDismissed(true)}
+              onClick={handleDismiss}
             >
               Plus tard
             </Button>
@@ -100,7 +121,7 @@ export function InstallPrompt() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setDismissed(true)}
+            onClick={handleDismiss}
           >
             Plus tard
           </Button>

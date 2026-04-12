@@ -41,7 +41,7 @@ export async function POST(
       typeof body === "object" && body !== null && "organizationId" in body
         ? String((body as { organizationId?: unknown }).organizationId ?? "")
         : ""
-    const rateLimit = applyRateLimit({
+    const rateLimit = await applyRateLimit({
       key: `subscription-payment-reject:${paymentId}:${getClientIpFromHeaders(request.headers)}`,
       limit: 10,
       windowMs: 60_000,

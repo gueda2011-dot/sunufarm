@@ -40,9 +40,9 @@ import { requiredIdSchema, positiveIntSchema } from "@/src/lib/validators"
 import { BatchStatus, UserRole } from "@/src/generated/prisma/client"
 import {
   getFeatureUpgradeMessage,
-  hasPlanFeature,
 } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { resolveEntitlementGate } from "@/src/lib/gate-resolver"
 
 // ---------------------------------------------------------------------------
 // Schémas Zod
@@ -284,14 +284,15 @@ export async function createFarm(
     const activeFarmCount = await prisma.farm.count({
       where: { organizationId, deletedAt: null },
     })
+    const farmGate = resolveEntitlementGate(subscription, "FARM_LIMIT", {
+      usage: activeFarmCount,
+      reason: `${getFeatureUpgradeMessage("MULTI_FARM")} Votre plan actuel est limite a 1 ferme.`,
+    })
 
-    if (
-      !hasPlanFeature(subscription.plan, "MULTI_FARM")
-      && activeFarmCount >= subscription.maxFarms
-    ) {
+    if (farmGate.access !== "full") {
       return {
         success: false,
-        error: `${getFeatureUpgradeMessage("MULTI_FARM")} Votre plan actuel est limite a ${subscription.maxFarms} ferme.`,
+        error: farmGate.reason,
       }
     }
 

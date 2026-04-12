@@ -23,7 +23,7 @@ export async function POST(
     }
 
     const { transactionId } = await params
-    const rateLimit = applyRateLimit({
+    const rateLimit = await applyRateLimit({
       key: `admin-payment-reject:${transactionId}:${getClientIpFromHeaders(request.headers)}`,
       limit: 10,
       windowMs: 60_000,

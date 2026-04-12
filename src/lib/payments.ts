@@ -394,6 +394,7 @@ export async function confirmPaymentTransaction(input: {
         amountFcfa: payment.amountFcfa,
         now,
         periodStart,
+        triggeredBy: "admin_wave",
       })
     }
 

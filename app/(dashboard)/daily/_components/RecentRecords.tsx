@@ -1,37 +1,28 @@
 "use client"
 
-/**
- * SunuFarm — Historique des 14 dernières saisies du lot
- *
- * Couverture doublon partielle (best-effort) :
- *   La mention en sous-titre rappelle que seuls les records chargés sont testés.
- *   La contrainte serveur @@batchId_date reste la vraie source de vérité.
- *
- * La ligne correspondant à la date sélectionnée est mise en évidence (fond vert).
- * Les saisies verrouillées affichent une icône cadenas.
- * La mortalité > 0 est affichée en rouge pour une lecture terrain rapide.
- */
+import { formatDate } from "@/src/lib/formatters"
+import { cn } from "@/src/lib/utils"
 
-import { formatDate }        from "@/src/lib/formatters"
-import type { DailyRecordDetail } from "@/src/actions/daily-records"
-import { cn }                from "@/src/lib/utils"
-
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
-interface RecentRecordsProps {
-  records:      DailyRecordDetail[]
-  isLoading:    boolean
-  selectedDate: string   // YYYY-MM-DD
+export interface RecentRecordRow {
+  id: string
+  date: Date | string
+  mortality: number
+  feedKg: number
+  waterLiters?: number | null
+  audioRecordUrl?: string | null
+  isLocked?: boolean
+  isOptimistic?: boolean
+  syncStatus?: "pending" | "failed" | "synced" | "conflict"
+  syncError?: string
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+interface RecentRecordsProps {
+  records: RecentRecordRow[]
+  isLoading: boolean
+  selectedDate: string
+}
 
-/** Compare date Prisma (UTC minuit) avec chaîne YYYY-MM-DD du HTML input */
-function isSameDay(recordDate: Date, dateStr: string): boolean {
+function isSameDay(recordDate: Date | string, dateStr: string): boolean {
   return new Date(recordDate).toISOString().substring(0, 10) === dateStr
 }
 
@@ -39,51 +30,40 @@ function formatFeed(kg: number): string {
   return `${kg % 1 === 0 ? kg : kg.toFixed(1)} kg`
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export function RecentRecords({ records, isLoading, selectedDate }: RecentRecordsProps) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-
-      {/* En-tête */}
-      <div className="px-4 py-3 border-b border-gray-100">
-        <h2 className="text-sm font-semibold text-gray-700">
-          Historique récent
-        </h2>
-        <p className="text-xs text-gray-400 mt-0.5">
-          14 dernières saisies · détection doublon client partielle
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="border-b border-gray-100 px-4 py-3">
+        <h2 className="text-sm font-semibold text-gray-700">Historique recent</h2>
+        <p className="mt-0.5 text-xs text-gray-400">
+          14 dernieres saisies et entrees locales en attente
         </p>
       </div>
 
-      {/* Loading shimmer */}
-      {isLoading && (
-        <div className="p-3 space-y-2">
-          {[...Array(4)].map((_, i) => (
+      {isLoading ? (
+        <div className="space-y-2 p-3">
+          {[...Array(4)].map((_, index) => (
             <div
-              key={i}
-              className="h-10 rounded-lg bg-gray-100 animate-pulse"
-              style={{ opacity: 1 - i * 0.2 }}
+              key={index}
+              className="h-10 animate-pulse rounded-lg bg-gray-100"
+              style={{ opacity: 1 - index * 0.2 }}
             />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* État vide */}
-      {!isLoading && records.length === 0 && (
+      {!isLoading && records.length === 0 ? (
         <div className="px-4 py-10 text-center text-sm text-gray-400">
           Aucune saisie pour ce lot
         </div>
-      )}
+      ) : null}
 
-      {/* Table */}
-      {!isLoading && records.length > 0 && (
+      {!isLoading && records.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-100 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                <th className="px-4 py-2.5 text-left">Date</th>
+              <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
+                <th className="px-4 py-2.5">Date</th>
                 <th className="px-4 py-2.5 text-right">Mort.</th>
                 <th className="px-4 py-2.5 text-right">Aliment</th>
                 <th className="px-4 py-2.5 text-right">Eau</th>
@@ -102,41 +82,57 @@ export function RecentRecords({ records, isLoading, selectedDate }: RecentRecord
                       isSelected ? "bg-green-50" : "hover:bg-gray-50",
                     )}
                   >
-                    {/* Date */}
-                    <td className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap">
-                      {isSelected && (
+                    <td className="whitespace-nowrap px-4 py-3 font-medium text-gray-800">
+                      {isSelected ? (
                         <span
-                          className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 mb-0.5 align-middle"
+                          className="mb-0.5 mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-green-500 align-middle"
                           aria-hidden
                         />
-                      )}
+                      ) : null}
                       {formatDate(record.date)}
-                      {record.isLocked && (
-                        <span className="ml-1.5 text-xs text-gray-400" title="Verrouillée">
-                          🔒
+                      {record.isLocked ? (
+                        <span className="ml-1.5 text-xs text-gray-400" title="Verrouillee">
+                          Locked
                         </span>
-                      )}
+                      ) : null}
+                      {record.isOptimistic ? (
+                        <span
+                          className={cn(
+                            "ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                            record.syncStatus === "failed"
+                              ? "bg-red-100 text-red-700"
+                              : record.syncStatus === "conflict"
+                                ? "bg-orange-100 text-orange-700"
+                              : "bg-amber-100 text-amber-700",
+                          )}
+                        >
+                          {record.syncStatus === "failed"
+                            ? "Erreur sync"
+                            : record.syncStatus === "conflict"
+                              ? "Conflit sync"
+                              : "En attente de sync"}
+                        </span>
+                      ) : null}
                     </td>
-
-                    {/* Mortalité */}
                     <td className="px-4 py-3 text-right tabular-nums">
                       {record.mortality > 0 ? (
-                        <span className="text-red-600 font-semibold">
-                          {record.mortality}
-                        </span>
+                        <span className="font-semibold text-red-600">{record.mortality}</span>
                       ) : (
                         <span className="text-gray-400">0</span>
                       )}
                     </td>
-
-                    {/* Aliment */}
-                    <td className="px-4 py-3 text-right tabular-nums text-gray-700 whitespace-nowrap">
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-gray-700">
                       {formatFeed(record.feedKg)}
                     </td>
-
-                    {/* Eau */}
-                    <td className="px-4 py-3 text-right tabular-nums text-gray-500 whitespace-nowrap">
-                      {record.waterLiters != null ? `${record.waterLiters} L` : "—"}
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-gray-500">
+                      {record.waterLiters != null ? `${record.waterLiters} L` : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {record.audioRecordUrl ? (
+                        <audio controls src={record.audioRecordUrl} className="mx-auto h-8 w-32 sm:w-48" />
+                      ) : (
+                        <span className="text-xs text-gray-300">-</span>
+                      )}
                     </td>
 
                     {/* Audio */}
@@ -153,7 +149,7 @@ export function RecentRecords({ records, isLoading, selectedDate }: RecentRecord
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

@@ -23,6 +23,10 @@ import {
   TRIAL_AI_CREDITS,
   UNLIMITED_AI,
 } from "@/src/lib/subscriptions"
+import {
+  getCommercialPlanDefinition,
+  type CommercialPlan,
+} from "@/src/lib/offer-catalog"
 
 // ---------------------------------------------------------------------------
 // Type retourné
@@ -33,10 +37,15 @@ export interface OrganizationSubscriptionSummary {
   plan:               SubscriptionPlan
   /** Plan stocké dans la DB (peut différer de plan pendant l'essai) */
   rawPlan:            SubscriptionPlan
+  /** Plan commercial exposé à l'utilisateur dans la roadmap pricing Phase 1. */
+  commercialPlan:     CommercialPlan
   status:             SubscriptionStatus
+  hasSubscriptionRecord: boolean
+  hasPaidAccess:      boolean
   amountFcfa:         number
   label:              string
   billingLabel:       string
+  currentPlanLabel:   string
   promise:            string
   audience:           string
   valueHeadline:      string
@@ -74,6 +83,45 @@ function trialDaysLeft(trialEndsAt: Date): number {
   return Math.max(0, Math.ceil(msLeft / 86_400_000))
 }
 
+function resolveCommercialPlan(params: {
+  hasSubscriptionRecord: boolean
+  rawPlan: SubscriptionPlan
+  status: SubscriptionStatus
+  isTrialActive: boolean
+  amountFcfa: number | null | undefined
+  currentPeriodEnd: Date | null | undefined
+  now: Date
+}): { commercialPlan: CommercialPlan; hasPaidAccess: boolean } {
+  if (params.isTrialActive) {
+    return {
+      commercialPlan: "PRO",
+      hasPaidAccess: false,
+    }
+  }
+
+  const hasPaidAccess =
+    params.hasSubscriptionRecord &&
+    params.status === SubscriptionStatus.ACTIVE &&
+    (
+      (params.amountFcfa ?? 0) > 0 ||
+      (params.currentPeriodEnd != null && params.currentPeriodEnd > params.now)
+    )
+
+  if (params.rawPlan === SubscriptionPlan.BUSINESS && hasPaidAccess) {
+    return { commercialPlan: "BUSINESS", hasPaidAccess }
+  }
+
+  if (params.rawPlan === SubscriptionPlan.PRO && hasPaidAccess) {
+    return { commercialPlan: "PRO", hasPaidAccess }
+  }
+
+  if (params.rawPlan === SubscriptionPlan.BASIC && hasPaidAccess) {
+    return { commercialPlan: "STARTER", hasPaidAccess }
+  }
+
+  return { commercialPlan: "FREE", hasPaidAccess: false }
+}
+
 // ---------------------------------------------------------------------------
 // Fonction principale
 // ---------------------------------------------------------------------------
@@ -81,31 +129,34 @@ function trialDaysLeft(trialEndsAt: Date): number {
 export async function getOrganizationSubscription(
   organizationId: string,
 ): Promise<OrganizationSubscriptionSummary> {
+  const now = new Date()
   const subscription = await prisma.subscription.findUnique({
     where:  { organizationId },
     select: {
       plan:           true,
       status:         true,
       amountFcfa:     true,
+      currentPeriodEnd: true,
       trialEndsAt:    true,
       aiCreditsTotal: true,
       aiCreditsUsed:  true,
     },
   })
 
+  const hasSubscriptionRecord = subscription != null
   const rawPlan   = subscription?.plan   ?? SubscriptionPlan.BASIC
-  const status    = subscription?.status ?? SubscriptionStatus.ACTIVE
+  const status    = subscription?.status ?? SubscriptionStatus.CANCELED
   const trialEndsAt = subscription?.trialEndsAt ?? null
 
   // ── Calcul état trial ──────────────────────────────────────────────────
   const isTrialActive =
     status === SubscriptionStatus.TRIAL &&
     trialEndsAt !== null &&
-    trialEndsAt > new Date()
+    trialEndsAt > now
 
   const isTrialExpired =
     status === SubscriptionStatus.TRIAL &&
-    (trialEndsAt === null || trialEndsAt <= new Date())
+    (trialEndsAt === null || trialEndsAt <= now)
 
   const trialDaysRemaining = isTrialActive && trialEndsAt
     ? trialDaysLeft(trialEndsAt)
@@ -117,7 +168,19 @@ export async function getOrganizationSubscription(
     : rawPlan
 
   const definition = getPlanDefinition(effectivePlan)
-  const rawDefinition = getPlanDefinition(rawPlan)
+  const {
+    commercialPlan,
+    hasPaidAccess,
+  } = resolveCommercialPlan({
+    hasSubscriptionRecord,
+    rawPlan,
+    status,
+    isTrialActive,
+    amountFcfa: subscription?.amountFcfa,
+    currentPeriodEnd: subscription?.currentPeriodEnd,
+    now,
+  })
+  const commercialDefinition = getCommercialPlanDefinition(commercialPlan)
 
   // ── Calcul crédits IA ─────────────────────────────────────────────────
   const aiCreditsTotal = subscription?.aiCreditsTotal ?? TRIAL_AI_CREDITS
@@ -136,26 +199,34 @@ export async function getOrganizationSubscription(
     ? 0
     : subscription?.amountFcfa && subscription.amountFcfa > 0
       ? subscription.amountFcfa
-      : rawDefinition.monthlyPriceFcfa
+      : commercialDefinition.monthlyPriceFcfa
 
   const billingLabel = isTrialActive
     ? "Essai gratuit"
-    : rawDefinition.label
+    : commercialDefinition.label
+
+  const currentPlanLabel = isTrialActive
+    ? `${commercialDefinition.label} (essai gratuit)`
+    : commercialDefinition.label
 
   return {
     plan:               effectivePlan,
     rawPlan,
+    commercialPlan,
     status,
+    hasSubscriptionRecord,
+    hasPaidAccess,
     amountFcfa,
-    label:              definition.label,
+    label:              commercialDefinition.label,
     billingLabel,
-    promise:            definition.promise,
-    audience:           definition.audience,
-    valueHeadline:      definition.valueHeadline,
+    currentPlanLabel,
+    promise:            commercialDefinition.promise,
+    audience:           commercialDefinition.audience,
+    valueHeadline:      commercialDefinition.valueHeadline,
     maxActiveBatches:   definition.maxActiveBatches,
     maxFarms:           definition.maxFarms,
-    recommended:        definition.recommended,
-    highlights:         definition.highlights,
+    recommended:        commercialDefinition.recommended,
+    highlights:         commercialDefinition.highlights,
     isTrialActive,
     isTrialExpired,
     trialEndsAt,

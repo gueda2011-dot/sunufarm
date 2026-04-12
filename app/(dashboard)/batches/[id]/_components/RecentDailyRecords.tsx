@@ -7,6 +7,7 @@
  */
 
 import Link                      from "next/link"
+import { Lock }                  from "lucide-react"
 import { formatDate, formatWeight } from "@/src/lib/formatters"
 import type { DailyRecordDetail } from "@/src/actions/daily-records"
 
@@ -17,27 +18,48 @@ import type { DailyRecordDetail } from "@/src/actions/daily-records"
 interface RecentDailyRecordsProps {
   records: DailyRecordDetail[]
   batchId: string
+  /** Vrai si l'utilisateur est sur le plan FREE (historique limité aux 7 dernières saisies) */
+  historyLocked?: boolean
+  /** Nombre total de saisies disponibles (avant la tranche) */
+  totalRecordsCount?: number
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function RecentDailyRecords({ records, batchId }: RecentDailyRecordsProps) {
+export function RecentDailyRecords({
+  records,
+  batchId,
+  historyLocked = false,
+  totalRecordsCount = 0,
+}: RecentDailyRecordsProps) {
+  const hiddenCount = historyLocked ? Math.max(0, totalRecordsCount - records.length) : 0
+
   return (
-    <div className="space-y-3">
+    <div id="saisies" className="space-y-3">
 
       {/* ── Titre + lien historique complet ──────────────────────────── */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
           Saisies récentes
         </h2>
-        <Link
-          href={`/daily?batchId=${batchId}`}
-          className="text-xs text-green-600 hover:text-green-700 hover:underline"
-        >
-          Saisir / Voir tout
-        </Link>
+        {!historyLocked && (
+          <Link
+            href={`/daily?batchId=${batchId}`}
+            className="text-xs text-green-600 hover:text-green-700 hover:underline"
+          >
+            Saisir / Voir tout
+          </Link>
+        )}
+        {historyLocked && (
+          <Link
+            href={`/daily?batchId=${batchId}`}
+            className="text-xs text-green-600 hover:text-green-700 hover:underline"
+          >
+            Saisir
+          </Link>
+        )}
       </div>
 
       {/* ── État vide ─────────────────────────────────────────────────── */}
@@ -94,6 +116,33 @@ export function RecentDailyRecords({ records, batchId }: RecentDailyRecordsProps
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* ── Bannière historique limité (plan FREE) ─────────────────────── */}
+      {historyLocked && records.length > 0 && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-amber-900">
+              Historique limité aux {records.length} dernières saisies
+              {hiddenCount > 0 && (
+                <span className="ml-1 font-normal text-amber-700">
+                  ({hiddenCount} saisie{hiddenCount > 1 ? "s" : ""} plus ancienne{hiddenCount > 1 ? "s" : ""} non visibles)
+                </span>
+              )}
+            </p>
+            <p className="mt-0.5 text-xs text-amber-700">
+              L&apos;historique complet est disponible à partir du plan{" "}
+              <span className="font-semibold">Starter</span> — 3 500 FCFA / mois.
+            </p>
+          </div>
+          <Link
+            href="/pricing?from=full_history"
+            className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+          >
+            Voir les plans
+          </Link>
         </div>
       )}
     </div>

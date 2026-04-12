@@ -46,6 +46,8 @@ import {
 } from "@/src/lib/permissions"
 import { requiredIdSchema } from "@/src/lib/validators"
 import { UserRole } from "@/src/generated/prisma/client"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
 
 // ---------------------------------------------------------------------------
 // Rôles assignables via les actions d'organisation
@@ -230,12 +232,13 @@ export async function addUserToOrganization(
     if (!accessResult.success) return accessResult
     const actorId = accessResult.data.session.user.id
 
-    
-    
-    
-    
+    const subscription = await getOrganizationSubscription(organizationId)
+    const teamRolesGate = resolveEntitlementGate(subscription, "TEAM_ROLES")
+    if (!gateHasFullAccess(teamRolesGate)) {
+      return { success: false, error: teamRolesGate.reason }
+    }
 
-  if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
+    if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
       return { success: false, error: "Permission refusée" }
     }
 
@@ -347,6 +350,12 @@ export async function updateUserRole(
   if (!accessResult.success) return accessResult
   const actorId = accessResult.data.session.user.id
 
+  const subscription = await getOrganizationSubscription(organizationId)
+  const teamRolesGate = resolveEntitlementGate(subscription, "TEAM_ROLES")
+  if (!gateHasFullAccess(teamRolesGate)) {
+    return { success: false, error: teamRolesGate.reason }
+  }
+
   if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusée" }
   }
@@ -426,6 +435,12 @@ export async function updateUserModulePermissions(
   if (!accessResult.success) return accessResult
   const actorId = accessResult.data.session.user.id
 
+  const subscription = await getOrganizationSubscription(organizationId)
+  const teamRolesGate = resolveEntitlementGate(subscription, "TEAM_ROLES")
+  if (!gateHasFullAccess(teamRolesGate)) {
+    return { success: false, error: teamRolesGate.reason }
+  }
+
   if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusee" }
   }
@@ -492,6 +507,12 @@ export async function updateUserNotificationPreference(
   const accessResult = await requireOrganizationModuleContext(organizationId, "TEAM")
   if (!accessResult.success) return accessResult
   const actorId = accessResult.data.session.user.id
+
+  const subscription = await getOrganizationSubscription(organizationId)
+  const teamRolesGate = resolveEntitlementGate(subscription, "TEAM_ROLES")
+  if (!gateHasFullAccess(teamRolesGate)) {
+    return { success: false, error: teamRolesGate.reason }
+  }
 
   if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusee" }
@@ -563,10 +584,11 @@ export async function removeUserFromOrganization(
   if (!accessResult.success) return accessResult
   const actorId = accessResult.data.session.user.id
 
-  
-  
-  
-  
+  const subscription = await getOrganizationSubscription(organizationId)
+  const teamRolesGate = resolveEntitlementGate(subscription, "TEAM_ROLES")
+  if (!gateHasFullAccess(teamRolesGate)) {
+    return { success: false, error: teamRolesGate.reason }
+  }
 
   if (!canPerformAction(accessResult.data.membership.role, "INVITE_USER")) {
     return { success: false, error: "Permission refusée" }

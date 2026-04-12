@@ -1,12 +1,17 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import {
   formatDate,
   formatMoneyFCFA,
   formatMoneyFCFACompact,
 } from "@/src/lib/formatters"
 import { createSupplier, deleteSupplier, type SupplierSummary } from "@/src/actions/suppliers"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { suppliersRepository } from "@/src/lib/offline/repositories"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
 
 const SUPPLIER_TYPE_LABELS: Record<string, string> = {
   POUSSIN: "Poussin",
@@ -61,18 +66,34 @@ export function SuppliersPageClient({
   organizationId,
   userRole,
   suppliers: initialSuppliers,
-  totalSuppliers,
-  totalPurchasedFcfa,
-  totalBalanceFcfa,
 }: Props) {
   const canMutate = ["SUPER_ADMIN", "OWNER", "MANAGER", "ACCOUNTANT"].includes(userRole)
 
-  const [suppliers, setSuppliers] = useState<SupplierSummary[]>(initialSuppliers)
+  const { data: cachedSuppliers = initialSuppliers, isOfflineFallback, isStale, readCacheMeta } = useOfflineData<SupplierSummary[]>({
+    key: OFFLINE_RESOURCE_KEYS.suppliersList,
+    organizationId,
+    initialData: initialSuppliers,
+    ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: async () => {
+      const rows = await suppliersRepository.getAll(organizationId)
+      if (rows.length === 0) return undefined
+      return rows.map((r) => r.data as SupplierSummary)
+    },
+  })
+
+  const [suppliers, setSuppliers] = useState<SupplierSummary[]>(cachedSuppliers)
+  // Sync l'état local quand le cache se résout de manière asynchrone (cas offline)
+  useEffect(() => { setSuppliers(cachedSuppliers) }, [cachedSuppliers])
+
   const [search, setSearch] = useState("")
   const [typeFilter, setTypeFilter] = useState("")
   const [showForm, setShowForm] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  const totalSuppliers     = suppliers.length
+  const totalPurchasedFcfa = useMemo(() => suppliers.reduce((sum, s) => sum + (s.totalPurchasedFcfa ?? 0), 0), [suppliers])
+  const totalBalanceFcfa   = useMemo(() => suppliers.reduce((sum, s) => sum + (s.balanceFcfa ?? 0), 0), [suppliers])
 
   const filtered = suppliers.filter((supplier) => {
     const matchSearch =
@@ -150,6 +171,13 @@ export function SuppliersPageClient({
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
+      <OfflineStateIndicator
+        isOfflineFallback={isOfflineFallback}
+        isStale={isStale}
+        isEmpty={isOfflineFallback && suppliers.length === 0}
+        readCacheMeta={readCacheMeta}
+      />
+
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Fournisseurs</h1>
@@ -285,7 +313,9 @@ export function SuppliersPageClient({
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-gray-100 bg-white p-8 text-center">
           <p className="text-sm text-gray-400">
-            {suppliers.length === 0
+            {suppliers.length === 0 && isOfflineFallback
+              ? "Aucune donnée disponible hors ligne. Connectez-vous pour synchroniser."
+              : suppliers.length === 0
               ? "Aucun fournisseur enregistre. Ajoutez votre premier fournisseur."
               : "Aucun resultat pour cette recherche."}
           </p>

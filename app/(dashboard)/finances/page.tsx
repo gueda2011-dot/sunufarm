@@ -62,7 +62,7 @@ export default async function FinancesPage() {
           <ExpenseForm organizationId={organizationId} />
         </div>
         <div className="lg:col-span-2">
-          <ExpenseList expenses={expenses} />
+          <ExpenseList organizationId={organizationId} expenses={expenses} />
         </div>
       </div>
     </div>

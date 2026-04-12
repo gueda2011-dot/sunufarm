@@ -1,7 +1,7 @@
 # PROGRESS.md - SunuFarm
 
 > Mis a jour apres chaque session de travail.
-> Derniere mise a jour : 2026-04-08 (Session 68)
+> Derniere mise a jour : 2026-04-11 (Session 77)
 
 ---
 
@@ -19,9 +19,11 @@
 | Achats / finance / stock | Paiement fournisseur, envoi au stock, sorties terrain, integrite admin V1 | En place |
 | Donnees demo | Seed / demo stable pour onboarding et validations manuelles | En place |
 | Observabilite / securite | Health admin, logs critiques, backup / restore, incident response, rate limiting | En place |
-| Hors ligne / resilience terrain | File locale navigateur + resynchronisation V1 sur flux critiques | En place |
+| Hors ligne / resilience terrain | Socle V2 : IndexedDB 22 stores, lectures offline 10 modules, 9 types de mutations queues, moteur sync avec classification erreurs, messages metier traduits, UX unifiee | En place — 6.5/10 maturite |
 | Intelligence Collective | Pool de snapshots anonymises, benchmark collectif, boucle de feedback, cron backfill | Phase A livree |
-| Chantiers ouverts | Durcissement webhooks Wave, outillage admin V2, extension offline restante | En cours |
+| Monetisation / paywalls | Catalogue plans FREE/STARTER/PRO/BUSINESS, gate resolver, FeatureGateCard, page pricing | En place |
+| Instrumentation / funnel | Table analytics_events, track() fire-and-forget, 7 surfaces instrumentees, funnel 5 etapes, requetes SQL | En place |
+| Chantiers ouverts | Durcissement webhooks Wave, outillage admin V2, PWA minimale (manifest + SW cache), bootstrap auto offline | En cours |
 
 ### Lecture rapide
 
@@ -36,7 +38,10 @@
 - Une V1 `Business` existe maintenant pour le pilotage global exploitation, reservee au plan `BUSINESS`
 - La couche `Business` a deja une phase de polissage produit et de differenciation conversion, sans changer son architecture
 - La Phase A de l'Intelligence Collective est livree : snapshots anonymises auto-generes a chaque cloture de lot, pool cross-organisations query-able avec fallback progressif (precis / etudie / global), benchmark collectif injecte dans les analyses IA, cron de backfill pour les lots deja fermes
+- La couche d'instrumentation produit est en place : 7 paywalls instrumentes, funnel de conversion en 5 etapes mesurable bout en bout, requetes SQL pret-a-l'emploi pour analyser la friction et prioriser les ameliorations
 - Les sujets encore ouverts sont surtout des sujets de fiabilisation, d'outillage admin, d'extension offline et de simplification UX, pas des blocs coeur absents
+- Le socle offline est passe d'une V1 fonctionnelle a un socle V2 mature : 10 modules en lecture locale, 9 mutations queues, moteur de sync avec classification d'erreurs, messages metier traduits par entite, UX unifiee via OfflineStateIndicator et OfflineSyncCard — note de maturite : 6.5/10
+- Les prochains chantiers offline prioritaires sont la PWA minimale (manifest.json, icones, installabilite, cache app shell) et le bootstrap automatique (delta sync silencieux a chaque connexion)
 
 ### Modules produit - etat actuel
 
@@ -57,9 +62,380 @@
 | Ventes | Fonctionnel, avec creation offline V1 |
 | Dashboard | Fonctionnel, achats + depenses integres dans les KPI |
 | Rapports | Fonctionnels au MVP |
+| Monetisation / paywalls | Fonctionnelle : catalogue plans, gate resolver, FeatureGateCard, page pricing, paywalls sur 7 surfaces |
+| Instrumentation produit | En place : table analytics_events, funnel 5 etapes, 7 surfaces instrumentees, requetes SQL d'analyse |
 | Admin plateforme | Fonctionnel, avec supervision de base et integrite stock V1 |
 | Emails transactionnels | Fonctionnels si Resend est correctement configure |
-| Offline / sync terrain | V1 operationnelle sur creations critiques |
+| Offline / sync terrain | V2 operationnelle : lectures IndexedDB sur 10 modules, 9 mutations queues, moteur sync mature, messages erreur metier, UX unifiee (6.5/10) |
+
+---
+
+## Session 77 - 2026-04-11
+
+### Travail effectue
+
+**Bilan maturite offline + mise a jour README et PROGRESS**
+
+- Audit complet du socle offline (infrastructure, hooks, UI, couverture modules, bootstrap, conflits, PWA)
+- Note de maturite attribuee : **6.5 / 10** — offline-capable, pas encore offline-first
+- Forces identifiees : IndexedDB mature, moteur de sync complet, 70% couverture modules, messages metier
+- Lacunes identifiees : PWA absente (manifest, Workbox), bootstrap manuel uniquement, pas de resolution interactive de conflits, batch detail et dashboard non couverts, patterns legacy non nettoyes
+- README mis a jour : section hors ligne V2, descriptions modules mises a jour
+- PROGRESS mis a jour : table etat global, lecture rapide, modules, sessions completes
+
+### Resultat
+
+- Bilan objectif fige comme reference pour la suite du chantier offline
+- Prochaine etape clairement identifiee : PWA minimale + bootstrap auto
+
+---
+
+## Session 76 - 2026-04-11
+
+### Travail effectue
+
+**Phase 4B — Messages d'erreur offline : precision par entite metier**
+
+Objectif : passer des messages generiques ("Une donnee liee n'a pas ete retrouvee") a des messages precis identifiant l'entite manquante.
+
+**`src/lib/offline/user-messages.ts`**
+
+- Ajout de `detectMissingEntity(raw: string)` : detecte l'entite manquante a partir du message brut backend (noms de champs Prisma : `customerId`, `supplierId`, `batchId`, `feedStockId`, `medicineStockId` + equivalents francais)
+- Ordre de priorite : feedStock et medicineStock avant les entites generiques pour eviter les faux positifs sur le mot "stock"
+- Ajout de `ENTITY_LABELS` et `ACTION_CONTEXT` pour composer les phrases dynamiquement
+- `getMissingRefMessage` refactorisee : recoit maintenant le message brut en premier argument et compose une phrase precisement (ex: "Le client lie a cette vente n'a pas ete retrouve.")
+- Fallbacks par action conserves pour les messages backends trop peu verbeux (ex: "Record not found")
+
+**Couverture apres Phase 4B**
+
+- Tous les champs Prisma FK standards sont detectes (CREATE_SALE, CREATE_PURCHASE, CREATE_DAILY_RECORD, CREATE_VACCINATION, CREATE_TREATMENT, CREATE_FEED_MOVEMENT, CREATE_MEDICINE_MOVEMENT)
+- Messages en francais, precis, directement actionnables
+- Fallback generique toujours present pour les messages opaques
+
+### Resultat
+
+- `tsc --noEmit` : OK
+- Smoke test complet sur 15 cas couverts
+
+---
+
+## Session 75 - 2026-04-11
+
+### Travail effectue
+
+**Phase 4A — Messages d'erreur offline : traduction metier + OfflineSyncCard**
+
+Objectif : remplacer les messages techniques bruts par des messages metier comprehensibles dans toute la card de sync.
+
+**`src/lib/offline/user-messages.ts`** (cree)
+
+- Helper central `getOfflineUserMessage({ action, scope, status, error })` retournant `{ title, description, severity, retryable }`
+- 9 categories d'erreurs avec detection par regex : doublon/idempotence, reference locale non synchronisee, dependance introuvable, validation invalide, stock insuffisant, reseau/offline, serveur temporaire, operation non supportee, erreur generique
+- Messages varies par type de mutation (CREATE_DAILY_RECORD, CREATE_VACCINATION, CREATE_EGG_RECORD…)
+- `getOfflineGlobalErrorMessage(error)` pour l'erreur globale de la card
+- Labels d'actions en francais : "saisie journaliere", "vaccination", "vente", "achat fournisseur"…
+
+**`app/(dashboard)/daily/_components/OfflineSyncCard.tsx`** (modifie)
+
+- Nouveau sous-composant `ItemErrorDetail` : titre metier en gras + description + bouton "Afficher le detail technique" retractable (message brut en mono)
+- Type item etendu avec `type?` et `scope?` — optionnels, retro-compatible total
+- L'erreur globale de la card traduite via `getOfflineGlobalErrorMessage`
+- Tous les call sites beneficient automatiquement (items passent deja `type` et `scope` via `OfflineQueueItem`)
+
+### Resultat
+
+- Modules couverts : daily, health, stock, eggs, sales, purchases, expenses (tous les utilisateurs de OfflineSyncCard)
+- `tsc --noEmit` : OK
+
+---
+
+## Session 74 - 2026-04-11
+
+### Travail effectue
+
+**Phase 3 — Lecture offline : expenses, purchases consolidation**
+
+**`src/lib/offline-keys.ts`**
+- Ajout de `expensesList: "expenses:list"`
+
+**`app/(dashboard)/finances/_components/ExpenseList.tsx`**
+- Conversion de composant serveur → composant client (`"use client"`)
+- Ajout prop `organizationId`, `useOfflineData` (TTL `records`, pas de `localLoader` — pas d'expensesRepository)
+- `OfflineStateIndicator` dans la Card
+- Empty state offline-aware
+
+**`app/(dashboard)/finances/page.tsx`**
+- Passage de `organizationId` a `ExpenseList`
+
+**`app/(dashboard)/purchases/_components/PurchasesPageClient.tsx`**
+- Import `OfflineStateIndicator`
+- Destructuration de `isStale` et `readCacheMeta` depuis le `useOfflineData` existant
+- Remplacement du texte amber inline par `OfflineStateIndicator`
+- Empty state offline-aware dans la liste des achats
+- `OfflineSyncCard` inchange
+
+### Resultat
+
+- Phase 3 complete — les 3 modules (expenses, purchases, sales) sont coherents
+- `tsc --noEmit` : OK
+
+---
+
+## Session 73 - 2026-04-11
+
+### Travail effectue
+
+**Phase 2 complete + Phase 2.5 — Offline read expansion et consolidation UX**
+
+**Phase 2 — Lectures offline sur 5 modules**
+
+- `app/(dashboard)/batches/_components/BatchListClient.tsx` : `useOfflineData` avec `batchesRepository.getAll()` comme `localLoader`, TTL `references`, `OfflineStateIndicator`
+- `app/(dashboard)/customers/_components/CustomersPageClient.tsx` : `useOfflineData` + `customersRepository`, `useEffect` de sync async, KPI calcules localement via `useMemo`, `OfflineStateIndicator`
+- `app/(dashboard)/suppliers/_components/SuppliersPageClient.tsx` : meme pattern que customers
+- `app/(dashboard)/sales/_components/SalesPageClient.tsx` : `useOfflineData` (TTL `records`, pas de `localLoader`), `OfflineStateIndicator`
+- `app/(dashboard)/farms/_components/FarmsClient.tsx` : `useOfflineData` + `farmsRepository`, `OfflineStateIndicator`
+- `src/lib/offline-keys.ts` : ajout de `batchesList`, `customersList`, `suppliersList`, `salesList`, `farmsList`
+
+**Phase 2.5 — Composant OfflineStateIndicator unifie**
+
+- `src/components/offline/OfflineStateIndicator.tsx` (cree) : composant 4 etats (online=null, offline-local=amber, stale=orange, vide=bloc descriptif)
+- Affiche le timestamp de derniere sync via `readCacheMeta()`
+- Remplacement de tous les badges inline precedents
+- Fix bug sync async : `useEffect(() => { setData(cachedData) }, [cachedData])` dans customers, suppliers, farms
+
+### Resultat
+
+- 10 modules en lecture offline (daily, batches, health, stock, eggs, sales, purchases, customers, suppliers, farms)
+- `tsc --noEmit` : OK
+
+---
+
+## Session 72 - 2026-04-11
+
+### Travail effectue
+
+**Revue roadmap offline + Phase 1 — Foundation Hardening**
+
+**Roadmap — `docs/roadmaps/offline-completion.md`**
+- Suppression des gaps obsoletes, matrice de capacite remplie avec assignation par phase, table de dependances de references par ecran, ajout "expenses read" en Phase 3
+
+**Phase 1 : 5 chantiers de durcissement**
+
+1. **`src/lib/offline/types.ts`** — ajout statut `"syncing"` a `OfflineSyncStatus`
+
+2. **`src/lib/offline/sync/queue.ts`** — ajout `recoverStuckSyncingCommands()` : reset des commandes bloquees en "syncing" > 5 minutes au statut "pending" (crash recovery)
+
+3. **`src/lib/offline/sync/engine.ts`**
+   - `classifyError(responseStatus, message)` : classification prioritaire par HTTP status (409=conflict, 5xx=retry, 400/422=failed), fallback regex sur le message
+   - Statut "syncing" ecrit avant chaque `replayCommand`
+   - `recoverStuckSyncingCommands` appele en debut de `runOfflineSync`
+
+4. **`src/lib/offline/sync/daily.ts`** — `resolveRelationId` avec options `{ required, fieldName }` : si `required=true` et mapping introuvable → `DailySyncValidationError` (plus jamais d'ID local envoye au serveur)
+
+5. **`app/api/offline/daily-sync/route.ts`** — idempotence pre-Zod : lookup `clientMutationId` avant validation, retourne 200 si deja enregistre
+
+6. **Propagation `"syncing"` dans 9 composants** : `OfflineSyncCard`, `ExpenseForm`, `HealthSection`, `StockMovementPanel`, `EggsClient`, `PurchasesPageClient`, `OfflineQueueItem`, `useOfflineSyncStatus` (isSyncing via useMemo)
+
+### Resultat
+
+- Aucun ID local ne peut plus atteindre le serveur via `daily.ts`
+- Crash recovery operationnel
+- Classification erreurs robuste
+- `tsc --noEmit` : OK
+
+---
+
+## Session 71 - 2026-04-11
+
+### Travail effectue
+
+**Revue securite acces paywall + ajustement tarifaire**
+
+#### Audit securite acces control
+
+Objectif : s'assurer qu'un appel direct aux Server Actions ou aux routes API ne peut jamais debloquer gratuitement une fonctionnalite STARTER / PRO / BUSINESS.
+
+**Vulnerabilite critique corrigee — `src/actions/organizations.ts`**
+
+Les 5 mutations de gestion d'equipe (`addUserToOrganization`, `updateUserRole`, `updateUserModulePermissions`, `updateUserNotificationPreference`, `removeUserFromOrganization`) verifiaient l'appartenance a l'org et le role OWNER mais pas l'entitlement `TEAM_ROLES` (BUSINESS uniquement). Un OWNER sur un plan inferieur pouvait appeler ces actions directement (DevTools / curl) et gerer des membres sans souscrire.
+
+Correctif : ajout du gate `resolveEntitlementGate(subscription, "TEAM_ROLES")` dans chacune des 5 fonctions, apres `requireOrganizationModuleContext`.
+
+**Vulnerabilite haute corrigee — `src/actions/predictive.ts` (fonctions Internal)**
+
+`getStockPredictionsInternal`, `getBatchMortalityPredictionsInternal`, `getBatchMarginPredictionsInternal` etaient exportees depuis un fichier `"use server"`. En Next.js 14, tout export d'un tel fichier est une Server Action callable via POST sans les gates d'abonnement et de membership. N'importe quel utilisateur authentifie pouvait appeler ces fonctions avec l'`organizationId` d'une org tierce.
+
+Correctif : extraction des 3 fonctions de calcul dans `src/lib/predictive-compute.ts` (sans `"use server"`). Suppression des exports Internal de `predictive.ts`. `notifications.ts` et `business.ts` importent desormais depuis le nouveau module lib.
+
+**Vulnerabilite moyenne corrigee — `getStockTrends`**
+
+Verifiait l'acces module STOCK mais pas l'entitlement `PREDICTIVE_STOCK_ALERTS` (PRO+). La page stock gatait correctement au niveau UI, mais un appel direct a la Server Action contournait ce controle.
+
+Correctif : ajout du gate `PREDICTIVE_STOCK_ALERTS` dans `getStockTrends`, identique au pattern de `getStockPredictions`.
+
+**Points confirmes sains lors de l'audit**
+
+- `getOrganizationSubscription` : toujours DB-fetched, jamais de confiance client
+- `gateHasFullAccess` : retourne `true` uniquement si `access === "full"`, "preview" est bloque
+- `profitability.ts` : gate avant tout calcul
+- Les 3 routes API `/api/reports/*` : auth + membership + module + subscription gate a chaque niveau
+- Server Components : donnees financieres jamais serialisees vers le client
+
+#### Ajustement tarifaire
+
+- **PRO** : 8 000 → 10 000 FCFA / mois (modifie dans `offer-catalog.ts` et `README.md`)
+- **BUSINESS** : 20 000 → 25 000 FCFA / mois (modifie dans `offer-catalog.ts` et `README.md`)
+- `subscriptions.ts` avait deja les nouveaux prix, seul `offer-catalog.ts` etait decale.
+
+#### Correctif build Vercel
+
+Turbopack traitait `export type { StockPredictionsResult }` dans `predictive.ts` comme une valeur d'action exportee et echouait a en creer un proxy runtime. Suppression de cette re-export de type — les types ne doivent pas etre exportes depuis des fichiers `"use server"`.
+
+**Regle retenue** : dans un fichier `"use server"`, n'exporter que des fonctions async. Jamais de types, interfaces ou valeurs non-action.
+
+### Resultat
+
+- Aucune fonctionnalite STARTER / PRO / BUSINESS n'est deblocable par appel direct aux Server Actions
+- `tsc --noEmit` : OK
+- `next build` : OK (Turbopack)
+- Prix PRO et BUSINESS mis a jour dans le catalogue et le README
+
+### Prochaine session recommandee
+
+- Appliquer la meme discipline de gate dans tout futur Server Action manipulant des donnees premium
+- Surveiller les exports des fichiers `"use server"` : uniquement des fonctions async
+
+---
+
+## Session 70 - 2026-04-11
+
+### Travail effectue
+
+**Phase 5 — Instrumentation, funnel de conversion et optimisation produit** (Sous-lots 1, 2 et 3)
+
+#### Sous-lot 1 : Instrumentation
+
+- **Schema Prisma** : nouveau modele `AnalyticsEvent` (table `analytics_events`), append-only, indexes sur `(event, created_at)`, `(organization_id, event, created_at)`, `(user_id, event, created_at)`. Applique via `prisma db execute --stdin` (migration normale bloquee par drift DB).
+- **`src/lib/analytics.ts`** : couche `track()` fire-and-forget — ne bloque jamais le chemin utilisateur, erreurs avalees et loguees en warn.
+- **`src/actions/analytics.ts`** : Server Action `trackAlertAction` pour les evenements client-side depuis `NotificationDropdown`.
+- **`app/api/track/pricing-cta/route.ts`** : route redirect — enregistre `pricing_cta_clicked` cote serveur puis redirige vers WhatsApp, sans JavaScript client.
+- **`src/components/subscription/FeatureGateCard.tsx`** : ajout prop `trackingSurface` pour construire le lien `/pricing?from=<surface>`.
+- **5 paywalls instrumentes** : `batches/[id]/page.tsx` (profitabilite, mortalite, marge), `reports/page.tsx`, `business/page.tsx`, `batches/new/page.tsx`, `team/page.tsx`.
+- **3 routes export instrumentees** : batch PDF, mensuel PDF/Excel/CSV, Business Excel/CSV.
+- **Page `/pricing`** : tracking `pricing_page_visited` avec contexte `from=`.
+- **`NotificationDropdown`** : `handleNavigate` appelle `trackAlertAction` avant `router.push`.
+
+#### Sous-lot 2 : Exploitation funnel
+
+- **Evenement `subscription_activated`** ajoute au type `AnalyticsEventName`.
+- **`src/lib/subscription-lifecycle.ts`** : `activateOrganizationSubscription` accepte maintenant `userId?` et `triggeredBy?`, appelle `track()` apres l'upsert. Couvre les 3 chemins : `user_confirm`, `admin_direct`, `admin_wave`.
+- **`docs/analytics/funnel-queries.sql`** : 7 requetes pret-a-l'emploi — funnel brut, conversion par surface, conversion par plan cible, drop-off par etape, breakdown activations, cohorte hebdomadaire, audit de coherence.
+
+#### Sous-lot 3 : Audit friction et corrections
+
+Audit complet de tous les call sites `track()` — 3 trous identifies et corriges :
+
+1. **`FULL_HISTORY` non tracee** (surface FREE → STARTER la plus exposee) :
+   - `batches/[id]/page.tsx` : ajout `track(paywall_viewed)` pour `historyGate`
+   - `RecentDailyRecords.tsx` : lien "Voir les plans" corrige en `/pricing?from=full_history`
+
+2. **`farm_limit` non tracee** :
+   - `farms/page.tsx` : ajout `track(paywall_viewed)` quand `farmGate.access !== "full"`
+   - `FarmsClient.tsx` : ajout `trackingSurface="farm_limit"` sur `FeatureGateCard`
+
+3. **Boite noire WhatsApp** — gap entre clic CTA et activation non mesurable :
+   - Ajout evenement `subscription_payment_requested` dans `createSubscriptionPaymentRequest`
+   - Proprietes : `{ plan, amountFcfa, paymentMethod }`
+   - Requetes SQL mises a jour pour inclure cette 4e etape du funnel
+
+**README.md mis a jour** : section Pricing corrigee (FREE/STARTER/PRO/BUSINESS avec vrais prix), section Instrumentation produit et funnel ajoutee.
+
+### Resultat
+
+- Le funnel de conversion est desormais mesurable en 5 etapes bout en bout : `paywall_viewed → pricing_page_visited → pricing_cta_clicked → subscription_payment_requested → subscription_activated`
+- 7 surfaces paywalls instrumentees sans exception
+- `tsc --noEmit` : OK
+
+### Limites V1 explicites
+
+- Pas de dashboard analytics in-app — les requetes sont a executer manuellement sur la base Supabase
+- Pas de retargeting ou de relance automatique — les recommandations produit (R1, R2, R3) sont prevues pour une prochaine phase apres accumulation de donnees reelles
+
+### Prochaine session recommandee
+
+- Laisser les donnees s'accumuler quelques semaines puis executer les requetes de `docs/analytics/funnel-queries.sql`
+- Si drop-off CTA→payment > 70% : planifier une relance in-app post-CTA (notification 24h apres clic sans payment)
+- Si drop-off payment→activation > 48h median : planifier une alerte admin pour les paiements PENDING trop longtemps
+
+---
+
+## Session 69 - 2026-04-10
+
+### Travail effectue
+
+- Construction d'une vraie couche offline locale basee sur `IndexedDB` :
+  - `src/lib/offline-cache.ts`
+  - `src/lib/offline-keys.ts`
+  - `src/lib/offline-ttl.ts`
+- Ajout du hook generique `src/hooks/useOfflineData.ts` pour relire un fallback local propre hors ligne dans les Client Components
+- Mise en cache des references et historiques critiques pour :
+  - `Saisie journaliere`
+  - `Sante`
+  - `Stock`
+  - `Nouvelle vente`
+  - `Oeufs`
+  - `Achats fournisseur`
+- Refonte du `service worker` (`public/sw.js`) pour pre-cacher le shell des routes critiques et permettre leur reouverture hors ligne
+- Ajout d'un contexte de session offline minimal :
+  - `app/api/offline-context/route.ts`
+  - `src/lib/offline-session.ts`
+  - `src/hooks/useOfflineSessionContext.ts`
+  - `src/components/pwa/OfflineSessionBootstrap.tsx`
+- Ajout d'une couche optimiste locale `src/lib/offline-optimistic.ts` et branchement initial sur :
+  - `Saisie journaliere`
+  - `Oeufs`
+  - `Achats fournisseur`
+- Factorisation du suivi de synchro avec `src/hooks/useOfflineSyncStatus.ts`
+- Harmonisation du panneau de synchro sur :
+  - `daily`
+  - `health`
+  - `stock`
+  - `sales/new`
+  - `eggs`
+  - `purchases`
+- Refonte de `/offline` en hub utile avec :
+  - etat reseau
+  - organisation active
+  - compteurs de sync
+  - repartition par module
+  - raccourcis offline
+  - ressources en cache
+  - dernieres saisies locales
+- Corrections de qualite projet pour remettre la base au vert :
+  - fix `tsc --noEmit`
+  - fix `npm run lint`
+  - fix `npm run test`
+  - validation `npm run build`
+
+### Resultat
+
+- Les modules terrain prioritaires peuvent maintenant se rouvrir hors ligne apres une premiere visite online, avec un shell disponible et des references minimales locales
+- L'utilisateur voit ses elements en attente de synchro de facon plus coherente, quel que soit le module
+- Le projet a maintenant une base offline V1 plus credible pour des tests terrain reels, sans refonte d'architecture
+- Le socle de qualite est revenu au vert : `tsc --noEmit`, `npm run lint`, `npm run test` et `npm run build` passent
+
+### Limites V1 explicites
+
+- Pas d'edition hors ligne generale
+- Pas d'upload audio / image hors ligne
+- Pas de resolution de conflits avancee
+- Certaines pages restent en mode `dernier etat connu` hors ligne
+
+### Prochaine session recommandee
+
+- Faire une recette offline terrain complete sur navigateur mobile / telephone
+- Lisser les redondances UX entre panneau de synchro et certaines listes locales `en attente`
+- Etendre ensuite le niveau de polissage offline aux ecrans detail ou aux modules secondaires si le terrain le justifie
 
 ---
 

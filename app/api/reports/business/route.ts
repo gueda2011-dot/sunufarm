@@ -4,12 +4,10 @@ import { apiError } from "@/src/lib/api-response"
 import { logger } from "@/src/lib/logger"
 import { hasModuleAccess } from "@/src/lib/permissions"
 import { getRequestId } from "@/src/lib/request-security"
-import {
-  getFeatureUpgradeMessage,
-  hasPlanFeature,
-} from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { getBusinessDashboardOverview } from "@/src/actions/business"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { track } from "@/src/lib/analytics"
 import {
   buildBusinessReportCsv,
   buildBusinessReportWorkbook,
@@ -49,14 +47,15 @@ export async function GET(request: Request) {
     }
 
     const subscription = await getOrganizationSubscription(activeMembership.organizationId)
-    if (!hasPlanFeature(subscription.plan, "GLOBAL_ANALYTICS")) {
+    const businessGate = resolveEntitlementGate(subscription, "GLOBAL_DASHBOARD")
+    if (!gateHasFullAccess(businessGate)) {
       logger.warn("reports.business.plan_upgrade_required", {
         requestId,
         userId: session.user.id,
         organizationId: activeMembership.organizationId,
-        plan: subscription.plan,
+        plan: subscription.commercialPlan,
       })
-      return apiError(getFeatureUpgradeMessage("GLOBAL_ANALYTICS"), {
+      return apiError(businessGate.reason, {
         status: 403,
         code: "PLAN_UPGRADE_REQUIRED",
       })
@@ -101,6 +100,14 @@ export async function GET(request: Request) {
       userId: session.user.id,
       organizationId: activeMembership.organizationId,
       format,
+    })
+
+    void track({
+      userId: session.user.id,
+      organizationId: activeMembership.organizationId,
+      event: "export_launched",
+      plan: subscription.commercialPlan,
+      properties: { format, reportType: "business" },
     })
 
     if (format === "csv") {

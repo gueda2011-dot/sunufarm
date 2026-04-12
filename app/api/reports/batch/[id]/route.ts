@@ -18,8 +18,9 @@ import { logger } from "@/src/lib/logger"
 import { hasModuleAccess } from "@/src/lib/permissions"
 import prisma from "@/src/lib/prisma"
 import { getRequestId } from "@/src/lib/request-security"
-import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { track } from "@/src/lib/analytics"
 
 export const dynamic = "force-dynamic"
 
@@ -112,7 +113,9 @@ export async function GET(
     }
 
     const subscription = await getOrganizationSubscription(organizationId)
-    const canSeeProfitability = hasPlanFeature(subscription.plan, "PROFITABILITY")
+    const profitabilityGate = resolveEntitlementGate(subscription, "REAL_PROFITABILITY")
+    const exportWatermarkGate = resolveEntitlementGate(subscription, "EXPORT_WITHOUT_WATERMARK")
+    const canSeeProfitability = gateHasFullAccess(profitabilityGate)
     const profitabilityResult = canSeeProfitability
       ? await getBatchProfitability({ organizationId, batchId })
       : null
@@ -157,6 +160,7 @@ export async function GET(
       recentRecords: records,
       generatedAt: new Date(),
       logoSrc: await getSunuFarmLogoDataUri(),
+      watermarkText: exportWatermarkGate.watermark ? "STARTER - EXPORT" : undefined,
     })
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -169,6 +173,14 @@ export async function GET(
       organizationId,
       batchId,
       canSeeProfitability,
+    })
+
+    void track({
+      userId: session.user.id,
+      organizationId,
+      event: "export_launched",
+      plan: subscription.commercialPlan,
+      properties: { format: "pdf", reportType: "batch", watermark: exportWatermarkGate.watermark },
     })
 
     return new Response(new Uint8Array(buffer), {

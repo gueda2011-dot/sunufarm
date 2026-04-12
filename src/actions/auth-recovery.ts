@@ -69,7 +69,7 @@ async function enforceRateLimit(scope: string, email: string) {
   const headersList = await headers()
   const ip = getClientIpFromHeaders(headersList)
 
-  return applyRateLimit({
+  return await applyRateLimit({
     key: `${scope}:${ip}:${email}`,
     limit: 5,
     windowMs: 15 * 60 * 1000,

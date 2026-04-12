@@ -4,9 +4,12 @@ import { auth }           from "@/src/auth"
 import prisma             from "@/src/lib/prisma"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
-import { PlanGuardCard }  from "@/src/components/subscription/PlanGuardCard"
+import { FeatureGateCard } from "@/src/components/subscription/FeatureGateCard"
 import { getFarms }       from "@/src/actions/farms"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { track } from "@/src/lib/analytics"
+import { ensureSenegalBreedCatalog } from "@/src/lib/breed-catalog"
 import { CreateBatchForm } from "./_components/CreateBatchForm"
 
 export const metadata: Metadata = { title: "Nouveau lot" }
@@ -35,7 +38,21 @@ export default async function NewBatchPage() {
   const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(role)
   if (!canCreate) redirect("/batches")
 
-  if (activeBatchCount >= subscription.maxActiveBatches) {
+  await ensureSenegalBreedCatalog(prisma)
+
+  const batchGate = resolveEntitlementGate(subscription, "ACTIVE_BATCH_LIMIT", {
+    usage: activeBatchCount,
+  })
+
+  if (batchGate.access !== "full") {
+    void track({
+      userId: session.user.id,
+      organizationId,
+      event: "paywall_viewed",
+      plan: subscription.commercialPlan,
+      properties: { entitlement: "ACTIVE_BATCH_LIMIT", surface: "batch_limit", access: batchGate.access },
+    })
+
     return (
       <div className="mx-auto max-w-2xl space-y-5">
         <div>
@@ -45,11 +62,14 @@ export default async function NewBatchPage() {
           </p>
         </div>
 
-        <PlanGuardCard
+        <FeatureGateCard
           title="Augmentez votre capacite de production"
-          message={`Le plan ${subscription.label} autorise jusqu'a ${subscription.maxActiveBatches} lot(s) actif(s).`}
-          requiredPlan={subscription.plan === "BASIC" ? "Pro" : "Business"}
-          currentPlan={subscription.plan}
+          message={batchGate.reason}
+          targetPlanLabel={batchGate.requiredPlanLabel}
+          currentPlanLabel={subscription.currentPlanLabel}
+          access={batchGate.access}
+          ctaLabel={batchGate.cta}
+          trackingSurface="batch_limit"
         />
       </div>
     )

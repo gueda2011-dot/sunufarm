@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { CircleAlert, PackagePlus, Plus, Trash2 } from "lucide-react"
 import {
   createPurchase,
@@ -9,6 +9,20 @@ import {
   recordPurchasePayment,
   type PurchaseSummary,
 } from "@/src/actions/purchases"
+import {
+  createClientMutationId,
+  enqueueOfflinePurchase,
+} from "@/src/lib/offline-mutation-outbox"
+import {
+  addOptimisticItem,
+  listOptimisticItems,
+  subscribeToOptimisticItems,
+} from "@/src/lib/offline-optimistic"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { loadPurchasesFromLocal } from "@/src/lib/offline/repositories/transactionLoaders"
 import type {
   FeedStockSummary,
   MedicineStockSummary,
@@ -18,6 +32,8 @@ import {
   formatMoneyFCFA,
   formatMoneyFCFACompact,
 } from "@/src/lib/formatters"
+import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
 
 interface Supplier {
   id: string
@@ -124,10 +140,52 @@ export function PurchasesPageClient({
   feedStocks,
   medicineStocks,
 }: Props) {
+  const {
+    isOnline,
+    pendingCount,
+    failedCount,
+    items,
+    isSyncing,
+    lastSyncedAt,
+    lastError,
+    sync,
+    retryItem,
+    removeItem,
+  } = useOfflineSyncStatus({ scope: "purchases" })
+  const {
+    data: cachedPurchases = initialPurchases,
+    isOfflineFallback: usesOfflinePurchases,
+    isStale: isPurchasesStale,
+    readCacheMeta: readPurchasesCacheMeta,
+  } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.purchasesList,
+    organizationId,
+    initialData: initialPurchases,
+    ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadPurchasesFromLocal(organizationId),
+  })
+  const { data: cachedSuppliers = suppliers } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.purchasesSuppliers,
+    organizationId,
+    initialData: suppliers,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: cachedFeedStocks = feedStocks } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.purchasesFeedStocks,
+    organizationId,
+    initialData: feedStocks,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
+  const { data: cachedMedicineStocks = medicineStocks } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.purchasesMedicineStocks,
+    organizationId,
+    initialData: medicineStocks,
+    ttlMs: OFFLINE_TTL_MS.references,
+  })
   const canMutate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(userRole)
   const canRecordPayment = ["SUPER_ADMIN", "OWNER", "MANAGER", "ACCOUNTANT"].includes(userRole)
 
-  const [purchases, setPurchases] = useState<PurchaseSummary[]>(initialPurchases)
+  const [purchases, setPurchases] = useState<PurchaseSummary[]>(cachedPurchases)
   const [showForm, setShowForm] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -148,6 +206,33 @@ export function PurchasesPageClient({
   const [stockPurchaseId, setStockPurchaseId] = useState<string | null>(null)
   const [stockDrafts, setStockDrafts] = useState<Record<string, StockLinkDraft>>({})
   const [stockError, setStockError] = useState<string | null>(null)
+  const [optimisticEntries, setOptimisticEntries] = useState<Array<{
+    id: string
+    label?: string
+    updatedAt: string
+    status: "pending" | "syncing" | "failed" | "synced"
+    error?: string
+  }>>([])
+
+  useEffect(() => {
+    setPurchases(cachedPurchases)
+  }, [cachedPurchases])
+
+  useEffect(() => {
+    async function refreshOptimisticEntries() {
+      const items = await listOptimisticItems(organizationId, "purchases")
+      setOptimisticEntries(items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
+    }
+
+    void refreshOptimisticEntries()
+    const unsubscribe = subscribeToOptimisticItems(() => {
+      void refreshOptimisticEntries()
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [organizationId])
 
   const formTotal = useMemo(
     () => lines.reduce((sum, line) => sum + lineTotal(line), 0),
@@ -166,7 +251,7 @@ export function PurchasesPageClient({
     )
   }, [purchases])
 
-  const selectedSupplier = suppliers.find((supplier) => supplier.id === supplierId) ?? null
+  const selectedSupplier = cachedSuppliers.find((supplier) => supplier.id === supplierId) ?? null
 
   function resetForm() {
     setFormError(null)
@@ -255,7 +340,39 @@ export function PurchasesPageClient({
     }
 
     startTransition(async () => {
+      const clientMutationId = createClientMutationId("purchase")
+      const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true
+
+      if (!isOnline) {
+        await addOptimisticItem({
+          id: clientMutationId,
+          organizationId,
+          scope: "purchases",
+          type: "CREATE_PURCHASE",
+          label: `Achat fournisseur ${purchaseDate}`,
+          data: {
+            supplierId: supplierId || undefined,
+            purchaseDate,
+            items,
+          },
+        })
+        await enqueueOfflinePurchase({
+          clientMutationId,
+          organizationId,
+          supplierId: supplierId || undefined,
+          purchaseDate,
+          reference: reference || undefined,
+          notes: notes || undefined,
+          items,
+        })
+        window.alert("Hors ligne — achat sauvegardé localement. Il sera synchronisé automatiquement dès le retour de connexion.")
+        resetForm()
+        setShowForm(false)
+        return
+      }
+
       const result = await createPurchase({
+        clientMutationId,
         organizationId,
         supplierId: supplierId || undefined,
         purchaseDate: new Date(purchaseDate),
@@ -406,6 +523,12 @@ export function PurchasesPageClient({
           <p className="mt-0.5 text-sm text-gray-500">
             Garde les commandes, les paiements et l&apos;integration au stock dans un seul flux.
           </p>
+          <OfflineStateIndicator
+            isOfflineFallback={usesOfflinePurchases}
+            isStale={isPurchasesStale}
+            isEmpty={usesOfflinePurchases && purchases.length === 0}
+            readCacheMeta={readPurchasesCacheMeta}
+          />
         </div>
 
         {canMutate ? (
@@ -418,6 +541,25 @@ export function PurchasesPageClient({
           </button>
         ) : null}
       </div>
+
+      <OfflineSyncCard
+        isOnline={isOnline}
+        pendingCount={pendingCount}
+        failedCount={failedCount}
+        isSyncing={isSyncing}
+        lastSyncedAt={lastSyncedAt}
+        lastError={lastError}
+        items={items}
+        onSync={() => {
+          void sync()
+        }}
+        onRetryItem={(itemId) => {
+          void retryItem(itemId)
+        }}
+        onRemoveItem={(itemId) => {
+          void removeItem(itemId)
+        }}
+      />
 
       <div className="grid gap-4 md:grid-cols-3">
         <KpiCard
@@ -443,6 +585,29 @@ export function PurchasesPageClient({
         Les achats fournisseur se gerent ici. Les autres sorties d&apos;argent restent dans la page
         `Depenses` pour eviter les doublons.
       </div>
+
+      {optimisticEntries.length > 0 ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-900">Achats locaux en attente</p>
+          <div className="mt-3 space-y-2">
+            {optimisticEntries.map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-amber-100 bg-white px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-gray-900">{entry.label ?? entry.id}</p>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+                    entry.status === "failed" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {entry.status === "failed" ? "Erreur sync" : "En attente"}
+                  </span>
+                </div>
+                {entry.error ? (
+                  <p className="mt-1 text-xs text-red-700">{entry.error}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {showForm ? (
         <form onSubmit={handleCreate} className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
@@ -473,7 +638,7 @@ export function PurchasesPageClient({
                     className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-green-500"
                   >
                     <option value="">Sans fournisseur precise</option>
-                    {suppliers.map((supplier) => (
+                    {cachedSuppliers.map((supplier) => (
                       <option key={supplier.id} value={supplier.id}>
                         {supplier.name}
                       </option>
@@ -652,7 +817,9 @@ export function PurchasesPageClient({
 
       {purchases.length === 0 ? (
         <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center text-sm text-gray-400">
-          Aucun achat enregistre pour le moment.
+          {usesOfflinePurchases
+            ? "Aucune donnée disponible hors ligne. Connectez-vous pour synchroniser."
+            : "Aucun achat enregistre pour le moment."}
         </div>
       ) : (
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
@@ -842,7 +1009,7 @@ export function PurchasesPageClient({
                     <div className="mt-4 space-y-4">
                       {purchase.items.map((item) => {
                         const draft = stockDrafts[item.id] ?? emptyStockLinkDraft(item.quantity, item.unit)
-                        const stockOptions = draft.stockType === "FEED" ? feedStocks : medicineStocks
+                        const stockOptions = draft.stockType === "FEED" ? cachedFeedStocks : cachedMedicineStocks
                         const isFeedSackItem = item.unit.trim().toUpperCase() === "SAC"
 
                         return (

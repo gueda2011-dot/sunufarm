@@ -1,23 +1,53 @@
+"use client"
+
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card"
 import { formatMoneyFCFA, formatDate }              from "@/src/lib/formatters"
 import type { ExpenseSummary }                      from "@/src/actions/expenses"
+import { useOfflineData }                           from "@/src/hooks/useOfflineData"
+import { OFFLINE_RESOURCE_KEYS }                    from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS }                           from "@/src/lib/offline-ttl"
+import { OfflineStateIndicator }                    from "@/src/components/offline/OfflineStateIndicator"
+import { loadExpensesFromLocal }                    from "@/src/lib/offline/repositories/transactionLoaders"
 
 interface ExpenseListProps {
+  organizationId: string
   expenses: ExpenseSummary[]
 }
 
-export function ExpenseList({ expenses }: ExpenseListProps) {
+export function ExpenseList({ organizationId, expenses: initialExpenses }: ExpenseListProps) {
+  const {
+    data: expenses = initialExpenses,
+    isOfflineFallback,
+    isStale,
+    readCacheMeta,
+  } = useOfflineData<ExpenseSummary[]>({
+    key: OFFLINE_RESOURCE_KEYS.expensesList,
+    organizationId,
+    initialData: initialExpenses,
+    ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadExpensesFromLocal(organizationId),
+  })
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Liste des dépenses</CardTitle>
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="space-y-3">
+        <OfflineStateIndicator
+          isOfflineFallback={isOfflineFallback}
+          isStale={isStale}
+          isEmpty={isOfflineFallback && expenses.length === 0}
+          readCacheMeta={readCacheMeta}
+        />
+
         {expenses.length === 0 ? (
           <p className="text-sm text-gray-400">
-            Aucune dépense enregistrée pour le moment.
+            {isOfflineFallback
+              ? "Aucune donnée disponible hors ligne. Connectez-vous pour synchroniser."
+              : "Aucune dépense enregistrée pour le moment."}
           </p>
         ) : (
           <div className="space-y-3">

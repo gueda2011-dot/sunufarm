@@ -7,6 +7,7 @@ import {
   View,
 } from "@react-pdf/renderer"
 import type { MonthlyReportData } from "@/src/lib/monthly-report-view"
+import type { MonthlyReportsPreviewModel } from "@/src/lib/reports-preview"
 
 const s = StyleSheet.create({
   page: {
@@ -134,6 +135,18 @@ const s = StyleSheet.create({
     fontSize: 8,
     color: "#9ca3af",
   },
+  watermark: {
+    position: "absolute",
+    top: "40%",
+    left: 0,
+    right: 0,
+    textAlign: "center",
+    fontSize: 34,
+    color: "#d97706",
+    opacity: 0.12,
+    transform: "rotate(-24deg)",
+    fontFamily: "Helvetica-Bold",
+  },
 })
 
 function fcfa(value: number) {
@@ -143,10 +156,16 @@ function fcfa(value: number) {
 export function MonthlyReportDocument({
   report,
   logoSrc,
+  previewModel,
+  watermarkText,
 }: {
   report: MonthlyReportData
   logoSrc?: string
+  previewModel?: MonthlyReportsPreviewModel
+  watermarkText?: string
 }) {
+  const isPreview = previewModel != null
+
   return (
     <Document
       title={`Rapport mensuel ${report.periodLabel}`}
@@ -154,12 +173,14 @@ export function MonthlyReportDocument({
       subject="Rapport mensuel de pilotage"
     >
       <Page size="A4" style={s.page}>
+        {watermarkText ? <Text style={s.watermark} fixed>{watermarkText}</Text> : null}
+
         <View style={s.header}>
           <View style={s.headerLeft}>
             {/* eslint-disable-next-line jsx-a11y/alt-text */}
             {logoSrc ? <Image src={logoSrc} style={s.logo} /> : null}
             <View>
-              <Text style={s.brandTitle}>Rapport mensuel</Text>
+              <Text style={s.brandTitle}>{isPreview ? "Rapport mensuel preview" : "Rapport mensuel"}</Text>
               <Text style={s.brandSub}>{report.organizationName}</Text>
               <Text style={s.brandSub}>{report.periodLabel}</Text>
             </View>
@@ -170,88 +191,126 @@ export function MonthlyReportDocument({
           </View>
         </View>
 
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Synthese</Text>
-          <View style={s.kpiGrid}>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Revenus ventes</Text>
-              <Text style={s.kpiValue}>{fcfa(report.totalSales)}</Text>
-              <Text style={s.kpiSub}>{report.salesCount} ventes</Text>
+        {isPreview && previewModel ? (
+          <>
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Decision preview</Text>
+              <View style={s.kpiGrid}>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Signal gratuit</Text>
+                  <Text style={s.kpiValue}>{previewModel.statusLabel}</Text>
+                  <Text style={s.kpiSub}>{previewModel.freeSignalCaption}</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Zone Starter</Text>
+                  <Text style={s.kpiValue}>{previewModel.starterRangeLabel}</Text>
+                  <Text style={s.kpiSub}>{previewModel.starterRangeCaption}</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Lecture Pro</Text>
+                  <Text style={s.kpiValue}>Rapport complet</Text>
+                  <Text style={s.kpiSub}>KPIs exacts et exports sans watermark</Text>
+                </View>
+              </View>
             </View>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Depenses</Text>
-              <Text style={s.kpiValue}>{fcfa(report.totalExpenses)}</Text>
-              <Text style={s.kpiSub}>{report.expensesCount} depenses</Text>
-            </View>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Resultat net</Text>
-              <Text style={s.kpiValue}>{fcfa(report.netResult)}</Text>
-              <Text style={s.kpiSub}>revenus - depenses</Text>
-            </View>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Mortalite</Text>
-              <Text style={s.kpiValue}>{report.totalMortality}</Text>
-              <Text style={s.kpiSub}>{report.totalEntryCount.toLocaleString("fr-SN")} sujets suivis</Text>
-            </View>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Aliment distribue</Text>
-              <Text style={s.kpiValue}>{report.totalFeedKg.toLocaleString("fr-SN")} kg</Text>
-              <Text style={s.kpiSub}>{report.dailyRecordsCount} saisies</Text>
-            </View>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Lots actifs</Text>
-              <Text style={s.kpiValue}>{report.batchesActive.length}</Text>
-              <Text style={s.kpiSub}>{report.batchesClosedCount} clotures ce mois</Text>
-            </View>
-          </View>
-        </View>
 
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Lots suivis sur la periode</Text>
-          <View style={s.tableHeader}>
-            <Text style={[s.headerCell, s.colLot]}>Lot</Text>
-            <Text style={[s.headerCell, s.colSite]}>Site</Text>
-            <Text style={[s.headerCell, s.colCount]}>Effectif</Text>
-            <Text style={[s.headerCell, s.colMort]}>Morts</Text>
-            <Text style={[s.headerCell, s.colFeed]}>Aliment</Text>
-            <Text style={[s.headerCell, s.colCost]}>Cout</Text>
-          </View>
-          {report.batchesActive.slice(0, 12).map((batch, index) => (
-            <View key={batch.id} style={index % 2 === 0 ? s.row : s.rowAlt}>
-              <Text style={[s.cell, s.colLot]}>{batch.number}</Text>
-              <Text style={[s.cell, s.colSite]}>{batch.farmName} / {batch.buildingName}</Text>
-              <Text style={[s.cell, s.colCount]}>{batch.entryCount}</Text>
-              <Text style={[s.cell, s.colMort]}>{batch.periodMortality}</Text>
-              <Text style={[s.cell, s.colFeed]}>{batch.periodFeedKg}</Text>
-              <Text style={[s.cell, s.colCost]}>{fcfa(batch.totalCostFcfa)}</Text>
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Contexte du mois</Text>
+              <View style={s.kpiGrid}>
+                {previewModel.drivers.map((driver) => (
+                  <View key={driver} style={s.kpiCard}>
+                    <Text style={s.kpiValue}>{driver}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
-          ))}
-        </View>
+          </>
+        ) : (
+          <>
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Synthese</Text>
+              <View style={s.kpiGrid}>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Revenus ventes</Text>
+                  <Text style={s.kpiValue}>{fcfa(report.totalSales)}</Text>
+                  <Text style={s.kpiSub}>{report.salesCount} ventes</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Depenses</Text>
+                  <Text style={s.kpiValue}>{fcfa(report.totalExpenses)}</Text>
+                  <Text style={s.kpiSub}>{report.expensesCount} depenses</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Resultat net</Text>
+                  <Text style={s.kpiValue}>{fcfa(report.netResult)}</Text>
+                  <Text style={s.kpiSub}>revenus - depenses</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Mortalite</Text>
+                  <Text style={s.kpiValue}>{report.totalMortality}</Text>
+                  <Text style={s.kpiSub}>{report.totalEntryCount.toLocaleString("fr-SN")} sujets suivis</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Aliment distribue</Text>
+                  <Text style={s.kpiValue}>{report.totalFeedKg.toLocaleString("fr-SN")} kg</Text>
+                  <Text style={s.kpiSub}>{report.dailyRecordsCount} saisies</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Lots actifs</Text>
+                  <Text style={s.kpiValue}>{report.batchesActive.length}</Text>
+                  <Text style={s.kpiSub}>{report.batchesClosedCount} clotures ce mois</Text>
+                </View>
+              </View>
+            </View>
 
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Flux financiers</Text>
-          <View style={s.kpiGrid}>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Encaissements</Text>
-              <Text style={s.kpiValue}>{fcfa(report.totalPaid)}</Text>
-              <Text style={s.kpiSub}>sur les ventes du mois</Text>
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Lots suivis sur la periode</Text>
+              <View style={s.tableHeader}>
+                <Text style={[s.headerCell, s.colLot]}>Lot</Text>
+                <Text style={[s.headerCell, s.colSite]}>Site</Text>
+                <Text style={[s.headerCell, s.colCount]}>Effectif</Text>
+                <Text style={[s.headerCell, s.colMort]}>Morts</Text>
+                <Text style={[s.headerCell, s.colFeed]}>Aliment</Text>
+                <Text style={[s.headerCell, s.colCost]}>Cout</Text>
+              </View>
+              {report.batchesActive.slice(0, 12).map((batch, index) => (
+                <View key={batch.id} style={index % 2 === 0 ? s.row : s.rowAlt}>
+                  <Text style={[s.cell, s.colLot]}>{batch.number}</Text>
+                  <Text style={[s.cell, s.colSite]}>{batch.farmName} / {batch.buildingName}</Text>
+                  <Text style={[s.cell, s.colCount]}>{batch.entryCount}</Text>
+                  <Text style={[s.cell, s.colMort]}>{batch.periodMortality}</Text>
+                  <Text style={[s.cell, s.colFeed]}>{batch.periodFeedKg}</Text>
+                  <Text style={[s.cell, s.colCost]}>{fcfa(batch.totalCostFcfa)}</Text>
+                </View>
+              ))}
             </View>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Achats fournisseurs</Text>
-              <Text style={s.kpiValue}>{fcfa(report.totalPurchases)}</Text>
-              <Text style={s.kpiSub}>{report.purchasesCount} achats</Text>
+
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Flux financiers</Text>
+              <View style={s.kpiGrid}>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Encaissements</Text>
+                  <Text style={s.kpiValue}>{fcfa(report.totalPaid)}</Text>
+                  <Text style={s.kpiSub}>sur les ventes du mois</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Achats fournisseurs</Text>
+                  <Text style={s.kpiValue}>{fcfa(report.totalPurchases)}</Text>
+                  <Text style={s.kpiSub}>{report.purchasesCount} achats</Text>
+                </View>
+                <View style={s.kpiCard}>
+                  <Text style={s.kpiLabel}>Comparatif ventes</Text>
+                  <Text style={s.kpiValue}>
+                    {report.comparison.sales.deltaPercent == null
+                      ? "n/a"
+                      : `${report.comparison.sales.deltaPercent.toFixed(1)}%`}
+                  </Text>
+                  <Text style={s.kpiSub}>vs mois precedent</Text>
+                </View>
+              </View>
             </View>
-            <View style={s.kpiCard}>
-              <Text style={s.kpiLabel}>Comparatif ventes</Text>
-              <Text style={s.kpiValue}>
-                {report.comparison.sales.deltaPercent == null
-                  ? "n/a"
-                  : `${report.comparison.sales.deltaPercent.toFixed(1)}%`}
-              </Text>
-              <Text style={s.kpiSub}>vs mois precedent</Text>
-            </View>
-          </View>
-        </View>
+          </>
+        )}
 
         <View style={s.footer} fixed>
           <Text style={s.footerText}>SunuFarm - Pilotage avicole</Text>

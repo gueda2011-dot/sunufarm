@@ -53,7 +53,7 @@ function InfoCard({
 }
 
 export default async function AdminOrganizationDetailPage(
-  props: PageProps<"/admin/organizations/[id]">,
+  props: { params: Promise<{ id: string }> },
 ) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")

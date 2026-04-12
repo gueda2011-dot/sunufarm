@@ -302,6 +302,7 @@ model Organization {
   currency  String    @default("XOF")
   locale    String    @default("fr-SN")
   timezone  String    @default("Africa/Dakar")
+  collectiveIntelligenceSharingEnabled Boolean @default(true)
   logoUrl   String?
   phone     String?
   address   String?
@@ -685,9 +686,10 @@ model EggProductionRecord {
   dirtyEggs    Int @default(0) // sales
   smallEggs    Int @default(0) // petits / déclassés (classe B/C)
 
-  passageCount Int     @default(1) // nombre de passages de ramassage dans la journée
-  observations String?
-  recordedById String?
+  passageCount      Int     @default(1) // nombre de passages de ramassage dans la journée
+  observations      String?
+  recordedById      String?
+  clientMutationId  String? @unique
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1022,13 +1024,14 @@ model Purchase {
   supplierId     String?
   invoiceId      String?  @unique
   purchaseDate   DateTime @db.Date
-  reference      String? // numéro facture fournisseur
-  totalFcfa      Int      @default(0)
-  paidFcfa       Int      @default(0)
-  notes          String?
-  createdById    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  reference        String? // numéro facture fournisseur
+  totalFcfa        Int      @default(0)
+  paidFcfa         Int      @default(0)
+  notes            String?
+  clientMutationId String?  @unique
+  createdById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   organization Organization   @relation(fields: [organizationId], references: [id])
   supplier     Supplier?      @relation(fields: [supplierId], references: [id])
@@ -1317,11 +1320,12 @@ model PredictiveSnapshot {
  * PAS d'organizationId — données strictement anonymisées.
  * Alimente le pool d'intelligence collective cross-organisations.
  *
- * Opt-in : generé uniquement si l'organisation a activé le partage (default: true).
+ * Partage piloté par l'organisation : généré uniquement si le partage est activé.
  * regionCode : dérivé du pays/région de la ferme (DAKAR, THIES, SAINT_LOUIS...).
  */
 model BatchOutcomeSnapshot {
   id String @id @default(cuid())
+  sourceFingerprint String @unique
 
   // Contexte du lot (anonymisé)
   batchType    BatchType
@@ -1420,4 +1424,40 @@ model RecommendationFeedback {
   @@index([organizationId, batchId])
   @@index([patternType])
   @@index([followed, outcomeTag])
+}
+
+// =============================================================================
+// ANALYTICS — ÉVÉNEMENTS PRODUIT (Phase 5)
+// =============================================================================
+
+/**
+ * Événements produit pour le funnel de conversion et l'instrumentation.
+ *
+ * Événements standards :
+ *   paywall_viewed        — un paywall s'est affiché (FeatureGateCard rendu)
+ *   pricing_page_visited  — la page /pricing a été visitée (avec contexte from)
+ *   pricing_cta_clicked   — clic sur un bouton d'achat (WhatsApp redirect)
+ *   export_launched       — un rapport a été téléchargé
+ *   alert_action_clicked  — clic sur l'action d'une alerte (NotificationDropdown)
+ *   feature_viewed        — une feature premium vue avec accès complet
+ *
+ * Règles :
+ *   - organizationId et userId sont optionnels pour robustesse (sessions partielles)
+ *   - plan = plan commercial au moment de l'événement (FREE, STARTER, PRO, BUSINESS)
+ *   - properties = JSON libre, schéma défini par event (entitlement, surface, format, etc.)
+ *   - Cette table est append-only — ne jamais update ni delete
+ */
+model AnalyticsEvent {
+  id             String   @id @default(cuid())
+  organizationId String?
+  userId         String?
+  event          String
+  plan           String?
+  properties     Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  @@index([event, createdAt])
+  @@index([organizationId, event, createdAt])
+  @@index([userId, event, createdAt])
+  @@map("analytics_events")
 }

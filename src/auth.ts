@@ -285,11 +285,15 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
   // "jwt" : sessions stockées dans un cookie signé côté client.
   //   Avantages   : aucune table Session en base, stateless, scalable.
   //   Inconvénients : révocation immédiate impossible (token valide jusqu'à expiry).
-  //   Pour le MVP terrain, ce compromis est acceptable.
+  //
+  //   Durée réduite à 8h (compromis sécurité / UX terrain) :
+  //     - Un token volé reste exploitable au maximum une journée de travail
+  //     - Les agents terrain se reconnectent en début de journée
+  //     - La PWA offline conserve le contexte localement sans dépendre du JWT
   //   En V2 : passer à "database" + PrismaAdapter pour la révocation à distance.
   // -------------------------------------------------------------------------
   session: {
     strategy: "jwt",
-    maxAge:   30 * 24 * 60 * 60, // 30 jours (adapté au contexte terrain)
+    maxAge:   8 * 60 * 60, // 8 heures (réduit de 30j pour limiter la fenêtre d'exploitation)
   },
 })

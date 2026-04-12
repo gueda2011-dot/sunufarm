@@ -23,7 +23,7 @@ export async function POST(
     }
 
     const { organizationId } = await params
-    const rateLimit = applyRateLimit({
+    const rateLimit = await applyRateLimit({
       key: `admin-subscription:${organizationId}:${getClientIpFromHeaders(request.headers)}`,
       limit: 10,
       windowMs: 60_000,

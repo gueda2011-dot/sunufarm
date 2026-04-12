@@ -61,7 +61,7 @@ export async function POST(
   }
 
   const rawBody = await request.text()
-  const rateLimit = applyRateLimit({
+  const rateLimit = await applyRateLimit({
     key: `payment-webhook:${providerParsed.data}:${getClientIpFromHeaders(request.headers)}`,
     limit: 120,
     windowMs: 60_000,

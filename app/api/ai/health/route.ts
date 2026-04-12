@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { organizationId } = parsed.data
-    const rateLimit = applyRateLimit({
+    const rateLimit = await applyRateLimit({
       key: `ai-health:${session.user.id}:${organizationId}:${getClientIpFromHeaders(request.headers)}`,
       limit: 5,
       windowMs: 60_000,

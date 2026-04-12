@@ -10,6 +10,7 @@ import type { Metadata } from "next"
 import { auth }          from "@/src/auth"
 import prisma            from "@/src/lib/prisma"
 import { getVaccinationPlans, getVaccinations, getTreatments } from "@/src/actions/health"
+import { getMedicineStocks } from "@/src/actions/stock"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { getVaccinationSuggestions } from "@/src/lib/health-guidance"
@@ -34,7 +35,7 @@ export default async function HealthPage() {
   const aiPolicy = getAIPolicy(subscription)
 
   // Fetch parallèle : vaccinations + traitements + map lots actifs
-  const [vaccinationsResult, treatmentsResult, vaccinationPlansResult, batches] = await Promise.all([
+  const [vaccinationsResult, treatmentsResult, vaccinationPlansResult, batches, medicineStocksResult] = await Promise.all([
     getVaccinations({ organizationId, limit: 30 }),
     getTreatments({ organizationId, limit: 30 }),
     canViewAdvancedHealth
@@ -57,11 +58,21 @@ export default async function HealthPage() {
         },
       },
     }),
+    getMedicineStocks({ organizationId, limit: 100 }),
   ])
 
   const vaccinations = vaccinationsResult.success ? vaccinationsResult.data : []
   const treatments   = treatmentsResult.success   ? treatmentsResult.data   : []
   const vaccinationPlans = vaccinationPlansResult.success ? vaccinationPlansResult.data : []
+  const medicineStocks = medicineStocksResult.success
+    ? medicineStocksResult.data.map((stock) => ({
+        id: stock.id,
+        farmId: stock.farmId,
+        name: stock.name,
+        unit: stock.unit,
+        quantityOnHand: stock.quantityOnHand,
+      }))
+    : []
 
   // Map batchId → numéro de lot pour l'affichage
   const batchMap = Object.fromEntries(
@@ -136,6 +147,12 @@ export default async function HealthPage() {
       activeTreatmentsCount={activeTreatments}
       totalVaxCount={vaccinations.length}
       totalTreatmentsCount={treatments.length}
+      offlineBatches={batches.map((batch) => ({
+        id: batch.id,
+        number: batch.number,
+        status: batch.status,
+      }))}
+      offlineMedicineStocks={medicineStocks}
     />
   )
 }

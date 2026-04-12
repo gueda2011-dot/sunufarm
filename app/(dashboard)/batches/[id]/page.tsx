@@ -1,31 +1,22 @@
 /**
  * SunuFarm — Détail d'un lot d'élevage (Server Component)
- *
- * Toutes les données sont chargées en parallèle (Promise.all) et les agrégations
- * calculées côté serveur avant de descendre en props simples vers les composants.
- * Pas de logique de calcul dans les enfants.
- *
- * Limites honnêtes documentées :
- *   - Effectif vivant : approximation entryCount - totalMortality (réformes non gérées au MVP)
- *   - totalMortality : agrégé depuis les 100 derniers records (suffisant pour MVP)
- *   - Rentabilité : getBatchProfitability agrège SaleItem, Expense et DailyRecord en parallèle
  */
 
-import { notFound, redirect }             from "next/navigation"
-import type { Metadata }                  from "next"
-import { auth }                           from "@/src/auth"
-import { getBatch }                       from "@/src/actions/batches"
-import type { ActionResult }             from "@/src/lib/auth"
+import { notFound, redirect } from "next/navigation"
+import type { Metadata } from "next"
+import { auth } from "@/src/auth"
+import { getBatch } from "@/src/actions/batches"
+import type { ActionResult } from "@/src/lib/auth"
 import { actionFailure } from "@/src/lib/action-result"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
-import { getDailyRecords }                from "@/src/actions/daily-records"
-import { getExpenses }                    from "@/src/actions/expenses"
+import { getDailyRecords } from "@/src/actions/daily-records"
+import { getExpenses } from "@/src/actions/expenses"
 import { getVaccinations, getTreatments } from "@/src/actions/health"
 import { getMedicineStocks } from "@/src/actions/stock"
 import { getBatchProfitability, type BatchProfitability } from "@/src/actions/profitability"
-import { PlanGuardCard }                  from "@/src/components/subscription/PlanGuardCard"
-import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
+import { FeatureGateCard } from "@/src/components/subscription/FeatureGateCard"
+import { getFeatureUpgradeMessage } from "@/src/lib/subscriptions"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { getAIPolicy, listStoredBatchAnalyses } from "@/src/lib/ai"
 import { getBatchMarginInsight, getBatchMortalityInsight } from "@/src/actions/predictive"
@@ -33,15 +24,22 @@ import {
   getBatchOperationalSnapshot,
   hasMissingBatchSaisie,
 } from "@/src/lib/batch-metrics"
-import { BatchHeader }                    from "./_components/BatchHeader"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { FREE_HISTORY_LIMIT } from "@/src/lib/entitlements"
+import { getPremiumSurfaceCopy } from "@/src/lib/premium-surface-copy"
+import { track } from "@/src/lib/analytics"
+import prisma from "@/src/lib/prisma"
+import { BatchHeader } from "./_components/BatchHeader"
 import { BatchMarginProjectionCard } from "./_components/BatchMarginProjectionCard"
 import { BatchMortalityPredictionCard } from "./_components/BatchMortalityPredictionCard"
-import { BatchAIAnalysisCard }            from "./_components/BatchAIAnalysisCard"
-import { BatchKpis }                      from "./_components/BatchKpis"
-import { ProfitabilityCard }              from "./_components/ProfitabilityCard"
-import { RecentDailyRecords }             from "./_components/RecentDailyRecords"
-import { HealthSection }                  from "./_components/HealthSection"
-import { RecentExpenses }                 from "./_components/RecentExpenses"
+import { BatchAIAnalysisCard } from "./_components/BatchAIAnalysisCard"
+import { BatchKpis } from "./_components/BatchKpis"
+import { ProfitabilityCard } from "./_components/ProfitabilityCard"
+import { ProfitabilityPreviewCard } from "./_components/ProfitabilityPreviewCard"
+import { RecentDailyRecords } from "./_components/RecentDailyRecords"
+import { HealthSection } from "./_components/HealthSection"
+import { RecentExpenses } from "./_components/RecentExpenses"
+import { BatchLocalHistory } from "./_components/BatchLocalHistory"
 
 export const metadata: Metadata = { title: "Détail du lot" }
 
@@ -65,74 +63,42 @@ export default async function BatchDetailPage({
 
   const { organizationId, role } = activeMembership
   const subscription = await getOrganizationSubscription(organizationId)
-  const canSeeProfitability = hasPlanFeature(subscription.plan, "PROFITABILITY")
-  const canSeePredictiveHealth = hasPlanFeature(subscription.plan, "PREDICTIVE_HEALTH_ALERTS")
-  const canSeePredictiveMargin = hasPlanFeature(subscription.plan, "PREDICTIVE_MARGIN_ALERTS")
-  const canShowMortalityPrediction = batch.status === "ACTIVE"
   const aiPolicy = getAIPolicy(subscription)
   const canUseBatchAI = aiPolicy.enabled
+  const canShowPredictiveCards = batch.status === "ACTIVE"
 
-  // ── Fetch parallèle ──────────────────────────────────────────────────────
-  // getBatch doit réussir pour afficher la page.
-  // Les autres fetches dégradent gracieusement si ils échouent (tableaux vides).
   const [
     recordsResult,
     expensesResult,
     vaccinationsResult,
     treatmentsResult,
     medicineStocksResult,
-    profitabilityResult,
-    mortalityInsightResult,
-    marginInsightResult,
     previousAnalyses,
+    eggProductionAgg,
   ] = await Promise.all([
     getDailyRecords({ organizationId, batchId: id, limit: 100 }),
     getExpenses({ organizationId, batchId: id, limit: 100 }),
     getVaccinations({ organizationId, batchId: id, limit: 10 }),
     getTreatments({ organizationId, batchId: id, limit: 10 }),
     getMedicineStocks({ organizationId, farmId: batch.building.farmId, limit: 100 }),
-    canSeeProfitability
-      ? getBatchProfitability({ organizationId, batchId: id })
-      : Promise.resolve<ActionResult<BatchProfitability>>(
-          actionFailure(getFeatureUpgradeMessage("PROFITABILITY"), {
-            code: "PLAN_UPGRADE_REQUIRED",
-            status: 403,
-          }),
-        ),
-    canSeePredictiveHealth && canShowMortalityPrediction
-      ? getBatchMortalityInsight(organizationId, id)
-      : Promise.resolve<ActionResult<Awaited<ReturnType<typeof getBatchMortalityInsight>> extends { success: true; data: infer T } ? T : never>>(
-          actionFailure(getFeatureUpgradeMessage("PREDICTIVE_HEALTH_ALERTS"), {
-            code: "PLAN_UPGRADE_REQUIRED",
-            status: 403,
-          }),
-        ),
-    canSeePredictiveMargin && canShowMortalityPrediction
-      ? getBatchMarginInsight(organizationId, id)
-      : Promise.resolve<ActionResult<Awaited<ReturnType<typeof getBatchMarginInsight>> extends { success: true; data: infer T } ? T : never>>(
-          actionFailure(getFeatureUpgradeMessage("PREDICTIVE_MARGIN_ALERTS"), {
-            code: "PLAN_UPGRADE_REQUIRED",
-            status: 403,
-          }),
-        ),
     listStoredBatchAnalyses(organizationId, id, 5),
+    prisma.eggProductionRecord.aggregate({
+      where: { batchId: id, organizationId },
+      _sum: {
+        totalEggs: true,
+        sellableEggs: true,
+      },
+    }),
   ])
 
-  const records       = recordsResult.success       ? recordsResult.data       : []
-  const expenses      = expensesResult.success      ? expensesResult.data      : []
-  const vaccinations  = vaccinationsResult.success  ? vaccinationsResult.data  : []
-  const treatments    = treatmentsResult.success    ? treatmentsResult.data    : []
+  const records = recordsResult.success ? recordsResult.data : []
+  const expenses = expensesResult.success ? expensesResult.data : []
+  const vaccinations = vaccinationsResult.success ? vaccinationsResult.data : []
+  const treatments = treatmentsResult.success ? treatmentsResult.data : []
   const medicineStocks = medicineStocksResult.success ? medicineStocksResult.data : []
-  const profitability = profitabilityResult.success ? profitabilityResult.data : null
-  const mortalityInsight = mortalityInsightResult.success ? mortalityInsightResult.data : null
-  const marginInsight = marginInsightResult.success ? marginInsightResult.data : null
 
-  // ── Agrégations opérationnelles (calculées une fois, propagées en props) ─
-  const totalMortality = records.reduce((s, r) => s + r.mortality, 0)
-
-  // records est trié date desc par l'action getDailyRecords
+  const totalMortality = records.reduce((sum, record) => sum + record.mortality, 0)
   const lastRecordDate = records[0]?.date ?? null
-
   const snapshot = getBatchOperationalSnapshot({
     entryDate: batch.entryDate,
     entryAgeDay: batch.entryAgeDay,
@@ -146,6 +112,79 @@ export default async function BatchDetailPage({
     entryDate: batch.entryDate,
     lastRecordDate,
   })
+
+  const hasDecisionData =
+    records.length >= 3 &&
+    (expenses.length > 0 || batch._count.saleItems > 0 || totalMortality > 0)
+  const totalEggsProduced = eggProductionAgg._sum.totalEggs ?? 0
+  const totalSellableEggs = eggProductionAgg._sum.sellableEggs ?? 0
+  const hasBreakEvenData =
+    hasDecisionData &&
+    (batch.type !== "PONDEUSE" || totalSellableEggs > 0)
+  const profitabilityGate = resolveEntitlementGate(subscription, "REAL_PROFITABILITY", {
+    hasMinimumData: hasDecisionData,
+    previewEnabled: hasDecisionData,
+  })
+  const breakEvenGate = resolveEntitlementGate(subscription, "BREAK_EVEN_PRICE", {
+    hasMinimumData: hasBreakEvenData,
+    previewEnabled: hasBreakEvenData,
+  })
+  const mortalityGate = resolveEntitlementGate(subscription, "PREDICTIVE_HEALTH_ALERTS", {
+    hasMinimumData: canShowPredictiveCards && records.length >= 3,
+  })
+  const marginGate = resolveEntitlementGate(subscription, "PREDICTIVE_MARGIN_ALERTS", {
+    hasMinimumData: canShowPredictiveCards && records.length >= 3,
+  })
+  const historyGate = resolveEntitlementGate(subscription, "FULL_HISTORY")
+
+  const [profitabilityResult, mortalityInsightResult, marginInsightResult] = await Promise.all([
+    gateHasFullAccess(profitabilityGate) || gateHasFullAccess(breakEvenGate)
+      ? getBatchProfitability({ organizationId, batchId: id })
+      : Promise.resolve<ActionResult<BatchProfitability>>(
+          actionFailure(getFeatureUpgradeMessage("PROFITABILITY"), {
+            code: "PLAN_UPGRADE_REQUIRED",
+            status: 403,
+          }),
+        ),
+    gateHasFullAccess(mortalityGate) && canShowPredictiveCards
+      ? getBatchMortalityInsight(organizationId, id)
+      : Promise.resolve<ActionResult<Awaited<ReturnType<typeof getBatchMortalityInsight>> extends { success: true; data: infer T } ? T : never>>(
+          actionFailure(getFeatureUpgradeMessage("PREDICTIVE_HEALTH_ALERTS"), {
+            code: "PLAN_UPGRADE_REQUIRED",
+            status: 403,
+          }),
+        ),
+    gateHasFullAccess(marginGate) && canShowPredictiveCards
+      ? getBatchMarginInsight(organizationId, id)
+      : Promise.resolve<ActionResult<Awaited<ReturnType<typeof getBatchMarginInsight>> extends { success: true; data: infer T } ? T : never>>(
+          actionFailure(getFeatureUpgradeMessage("PREDICTIVE_MARGIN_ALERTS"), {
+            code: "PLAN_UPGRADE_REQUIRED",
+            status: 403,
+          }),
+        ),
+  ])
+
+  const profitability = profitabilityResult.success ? profitabilityResult.data : null
+  const mortalityInsight = mortalityInsightResult.success ? mortalityInsightResult.data : null
+  const marginInsight = marginInsightResult.success ? marginInsightResult.data : null
+  const profitabilityCopy = getPremiumSurfaceCopy("profitability", profitabilityGate.access)
+  const marginCopy = getPremiumSurfaceCopy("margin", marginGate.access)
+  const mortalityCopy = getPremiumSurfaceCopy("mortality", mortalityGate.access)
+
+  // ── Tracking paywalls ──────────────────────────────────────────────────────
+  const trackCtx = { userId: session.user.id, organizationId, plan: subscription.commercialPlan }
+  if (!gateHasFullAccess(profitabilityGate) && profitabilityGate.access !== "blocked") {
+    void track({ ...trackCtx, event: "paywall_viewed", properties: { entitlement: "REAL_PROFITABILITY", surface: "batch_detail", access: profitabilityGate.access } })
+  }
+  if (!gateHasFullAccess(mortalityGate) && mortalityGate.access !== "blocked" && canShowPredictiveCards) {
+    void track({ ...trackCtx, event: "paywall_viewed", properties: { entitlement: "PREDICTIVE_HEALTH_ALERTS", surface: "batch_detail", access: mortalityGate.access } })
+  }
+  if (!gateHasFullAccess(marginGate) && marginGate.access !== "blocked" && canShowPredictiveCards) {
+    void track({ ...trackCtx, event: "paywall_viewed", properties: { entitlement: "PREDICTIVE_MARGIN_ALERTS", surface: "batch_detail", access: marginGate.access } })
+  }
+  if (!gateHasFullAccess(historyGate)) {
+    void track({ ...trackCtx, event: "paywall_viewed", properties: { entitlement: "FULL_HISTORY", surface: "full_history", access: historyGate.access } })
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -164,6 +203,12 @@ export default async function BatchDetailPage({
         isActive={batch.status === "ACTIVE"}
       />
 
+      <BatchLocalHistory
+        batchId={batch.id}
+        organizationId={organizationId}
+        entryCount={batch.entryCount}
+      />
+
       {mortalityInsight && (
         <BatchMortalityPredictionCard
           prediction={mortalityInsight.prediction}
@@ -171,12 +216,17 @@ export default async function BatchDetailPage({
         />
       )}
 
-      {!mortalityInsight && canShowMortalityPrediction && (
-        <PlanGuardCard
-          title="Debloquez la prediction mortalite"
-          message={getFeatureUpgradeMessage("PREDICTIVE_HEALTH_ALERTS")}
-          requiredPlan="Pro"
-          currentPlan={subscription.plan}
+      {!mortalityInsight && canShowPredictiveCards && (
+        <FeatureGateCard
+          title={mortalityCopy.title}
+          message={mortalityGate.reason}
+          targetPlanLabel={mortalityGate.requiredPlanLabel}
+          currentPlanLabel={subscription.currentPlanLabel}
+          access={mortalityGate.access}
+          ctaLabel={mortalityCopy.ctaLabel}
+          highlights={mortalityCopy.highlights}
+          footerHint={mortalityCopy.footerHint}
+          trackingSurface="mortality"
         />
       )}
 
@@ -187,12 +237,17 @@ export default async function BatchDetailPage({
         />
       )}
 
-      {!marginInsight && canShowMortalityPrediction && (
-        <PlanGuardCard
-          title="Debloquez la projection de marge"
-          message={getFeatureUpgradeMessage("PREDICTIVE_MARGIN_ALERTS")}
-          requiredPlan="Pro"
-          currentPlan={subscription.plan}
+      {!marginInsight && canShowPredictiveCards && (
+        <FeatureGateCard
+          title={marginCopy.title}
+          message={marginGate.reason}
+          targetPlanLabel={marginGate.requiredPlanLabel}
+          currentPlanLabel={subscription.currentPlanLabel}
+          access={marginGate.access}
+          ctaLabel={marginCopy.ctaLabel}
+          highlights={marginCopy.highlights}
+          footerHint={marginCopy.footerHint}
+          trackingSurface="margin"
         />
       )}
 
@@ -200,19 +255,51 @@ export default async function BatchDetailPage({
         <ProfitabilityCard profitability={profitability} />
       )}
 
+      {!profitability && profitabilityGate.access === "preview" && (
+        <ProfitabilityPreviewCard
+          commercialPlan={subscription.commercialPlan}
+          batchType={batch.type}
+          breakEvenAccess={breakEvenGate.access}
+          entryCount={batch.entryCount}
+          purchaseCostFcfa={batch.totalCostFcfa}
+          operationalCostFcfa={expenses.reduce((sum, expense) => sum + expense.amountFcfa, 0)}
+          totalMortality={totalMortality}
+          totalEggsProduced={totalEggsProduced}
+          totalSellableEggs={totalSellableEggs}
+          recordsCount={records.length}
+          expensesCount={expenses.length}
+          saleItemsCount={batch._count.saleItems}
+        />
+      )}
+
       {!profitability && (
-        <PlanGuardCard
-          title="Debloquez la rentabilite par lot"
-          message={getFeatureUpgradeMessage("PROFITABILITY")}
-          requiredPlan="Pro"
-          currentPlan={subscription.plan}
+        <FeatureGateCard
+          title={profitabilityCopy.title}
+          message={
+            breakEvenGate.access === "blocked" && profitabilityGate.access !== "blocked"
+              ? `${profitabilityGate.reason} Le prix minimum exact s activera des que les donnees de vente ou d oeufs seront suffisantes.`
+              : profitabilityGate.reason
+          }
+          targetPlanLabel={profitabilityGate.requiredPlanLabel}
+          currentPlanLabel={subscription.currentPlanLabel}
+          access={profitabilityGate.access}
+          ctaLabel={profitabilityCopy.ctaLabel}
+          highlights={profitabilityCopy.highlights}
+          footerHint={
+            profitabilityGate.access === "preview"
+              ? breakEvenGate.access === "blocked"
+                ? "Vous voyez la decision preview de marge. Continuez la saisie pour preparer le prix minimum, puis Pro debloquera les valeurs exactes."
+                : "Vous voyez maintenant une decision preview. Pro debloque la marge exacte et le vrai prix minimum de vente."
+              : profitabilityCopy.footerHint
+          }
+          trackingSurface="profitability"
         />
       )}
 
       <BatchAIAnalysisCard
         organizationId={organizationId}
         batchId={batch.id}
-        planLabel={subscription.isTrialActive ? "Essai gratuit" : subscription.billingLabel}
+        planLabel={subscription.currentPlanLabel}
         aiAccessLabel={
           subscription.isTrialActive
             ? "Essai limite"
@@ -239,8 +326,10 @@ export default async function BatchDetailPage({
       />
 
       <RecentDailyRecords
-        records={records.slice(0, 7)}
+        records={records.slice(0, FREE_HISTORY_LIMIT)}
         batchId={batch.id}
+        historyLocked={historyGate.access !== "full"}
+        totalRecordsCount={records.length}
       />
 
       <HealthSection

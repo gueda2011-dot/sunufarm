@@ -48,11 +48,11 @@ interface PlanDefinition {
 
 export const PLAN_DEFINITIONS: Record<SubscriptionPlan, PlanDefinition> = {
   BASIC: {
-    label: "Basic",
+    label: "Starter",
     monthlyPriceFcfa: 3_000,
-    promise: "Mettre de l'ordre dans l'elevage au quotidien.",
-    audience: "Petits eleveurs et exploitations en demarrage",
-    valueHeadline: "Commencer a suivre proprement son elevage",
+    promise: "Mieux organiser l'exploitation au quotidien.",
+    audience: "Eleveurs qui veulent structurer leurs operations",
+    valueHeadline: "Passer de l'habitude a l'organisation",
     maxActiveBatches: 2,
     maxFarms: 1,
     highlights: [
@@ -182,9 +182,9 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
     case "REPORTS":
       return "Les rapports mensuels sont disponibles a partir du plan Pro."
     case "PROFITABILITY":
-      return "L'analyse de rentabilite est disponible a partir du plan Pro."
+      return "La vraie rentabilite par lot est disponible a partir du plan Pro."
     case "ALERTS":
-      return "Les alertes intelligentes sont disponibles a partir du plan Pro."
+      return "Les alertes actionnables sont disponibles a partir du plan Pro."
     case "ADVANCED_HEALTH":
       return "La surveillance sanitaire avancee est disponible a partir du plan Pro."
     case "GLOBAL_ANALYTICS":
@@ -200,7 +200,7 @@ export function getFeatureUpgradeMessage(feature: SubscriptionFeature): string {
     case "ADVANCED_EXPORTS":
       return "Le plan Business debloque les exports consolides utiles pour le pilotage et le partage dirigeant."
     case "AI_BATCH_ANALYSIS":
-      return "L'analyse intelligente des lots est disponible a partir du plan Pro."
+      return "L'analyse plus poussee par lot est disponible a partir du plan Pro."
     case "PREDICTIVE_STOCK_ALERTS":
       return "Les alertes predictives de rupture stock sont disponibles a partir du plan Pro."
   }

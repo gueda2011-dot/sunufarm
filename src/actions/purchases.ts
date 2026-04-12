@@ -65,12 +65,13 @@ const getPurchasesSchema = z.object({
 })
 
 const createPurchaseSchema = z.object({
-  organizationId: requiredIdSchema,
-  supplierId: optionalIdSchema,
-  purchaseDate: z.coerce.date(),
-  reference: z.string().max(100).optional().or(z.literal("")),
-  notes: z.string().max(1000).optional().or(z.literal("")),
-  items: z.array(purchaseItemSchema).min(1, "Au moins une ligne requise"),
+  organizationId:  requiredIdSchema,
+  supplierId:      optionalIdSchema,
+  purchaseDate:    z.coerce.date(),
+  reference:       z.string().max(100).optional().or(z.literal("")),
+  notes:           z.string().max(1000).optional().or(z.literal("")),
+  items:           z.array(purchaseItemSchema).min(1, "Au moins une ligne requise"),
+  clientMutationId: z.string().trim().min(1).max(100).optional(),
 })
 
 const deletePurchaseSchema = z.object({
@@ -233,7 +234,7 @@ export async function createPurchase(
       return { success: false, error: parsed.error.issues[0]?.message ?? "Donnees invalides" }
     }
 
-    const { organizationId, supplierId, purchaseDate, reference, notes, items } = parsed.data
+    const { organizationId, supplierId, purchaseDate, reference, notes, items, clientMutationId } = parsed.data
     const accessResult = await requireOrganizationModuleContext(organizationId, "PURCHASES")
     if (!accessResult.success) return accessResult
     const roleResult = requireRole(
@@ -242,6 +243,18 @@ export async function createPurchase(
       "Permission refusee",
     )
     if (!roleResult.success) return roleResult
+
+    // Idempotence : si clientMutationId déjà connu, retourner l'achat existant
+    if (clientMutationId) {
+      const existingByMutation = await prisma.purchase.findUnique({
+        where: { clientMutationId },
+        select: purchaseSelect,
+      })
+      if (existingByMutation) {
+        const [decorated] = await decoratePurchasesWithStockLinks(organizationId, [existingByMutation])
+        return { success: true, data: decorated }
+      }
+    }
 
     if (supplierId) {
       const supplier = await prisma.supplier.findFirst({
@@ -270,6 +283,7 @@ export async function createPurchase(
         notes: notes || null,
         totalFcfa,
         paidFcfa: 0,
+        clientMutationId: clientMutationId ?? null,
         createdById: accessResult.data.session.user.id,
         items: {
           create: itemsWithTotal,

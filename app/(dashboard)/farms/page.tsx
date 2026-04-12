@@ -6,6 +6,8 @@ import { getFarms }        from "@/src/actions/farms"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
+import { resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { track } from "@/src/lib/analytics"
 import { FarmsClient }     from "./_components/FarmsClient"
 
 export const metadata: Metadata = { title: "Fermes & Bâtiments" }
@@ -28,14 +30,27 @@ export default async function FarmsPage() {
 
   const farmsResult = await getFarms({ organizationId })
   const farms = farmsResult.success ? farmsResult.data : []
+  const farmGate = resolveEntitlementGate(subscription, "FARM_LIMIT", {
+    usage: activeFarmCount,
+  })
+
+  if (farmGate.access !== "full") {
+    void track({
+      userId: session.user.id,
+      organizationId,
+      event: "paywall_viewed",
+      plan: subscription.commercialPlan,
+      properties: { entitlement: "FARM_LIMIT", surface: "farm_limit", access: farmGate.access },
+    })
+  }
 
   return (
     <FarmsClient
       organizationId={organizationId}
       userRole={role as string}
-      subscriptionPlan={subscription.plan}
-      maxFarms={subscription.maxFarms}
-      canCreateFarm={activeFarmCount < subscription.maxFarms}
+      currentPlanLabel={subscription.currentPlanLabel}
+      maxFarms={farmGate.limit}
+      canCreateFarm={farmGate.access === "full"}
       initialFarms={farms}
     />
   )

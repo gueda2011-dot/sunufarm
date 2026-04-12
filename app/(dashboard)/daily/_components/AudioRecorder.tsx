@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { Mic, Square, Loader2, Play, Trash2 } from "lucide-react"
+import { Mic, Square, Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/src/components/ui/button"
 import { toast } from "sonner"
 

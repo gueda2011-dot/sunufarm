@@ -42,7 +42,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - enregistrement quotidien des donnees terrain
 - mortalite, alimentation, eau, temperature (auto via Open-Meteo), humidite et observations (vocales via Cloudinary)
 - historique structure pour mieux comprendre ce qui se passe dans l'elevage
-- mode hors ligne V1 avec mise en file locale et resynchronisation automatique au retour du reseau
+- mode hors ligne avec lecture locale (lots, stocks) et mise en file des saisies pour resynchronisation automatique au retour du reseau
 
 ### Production
 
@@ -69,7 +69,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - tendance predictive `S'ameliore / Stable / Se degrade` sur les stocks les plus sensibles
 - enregistrement des ventes
 - meilleure visibilite sur les mouvements et les sorties
-- creation de ventes disponible hors ligne en V1 avec synchro differee
+- creation de ventes disponible hors ligne avec synchro differee et lecture locale de l'historique
 
 ### Finances
 
@@ -80,7 +80,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - analyse de la rentabilite pour savoir ce qui marche vraiment
 - affichage d'un `Prix minimum de vente` pour aider a savoir a partir de quel niveau vendre un poulet sans perdre d'argent
 - projection predictive de la marge finale des lots actifs pour les plans `Pro` et `Business`
-- creation de depenses disponible hors ligne en V1 avec synchro differée
+- creation de depenses disponible hors ligne avec synchro differee et lecture locale
 
 ### Parcours achats et stock
 
@@ -96,7 +96,17 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - meilleure tracabilite sanitaire
 - alertes et historique plus faciles a exploiter
 - prediction du risque mortalite sur 7 jours pour les plans `Pro` et `Business`
-- vaccinations et traitements disponibles hors ligne en V1 avec synchro differée
+- vaccinations et traitements disponibles hors ligne avec synchro differee et lecture locale des lots et plans vaccinaux
+
+### Intelligence Collective (Phase A)
+
+- a chaque cloture d'un lot, un snapshot anonymise est genere automatiquement et verse dans un pool collectif
+- aucune donnee identifiable : pas d'organizationId, pas de ferme, pas d'eleveur — uniquement les metriques agregees du lot
+- benchmark collectif progressif : l'analyse IA compare automatiquement le lot aux lots reels similaires du reseau (race + region + saison)
+- strategie de fallback : si la donnee precise manque, le systeme elargit la comparaison (race seule, puis type de lot global)
+- le benchmark collectif est injecte dans chaque analyse GPT/Claude a la place des seuils codes en dur
+- un cron nocturne alimente le pool avec les lots historiques et logue les statistiques du pool
+- boucle de feedback prevue : `RecommendationFeedback` permet de valider si un conseil a ete suivi et d'ajuster la confiance des patterns appris
 
 ### Intelligence Collective (Phase A)
 
@@ -137,41 +147,66 @@ Le produit est pense pour des usages concrets, avec une interface simple et une 
 
 ## Pricing
 
-### Basic - 3 000 FCFA / mois
+### Gratuit - 0 FCFA
 
-Pour les petits elevages qui veulent digitaliser leur suivi de base.
+Pour decouvrir SunuFarm sans engagement. Inclut 1 ferme, 1 lot actif, la saisie journaliere complete et une lecture simplifiee du lot avec apercus partiels.
+
+### Starter - 3 000 FCFA / mois
+
+Pour organiser l'exploitation au quotidien. Inclut les lots illimites, les ventes, depenses, stock basique, historique complet et export PDF avec watermark.
 
 ### Pro - 10 000 FCFA / mois
 
-Notre offre principale, concue pour les elevages qui veulent mieux piloter leur rentabilite et leur croissance.
+Notre offre recommandee pour les elevages qui veulent proteger leur marge. Inclut en plus :
 
-Inclut maintenant :
-
-- rapports
-- rentabilite par lot
-- prix minimum de vente par lot
-- alertes intelligentes
-- analyse AI des lots
-- prediction de rupture stock
-- prediction risque mortalite
+- rentabilite reelle par lot et prix minimum de vente
+- alertes actionnables sur mortalite, aliment et stock
+- prediction de rupture stock sur 14 jours
+- prediction risque mortalite sur 7 jours
 - projection marge finale
+- export PDF sans watermark
 
 ### Business - 25 000 FCFA / mois
 
-Pour les structures plus avancees qui ont besoin d'un pilotage plus complet et d'un meilleur niveau d'organisation.
+Pour les structures multi-sites ou les equipes de production qui ont besoin d'un pilotage global. Inclut tout le plan Pro, plus :
 
-Inclut aussi :
-
-- vue globale exploitation avec synthese dirigeant
+- fermes et batiments en nombre illimite
+- dashboard global cross-fermes avec synthese dirigeant
 - signaux prioritaires et recommandations de pilotage
-- export Business consolide
-- prix minimum de vente par lot
-- prediction de rupture stock
-- prediction risque mortalite
-- projection marge finale
-- multi-fermes
-- gestion d'equipe
-- exports avances
+- gestion d'equipe, roles et permissions par module
+- export Business consolide Excel / CSV
+
+## Instrumentation produit et funnel de conversion
+
+SunuFarm dispose d'une couche d'instrumentation interne pour mesurer le comportement des utilisateurs face aux fonctionnalites premium et optimiser la conversion.
+
+### Evenements traces
+
+| Evenement | Declencheur |
+|---|---|
+| `paywall_viewed` | Affichage d'un paywall (7 surfaces : profitabilite, mortalite, marge, historique, limite lot, rapports, business, equipe, fermes) |
+| `pricing_page_visited` | Visite de `/pricing` avec contexte d'origine (`from=`) |
+| `pricing_cta_clicked` | Clic sur un bouton "Choisir plan" via la route de tracking |
+| `subscription_payment_requested` | Soumission d'une demande de paiement par l'owner |
+| `subscription_activated` | Activation du plan (user confirm / admin direct / admin Wave) |
+| `export_launched` | Telechargement d'un rapport (PDF batch, mensuel, Business Excel/CSV) |
+| `alert_action_clicked` | Clic sur une action depuis la cloche de notifications |
+
+### Funnel mesurable
+
+```
+paywall_viewed → pricing_page_visited → pricing_cta_clicked → subscription_payment_requested → subscription_activated
+```
+
+Chaque etape conserve le contexte d'origine (`from`, `surface`, `entitlement`) pour identifier les paywalls qui convertissent le mieux et les points de friction reels.
+
+### Architecture
+
+- Table `analytics_events` (PostgreSQL, append-only)
+- `src/lib/analytics.ts` — `track()` fire-and-forget, erreurs avalees, accessible uniquement cote serveur
+- `src/actions/analytics.ts` — Server Action pour les evenements client (alertes NotificationDropdown)
+- `app/api/track/pricing-cta/route.ts` — route redirect qui trace le clic CTA puis redirige vers WhatsApp, sans JavaScript client
+- `docs/analytics/funnel-queries.sql` — 7 requetes SQL pret a l'emploi pour analyser le funnel, les taux de conversion par surface, le drop-off par etape et la coherence des donnees
 
 ## Pourquoi SunuFarm est different
 
@@ -259,20 +294,24 @@ Configuration Firebase Cloud Messaging :
   - Alerte mortalite critique : push instantane aux Owners/Managers des que la mortalite depasse 2% (creation ou correction)
 - recuperation meteo terrain : correction du conflit de parametres Open-Meteo et arrondi des coordonnees (V1.1)
 
-Mode hors ligne V1 :
+Socle hors ligne V2 :
 
-- l'application peut deja conserver localement puis resynchroniser certaines creations metier si la connexion tombe
-- flux couverts en V1 :
+- infrastructure IndexedDB mature (22 stores, migrations versionnees, TTL par type de donnee)
+- 9 types de mutations queues et rejoues automatiquement au retour du reseau :
   - `Saisie journaliere`
   - `Vaccinations`
   - `Traitements`
   - `Depenses`
   - `Ventes`
-  - `Mouvements de stock`
-- les actions sont stockees localement dans le navigateur puis rejouees automatiquement au retour du reseau
-- un panneau de synchronisation affiche les elements en attente, les erreurs, permet une resynchronisation globale et des actions `Retenter` / `Supprimer` par element
-- les flux offline critiques utilisent maintenant une `clientMutationId` persistée cote serveur pour limiter les doublons lors d'un rejeu apres reconnexion
-- le perimetre V1 couvre uniquement la creation hors ligne, pas encore l'edition hors ligne ni la resolution avancee de conflits
+  - `Mouvements de stock (aliment et medicament)`
+  - `Production d'oeufs`
+  - `Achats fournisseur`
+- lectures hors ligne couvertes sur 10 modules : lots, saisie, sante, stock, oeufs, ventes, achats, clients, fournisseurs, fermes — avec cache IndexedDB local bootstrappe et TTL degrade (references 24h, saisies 30min)
+- moteur de synchronisation avec classification des erreurs (409 conflit, 5xx retry, 4xx echec), recuperation des commandes bloquees et idempotence serveur via `clientMutationId`
+- messages d'erreur metier : les erreurs de synchronisation sont traduites en langage utilisateur avec identification precise de l'entite manquante (client, fournisseur, lot, stock d'aliment, medicament) — le detail technique reste disponible a la demande
+- indicateur d'etat hors ligne unifie (`OfflineStateIndicator`) sur tous les modules lus : 4 etats — connecte, hors ligne local, donnees perimees, vide
+- `OfflineSyncCard` par module avec file de mutations visible, actions Retenter / Supprimer, et feedback de synchronisation en temps reel
+- perimetre encore non couvert : edition hors ligne, upload audio/image hors ligne, resolution interactive de conflits, dashboard/finances en lecture hors ligne
 
 Prediction de rupture stock V1 :
 

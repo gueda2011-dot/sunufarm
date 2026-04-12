@@ -15,6 +15,10 @@ import { formatDateTime } from "@/src/lib/formatters"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
 import { APP_MODULE_LABELS, getEffectiveModulePermissions } from "@/src/lib/permissions"
 import { UserRole } from "@/src/generated/prisma/client"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { FeatureGateCard } from "@/src/components/subscription/FeatureGateCard"
+import { track } from "@/src/lib/analytics"
 import { TeamManagementClient } from "./_components/TeamManagementClient"
 
 export const metadata: Metadata = { title: "Equipe" }
@@ -53,34 +57,49 @@ export default async function TeamPage() {
     redirect("/admin")
   }
 
-  const members = await prisma.userOrganization.findMany({
-    where: {
-      organizationId: activeMembership.organizationId,
-      user: { deletedAt: null },
-    },
-    select: {
-      id: true,
-      userId: true,
-      role: true,
-      emailNotificationsEnabled: true,
-      modulePermissions: true,
-      createdAt: true,
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
+  const [members, subscription] = await Promise.all([
+    prisma.userOrganization.findMany({
+      where: {
+        organizationId: activeMembership.organizationId,
+        user: { deletedAt: null },
+      },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        emailNotificationsEnabled: true,
+        modulePermissions: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
         },
       },
-    },
-    orderBy: [
-      { role: "asc" },
-      { createdAt: "asc" },
-    ],
-  })
+      orderBy: [
+        { role: "asc" },
+        { createdAt: "asc" },
+      ],
+    }),
+    getOrganizationSubscription(activeMembership.organizationId),
+  ])
 
-  const canManageTeam = activeMembership.role === UserRole.OWNER
+  const teamRolesGate = resolveEntitlementGate(subscription, "TEAM_ROLES")
+  const isOwner = activeMembership.role === UserRole.OWNER
+  const canManageTeam = isOwner && teamRolesGate.access === "full"
   const ownerCount = members.filter((member) => member.role === UserRole.OWNER).length
+
+  if (teamRolesGate.access !== "full" && isOwner) {
+    void track({
+      userId: session.user.id,
+      organizationId: activeMembership.organizationId,
+      event: "paywall_viewed",
+      plan: subscription.commercialPlan,
+      properties: { entitlement: "TEAM_ROLES", surface: "team", access: teamRolesGate.access },
+    })
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -124,12 +143,16 @@ export default async function TeamPage() {
             <p className={`text-sm font-semibold ${canManageTeam ? "text-green-900" : "text-amber-900"}`}>
               {canManageTeam
                 ? "Le proprietaire peut gerer les roles et acces"
-                : "Seul le proprietaire de l'organisation peut gerer les acces"}
+                : isOwner
+                  ? "Gestion d'equipe disponible a partir du plan Business"
+                  : "Seul le proprietaire de l'organisation peut gerer les acces"}
             </p>
             <p className={`mt-1 text-sm ${canManageTeam ? "text-green-800" : "text-amber-800"}`}>
               {canManageTeam
                 ? "Vous pouvez ajouter un membre existant, modifier son role et personnaliser les modules visibles."
-                : "Les autres membres peuvent consulter l'equipe, mais seuls les proprietaires peuvent inviter, retirer ou ajuster les modules."}
+                : isOwner
+                  ? "Passez au plan Business pour inviter des membres, attribuer des roles et personnaliser les acces par ferme."
+                  : "Les autres membres peuvent consulter l'equipe, mais seuls les proprietaires peuvent inviter, retirer ou ajuster les modules."}
             </p>
           </div>
         </CardContent>
@@ -181,35 +204,52 @@ export default async function TeamPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Administration de l&apos;equipe</CardTitle>
-          <CardDescription>
-            Ajouter un membre existant, ajuster les roles et retirer des acces.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <TeamManagementClient
-            organizationId={activeMembership.organizationId}
-            actorUserId={session.user.id}
-            canManageTeam={canManageTeam}
-            initialMembers={members.map((member) => ({
-              id: member.id,
-              userId: member.userId,
-              role: member.role,
-              emailNotificationsEnabled: member.emailNotificationsEnabled,
-              modulePermissions: member.modulePermissions,
-              farmPermissions: [],
-              createdAt: member.createdAt,
-              user: {
-                id: member.user.id,
-                name: member.user.name,
-                email: member.user.email,
-              },
-            }))}
-          />
-        </CardContent>
-      </Card>
+      {teamRolesGate.access !== "full" ? (
+        <FeatureGateCard
+          title="Gestion d'equipe — plan Business"
+          message="L'invitation de membres, l'attribution de roles et la personnalisation des acces par module sont des fonctionnalites du plan Business."
+          currentPlanLabel={subscription.currentPlanLabel}
+          targetPlanLabel={teamRolesGate.requiredPlanLabel}
+          access={teamRolesGate.access}
+          highlights={[
+            "Invitation de membres par email",
+            "Roles : Manager, Technicien, Comptable, Veterinaire...",
+            "Personnalisation des modules visibles par membre",
+          ]}
+          ctaLabel="Passer a Business"
+          trackingSurface="team"
+        />
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Administration de l&apos;equipe</CardTitle>
+            <CardDescription>
+              Ajouter un membre existant, ajuster les roles et retirer des acces.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <TeamManagementClient
+              organizationId={activeMembership.organizationId}
+              actorUserId={session.user.id}
+              canManageTeam={canManageTeam}
+              initialMembers={members.map((member) => ({
+                id: member.id,
+                userId: member.userId,
+                role: member.role,
+                emailNotificationsEnabled: member.emailNotificationsEnabled,
+                modulePermissions: member.modulePermissions,
+                farmPermissions: [],
+                createdAt: member.createdAt,
+                user: {
+                  id: member.user.id,
+                  name: member.user.name,
+                  email: member.user.email,
+                },
+              }))}
+            />
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

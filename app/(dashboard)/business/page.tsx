@@ -6,9 +6,10 @@ import { auth } from "@/src/auth"
 import { getBusinessDashboardOverview } from "@/src/actions/business"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
-import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
-import { getFeatureUpgradeMessage, hasPlanFeature } from "@/src/lib/subscriptions"
+import { FeatureGateCard } from "@/src/components/subscription/FeatureGateCard"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { gateHasFullAccess, resolveEntitlementGate } from "@/src/lib/gate-resolver"
+import { track } from "@/src/lib/analytics"
 import { BusinessBatchComparisonTable } from "./_components/BusinessBatchComparisonTable"
 import { BusinessKpiGrid } from "./_components/BusinessKpiGrid"
 import { BusinessPriorityPanel } from "./_components/BusinessPriorityPanel"
@@ -26,9 +27,17 @@ export default async function BusinessPage() {
   ensureModuleAccess(activeMembership, "DASHBOARD")
 
   const subscription = await getOrganizationSubscription(activeMembership.organizationId)
-  const canSeeBusinessDashboard = hasPlanFeature(subscription.plan, "GLOBAL_ANALYTICS")
+  const businessGate = resolveEntitlementGate(subscription, "GLOBAL_DASHBOARD")
 
-  if (!canSeeBusinessDashboard) {
+  if (!gateHasFullAccess(businessGate)) {
+    void track({
+      userId: session.user.id,
+      organizationId: activeMembership.organizationId,
+      event: "paywall_viewed",
+      plan: subscription.commercialPlan,
+      properties: { entitlement: "GLOBAL_DASHBOARD", surface: "business", access: businessGate.access },
+    })
+
     return (
       <div className="mx-auto max-w-5xl space-y-6">
         <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-green-800 px-6 py-8 text-white shadow-lg">
@@ -44,16 +53,19 @@ export default async function BusinessPage() {
           </p>
         </section>
 
-        <PlanGuardCard
+        <FeatureGateCard
           title="Passez a Business pour piloter toute l'exploitation"
-          message={getFeatureUpgradeMessage("GLOBAL_ANALYTICS")}
-          requiredPlan="Business"
-          currentPlan={subscription.plan}
+          message={businessGate.reason}
+          targetPlanLabel={businessGate.requiredPlanLabel}
+          currentPlanLabel={businessGate.currentPlanLabel}
+          access={businessGate.access}
+          trackingSurface="business"
           highlights={[
             "Vue globale des marges, risques sanitaires et stocks critiques",
             "Synthese dirigeant pour savoir quoi traiter en premier",
             "Export Business consolide pour partager une lecture claire de l'exploitation",
           ]}
+          ctaLabel={businessGate.cta}
           footerHint="Business est pense pour le pilotage global : plusieurs fermes, plusieurs responsables et une vraie lecture de decision."
         />
       </div>
