@@ -9,6 +9,7 @@ import { getExpenses } from "@/src/actions/expenses"
 import { getSales } from "@/src/actions/sales"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { ExpenseForm } from "./_components/ExpenseForm"
 import { ExpenseList } from "./_components/ExpenseList"
 import { ExpenseSummaryCards } from "./_components/ExpenseSummaryCards"
@@ -24,6 +25,11 @@ export default async function FinancesPage() {
   ensureModuleAccess(activeMembership, "FINANCES")
 
   const { organizationId } = activeMembership
+
+  const subscription = await getOrganizationSubscription(organizationId)
+  if (subscription.commercialPlan === "FREE") {
+    redirect("/pricing?from=finances")
+  }
 
   const [expensesResult, salesResult] = await Promise.all([
     getExpenses({ organizationId, limit: 50 }),

@@ -113,6 +113,10 @@ export async function GET(
     }
 
     const subscription = await getOrganizationSubscription(organizationId)
+    const pdfExportGate = resolveEntitlementGate(subscription, "PDF_EXPORT")
+    if (!gateHasFullAccess(pdfExportGate)) {
+      return apiError("L'export PDF est disponible à partir du plan Starter.", { status: 403, code: "PLAN_REQUIRED" })
+    }
     const profitabilityGate = resolveEntitlementGate(subscription, "REAL_PROFITABILITY")
     const exportWatermarkGate = resolveEntitlementGate(subscription, "EXPORT_WITHOUT_WATERMARK")
     const canSeeProfitability = gateHasFullAccess(profitabilityGate)

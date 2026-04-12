@@ -49,6 +49,9 @@ import {
   optionalDateSchema,
 } from "@/src/lib/validators"
 import { SaleProductType, UserRole } from "@/src/generated/prisma/client"
+import { forbidden } from "@/src/lib/action-result"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
+import { resolveEntitlementGate, gateHasFullAccess } from "@/src/lib/gate-resolver"
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -303,6 +306,10 @@ export async function getSales(
       "Accès aux données financières refusé",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les ventes sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     const sales = await prisma.sale.findMany({
       where: {
@@ -357,6 +364,10 @@ export async function getSale(
       "Accès aux données financières refusé",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les ventes sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     const sale = await prisma.sale.findFirst({
       where:  { id: saleId, organizationId },
@@ -405,6 +416,10 @@ export async function createSale(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les ventes sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     if (clientMutationId) {
       const existingSale = await prisma.sale.findFirst({
@@ -510,6 +525,10 @@ export async function updateSale(
       "Permission refusée",
     )
     if (!roleResult.success) return roleResult
+    const subscription = await getOrganizationSubscription(organizationId)
+    if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+      return forbidden("Les ventes sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+    }
 
     const existing = await prisma.sale.findFirst({
       where:  { id: saleId, organizationId },
@@ -635,6 +654,10 @@ export async function deleteSale(
     "Permission refusée",
   )
   if (!roleResult.success) return roleResult
+  const subscription = await getOrganizationSubscription(organizationId)
+  if (!gateHasFullAccess(resolveEntitlementGate(subscription, "SALES_ACCESS"))) {
+    return forbidden("Les ventes sont disponibles à partir du plan Starter.", "PLAN_REQUIRED")
+  }
 
   const existing = await prisma.sale.findFirst({
     where:  { id: saleId, organizationId },

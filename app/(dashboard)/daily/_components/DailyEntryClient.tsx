@@ -46,6 +46,7 @@ const MANAGER_OR_ABOVE = ["SUPER_ADMIN", "OWNER", "MANAGER"] as const
 interface DailyEntryClientProps {
   organizationId: string
   userRole: string
+  historyLimit: number
   initialBatches: BatchSummary[]
   initialFeedStocks: Array<{
     id: string
@@ -59,6 +60,7 @@ interface DailyEntryClientProps {
 export function DailyEntryClient({
   organizationId,
   userRole,
+  historyLimit,
   initialBatches,
   initialFeedStocks,
   defaultBatchId,
@@ -142,7 +144,7 @@ export function DailyEntryClient({
       const result = await getDailyRecords({
         organizationId,
         batchId: selectedBatchId,
-        limit: 14,
+        limit: historyLimit,
       })
 
       return result.success ? result.data : []

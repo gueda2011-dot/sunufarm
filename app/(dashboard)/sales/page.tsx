@@ -5,6 +5,7 @@ import { auth } from "@/src/auth"
 import { getSales } from "@/src/actions/sales"
 import { getCurrentOrganizationContext } from "@/src/lib/active-organization"
 import { ensureModuleAccess } from "@/src/lib/dashboard-access"
+import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { SalesPageClient } from "./_components/SalesPageClient"
 
 export const metadata: Metadata = { title: "Ventes" }
@@ -18,6 +19,11 @@ export default async function SalesPage() {
   ensureModuleAccess(activeMembership, "SALES")
 
   const { organizationId } = activeMembership
+
+  const subscription = await getOrganizationSubscription(organizationId)
+  if (subscription.commercialPlan === "FREE") {
+    redirect("/pricing?from=sales")
+  }
 
   const salesResult = await getSales({
     organizationId,
