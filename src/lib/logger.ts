@@ -4,10 +4,13 @@ type LogContext = Record<string, unknown>
 
 function serializeError(error: unknown) {
   if (error instanceof Error) {
+    const isProd = process.env.NODE_ENV === "production"
     return {
       name: error.name,
       message: error.message,
-      stack: error.stack,
+      // Stack trace uniquement hors production — en prod elle expose la structure interne
+      // aux personnes ayant accès aux logs (Vercel dashboard, exports, etc.)
+      ...(isProd ? {} : { stack: error.stack }),
     }
   }
 

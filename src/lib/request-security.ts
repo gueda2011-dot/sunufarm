@@ -7,8 +7,13 @@ export interface AuditRequestContext {
 }
 
 export function getRequestAuditContext(headers: Headers): AuditRequestContext {
+  // Priorité à x-real-ip (injecté par Vercel, non forgeable), puis dernière entrée de x-forwarded-for
+  const realIp = headers.get("x-real-ip")
   const forwardedFor = headers.get("x-forwarded-for")
-  const ipAddress = forwardedFor?.split(",")[0]?.trim() ?? headers.get("x-real-ip") ?? undefined
+  const ipAddress =
+    realIp?.trim() ??
+    forwardedFor?.split(",").at(-1)?.trim() ??
+    undefined
   const userAgent = headers.get("user-agent") ?? undefined
   const requestId = getRequestId(headers)
 

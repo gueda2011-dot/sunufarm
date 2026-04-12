@@ -12,8 +12,9 @@ function isAuthorized(request: Request) {
   const env = getServerEnv()
   const authHeader = request.headers.get("authorization")
 
+  // Exiger le secret dans tous les environnements — pas de fallback permissif
   if (!env.CRON_SECRET) {
-    return env.NODE_ENV !== "production"
+    return false
   }
 
   return authHeader === `Bearer ${env.CRON_SECRET}`

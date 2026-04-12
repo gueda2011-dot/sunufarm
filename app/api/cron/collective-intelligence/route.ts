@@ -28,11 +28,9 @@ export async function GET() {
     const headersList = await headers()
     const authHeader = headersList.get("Authorization")
 
-    if (env.CRON_SECRET) {
-      const expectedToken = `Bearer ${env.CRON_SECRET}`
-      if (authHeader !== expectedToken) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-      }
+    // Exiger le secret dans tous les environnements — pas de fallback permissif
+    if (!env.CRON_SECRET || authHeader !== `Bearer ${env.CRON_SECRET}`) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const startedAt = new Date()
