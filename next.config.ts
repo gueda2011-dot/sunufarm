@@ -1,5 +1,9 @@
 import type { NextConfig } from "next";
 
+// Vercel preview deployments inject a toolbar script from vercel.live.
+// We relax the CSP for preview only — production stays strict.
+const isVercelPreview = process.env.VERCEL_ENV === "preview"
+
 const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
@@ -16,7 +20,9 @@ const nextConfig: NextConfig = {
 
               // unsafe-inline requis pour Next.js (styles inline dans les Server Components).
               // unsafe-eval supprimé — Next.js 14+ ne l'exige plus en production.
-              "script-src 'self' 'unsafe-inline'",
+              // En preview Vercel, on autorise vercel.live pour la toolbar de feedback.
+              "script-src 'self' 'unsafe-inline'" +
+                (isVercelPreview ? " https://vercel.live https://*.vercel.live" : ""),
 
               "style-src 'self' 'unsafe-inline'",
 
@@ -33,6 +39,7 @@ const nextConfig: NextConfig = {
               //   - Anthropic / OpenAI : proxiés via /api/ai — pas contactés directement depuis le navigateur
               //   - Wave : proxié via /api/payments — pas contacté depuis le navigateur
               //   - ws:/wss: : hot-reload Next.js dev + éventuels websockets Supabase Realtime
+              //   - En preview Vercel : vercel.live (toolbar) + Pusher (temps réel toolbar)
               "connect-src 'self'" +
                 " https://*.supabase.co" +
                 " https://*.supabase.in" +
@@ -41,10 +48,16 @@ const nextConfig: NextConfig = {
                 " https://firebaseinstallations.googleapis.com" +
                 " https://storage.googleapis.com" +
                 " wss://fcm.googleapis.com" +
-                " ws://localhost:* wss://localhost:*",
+                " ws://localhost:* wss://localhost:*" +
+                (isVercelPreview
+                  ? " https://vercel.live https://*.vercel.live wss://*.pusher.com https://*.pusher.com"
+                  : ""),
 
               // Service Worker + Web Workers pour PWA
               "worker-src 'self' blob:",
+
+              // frame-src : en preview Vercel, la toolbar utilise des iframes
+              isVercelPreview ? "frame-src https://vercel.live" : "frame-src 'none'",
 
               "frame-ancestors 'none'",
               "base-uri 'self'",
