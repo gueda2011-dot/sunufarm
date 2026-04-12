@@ -26,6 +26,12 @@ import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
 import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
 import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
 import { setCachedResource } from "@/src/lib/offline-cache"
+import {
+  loadFeedMovementsFromLocal,
+  loadFeedStocksFromLocal,
+  loadMedicineMovementsFromLocal,
+  loadMedicineStocksFromLocal,
+} from "@/src/lib/offline/repositories/transactionLoaders"
 import { StockMovementPanel } from "./StockMovementPanel"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
 
@@ -44,6 +50,8 @@ type Props = {
   medicinePredictions: Record<string, StockRupturePrediction>
   feedTrends: Record<string, StockTrendResult>
   medicineTrends: Record<string, StockTrendResult>
+  /** Tab présélectionné au chargement — transmis via ?tab= dans l'URL (ex: depuis une alerte) */
+  initialTab?: "ALIMENT" | "MEDICAMENT"
 }
 
 type StockTab = "ALIMENT" | "MEDICAMENT"
@@ -126,6 +134,7 @@ export function StockPageClient({
   medicinePredictions,
   feedTrends,
   medicineTrends,
+  initialTab,
 }: Props) {
   const {
     isOnline,
@@ -156,26 +165,30 @@ export function StockPageClient({
     organizationId,
     initialData: initialFeedStocks,
     ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: () => loadFeedStocksFromLocal(organizationId),
   })
   const { data: cachedMedicineStocks = initialMedicineStocks, isOfflineFallback: usesOfflineMedicineStocks } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.stockMedicineStocks,
     organizationId,
     initialData: initialMedicineStocks,
     ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: () => loadMedicineStocksFromLocal(organizationId),
   })
   const { data: cachedFeedMovements = initialFeedMovements } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.stockFeedMovements,
     organizationId,
     initialData: initialFeedMovements,
     ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadFeedMovementsFromLocal(organizationId),
   })
   const { data: cachedMedicineMovements = initialMedicineMovements } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.stockMedicineMovements,
     organizationId,
     initialData: initialMedicineMovements,
     ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadMedicineMovementsFromLocal(organizationId),
   })
-  const [tab, setTab] = useState<StockTab>("ALIMENT")
+  const [tab, setTab] = useState<StockTab>(initialTab ?? "ALIMENT")
   const [isPending, startTransition] = useTransition()
   const [search, setSearch] = useState("")
   const [feedFilter, setFeedFilter] = useState<"ALL" | "ALERT">("ALL")

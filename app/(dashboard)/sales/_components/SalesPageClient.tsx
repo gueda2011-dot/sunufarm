@@ -8,8 +8,14 @@ import {
   formatDate,
   formatMoneyFCFA,
 } from "@/src/lib/formatters"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
+import { loadSalesFromLocal } from "@/src/lib/offline/repositories/transactionLoaders"
 
 type Props = {
+  organizationId: string
   sales: SaleSummary[]
 }
 
@@ -23,8 +29,16 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
 }
 
-export function SalesPageClient({ sales }: Props) {
+export function SalesPageClient({ organizationId, sales: initialSales }: Props) {
   const [search, setSearch] = useState("")
+
+  const { data: sales = initialSales, isOfflineFallback, isStale, readCacheMeta } = useOfflineData({
+    key: OFFLINE_RESOURCE_KEYS.salesList,
+    organizationId,
+    initialData: initialSales,
+    ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadSalesFromLocal(organizationId),
+  })
 
   const normalizedSearch = search.trim().toLowerCase()
 
@@ -47,6 +61,13 @@ export function SalesPageClient({ sales }: Props) {
 
   return (
     <div className="space-y-5">
+
+      <OfflineStateIndicator
+        isOfflineFallback={isOfflineFallback}
+        isStale={isStale}
+        isEmpty={isOfflineFallback && sales.length === 0}
+        readCacheMeta={readCacheMeta}
+      />
 
       {/* HEADER */}
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -122,7 +143,11 @@ export function SalesPageClient({ sales }: Props) {
 
         {filteredSales.length === 0 ? (
           <div className="px-4 py-10 text-center">
-            <p className="text-sm text-gray-500">Aucune vente trouvée.</p>
+            <p className="text-sm text-gray-500">
+              {sales.length === 0 && isOfflineFallback
+                ? "Aucune donnée disponible hors ligne. Connectez-vous pour synchroniser."
+                : "Aucune vente trouvée."}
+            </p>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">

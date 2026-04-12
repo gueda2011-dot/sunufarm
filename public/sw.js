@@ -1,4 +1,4 @@
-const CACHE_NAME = "sunufarm-app-shell-v5"
+const CACHE_NAME = "sunufarm-app-shell-v6"
 const OFFLINE_URL = "/offline"
 const OFFLINE_FALLBACK_URL = "/offline?fallback=1"
 const CRITICAL_ROUTES = [
@@ -12,6 +12,9 @@ const CRITICAL_ROUTES = [
   "/purchases",
   "/batches",
   "/sales",
+  "/customers",
+  "/suppliers",
+  "/farms",
   OFFLINE_URL,
   OFFLINE_FALLBACK_URL,
 ]

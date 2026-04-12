@@ -36,6 +36,7 @@ export async function selectActiveOrganization(
 
   ;(await cookies()).set(ACTIVE_ORG_COOKIE, target.organizationId, {
     path: "/",
+    httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     maxAge: 60 * 60 * 24 * 180,

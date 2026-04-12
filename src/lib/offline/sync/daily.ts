@@ -24,12 +24,37 @@ function looksLikeServerId(value: string) {
   return /^[a-z0-9]{24,32}$/i.test(value)
 }
 
-async function resolveRelationId(entityType: string, value: string | undefined) {
-  if (!value) return undefined
+async function resolveRelationId(
+  entityType: string,
+  value: string | undefined,
+  options?: { required?: boolean; fieldName?: string },
+) {
+  if (!value) {
+    if (options?.required) {
+      throw new DailySyncValidationError(
+        `${options.fieldName ?? entityType} manquant`,
+        { [options.fieldName ?? entityType]: [`${options.fieldName ?? entityType} requis`] },
+      )
+    }
+    return undefined
+  }
+
   if (looksLikeServerId(value)) return value
 
   const mapped = await findServerId(entityType, value)
-  return mapped ?? value
+
+  if (!mapped) {
+    if (options?.required) {
+      throw new DailySyncValidationError(
+        `Référence locale non synchronisée : ${options.fieldName ?? entityType}`,
+        { [options.fieldName ?? entityType]: ["Cette référence n'a pas encore été synchronisée avec le serveur"] },
+      )
+    }
+    // Référence optionnelle introuvable : on l'exclut plutôt que d'envoyer un ID local invalide
+    return undefined
+  }
+
+  return mapped
 }
 
 export class DailySyncValidationError extends Error {
@@ -87,8 +112,8 @@ export async function buildDailyServerPayload(
     )
   }
 
-  const batchId = await resolveRelationId("batch", batchInputId)
-  const feedStockId = await resolveRelationId("stock_item", feedStockInputId)
+  const batchId = await resolveRelationId("batch", batchInputId, { required: true, fieldName: "batchId" })
+  const feedStockId = await resolveRelationId("stock_item", feedStockInputId, { fieldName: "feedStockId" })
 
   const mappedPayload = {
     ...originalPayload,

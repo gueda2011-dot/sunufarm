@@ -9,6 +9,7 @@ import { getFarms }       from "@/src/actions/farms"
 import { getOrganizationSubscription } from "@/src/lib/subscriptions.server"
 import { resolveEntitlementGate } from "@/src/lib/gate-resolver"
 import { track } from "@/src/lib/analytics"
+import { ensureSenegalBreedCatalog } from "@/src/lib/breed-catalog"
 import { CreateBatchForm } from "./_components/CreateBatchForm"
 
 export const metadata: Metadata = { title: "Nouveau lot" }
@@ -36,6 +37,8 @@ export default async function NewBatchPage() {
   // Seuls les rôles qui peuvent créer un lot accèdent à cette page
   const canCreate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(role)
   if (!canCreate) redirect("/batches")
+
+  await ensureSenegalBreedCatalog(prisma)
 
   const batchGate = resolveEntitlementGate(subscription, "ACTIVE_BATCH_LIMIT", {
     usage: activeBatchCount,

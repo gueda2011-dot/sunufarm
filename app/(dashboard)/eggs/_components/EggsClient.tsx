@@ -29,6 +29,7 @@ import { useOfflineData } from "@/src/hooks/useOfflineData"
 import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
 import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
 import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { loadEggRecordsFromLocal } from "@/src/lib/offline/repositories/transactionLoaders"
 import type { BatchSummary } from "@/src/actions/batches"
 import { formatDate, formatNumber, formatPercent } from "@/src/lib/formatters"
 import { layingRate as calculateLayingRate } from "@/src/lib/kpi"
@@ -125,6 +126,7 @@ export function EggsClient({
     organizationId,
     initialData: initialRecords,
     ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadEggRecordsFromLocal(organizationId),
   })
   useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.eggsMetrics,
@@ -140,7 +142,7 @@ export function EggsClient({
     id: string
     label?: string
     updatedAt: string
-    status: "pending" | "failed" | "synced"
+    status: "pending" | "syncing" | "failed" | "synced"
     error?: string
   }>>([])
 

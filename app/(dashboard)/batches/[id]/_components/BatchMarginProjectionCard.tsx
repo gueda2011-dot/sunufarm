@@ -51,7 +51,7 @@ export function BatchMarginProjectionCard({
   const trendBadge = getTrendBadge(trend)
 
   return (
-    <section className={cn("rounded-2xl border p-4", styles.card)}>
+    <section id="alerte-marge" className={cn("rounded-2xl border p-4", styles.card)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-gray-900">Projection marge finale</p>

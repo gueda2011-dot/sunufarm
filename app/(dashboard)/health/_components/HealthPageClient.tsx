@@ -8,6 +8,10 @@ import { useOfflineData } from "@/src/hooks/useOfflineData"
 import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
 import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
 import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import {
+  loadTreatmentsFromLocal,
+  loadVaccinationsFromLocal,
+} from "@/src/lib/offline/repositories/transactionLoaders"
 import type {
   TreatmentSummary,
   VaccinationPlanSummary,
@@ -16,6 +20,7 @@ import type {
 import { PlanGuardCard } from "@/src/components/subscription/PlanGuardCard"
 import { HealthAIOverviewCard } from "./HealthAIOverviewCard"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
 
 interface BatchInfo {
   number: string
@@ -129,17 +134,29 @@ export function HealthPageClient({
     removeItem,
   } = useOfflineSyncStatus({ scope: "health" })
 
-  const { data: cachedVaccinations = vaccinations, isOfflineFallback: usesVaccinationFallback } = useOfflineData({
+  const {
+    data: cachedVaccinations = vaccinations,
+    isOfflineFallback: usesVaccinationFallback,
+    isStale: isVaccinationsStale,
+    readCacheMeta: readVaccinationsCacheMeta,
+  } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.healthVaccinations,
     organizationId,
     initialData: vaccinations,
     ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadVaccinationsFromLocal(organizationId),
   })
-  const { data: cachedTreatments = treatments, isOfflineFallback: usesTreatmentFallback } = useOfflineData({
+  const {
+    data: cachedTreatments = treatments,
+    isOfflineFallback: usesTreatmentFallback,
+    isStale: isTreatmentsStale,
+    readCacheMeta: readTreatmentsCacheMeta,
+  } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.healthTreatments,
     organizationId,
     initialData: treatments,
     ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadTreatmentsFromLocal(organizationId),
   })
   useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.healthVaccinationPlans,
@@ -166,6 +183,17 @@ export function HealthPageClient({
     ttlMs: OFFLINE_TTL_MS.references,
   })
 
+  const activeHealthData = tab === "vaccinations" ? cachedVaccinations : cachedTreatments
+  const activeOfflineFallback = tab === "vaccinations"
+    ? usesVaccinationFallback
+    : usesTreatmentFallback
+  const activeIsStale = tab === "vaccinations"
+    ? isVaccinationsStale
+    : isTreatmentsStale
+  const activeReadCacheMeta = tab === "vaccinations"
+    ? readVaccinationsCacheMeta
+    : readTreatmentsCacheMeta
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -173,11 +201,12 @@ export function HealthPageClient({
         <p className="mt-0.5 text-sm text-gray-500">
           Pilotage des vaccinations, traitements et lots a surveiller.
         </p>
-        {!isOnline && (usesVaccinationFallback || usesTreatmentFallback) ? (
-          <p className="mt-1 text-xs text-amber-700">
-            Historique sante affiche depuis le dernier etat connu hors ligne.
-          </p>
-        ) : null}
+        <OfflineStateIndicator
+          isOfflineFallback={activeOfflineFallback}
+          isStale={activeIsStale}
+          isEmpty={activeOfflineFallback && activeHealthData.length === 0}
+          readCacheMeta={activeReadCacheMeta}
+        />
       </div>
 
       <OfflineSyncCard
@@ -379,10 +408,18 @@ export function HealthPageClient({
       </div>
 
       {tab === "vaccinations" && (
-        <VaccinationsTable vaccinations={cachedVaccinations} batchMap={batchMap} />
+        <VaccinationsTable
+          vaccinations={cachedVaccinations}
+          batchMap={batchMap}
+          isOfflineFallback={usesVaccinationFallback}
+        />
       )}
       {tab === "traitements" && (
-        <TreatmentsTable treatments={cachedTreatments} batchMap={batchMap} />
+        <TreatmentsTable
+          treatments={cachedTreatments}
+          batchMap={batchMap}
+          isOfflineFallback={usesTreatmentFallback}
+        />
       )}
     </div>
   )
@@ -391,14 +428,18 @@ export function HealthPageClient({
 function VaccinationsTable({
   vaccinations,
   batchMap,
+  isOfflineFallback,
 }: {
   vaccinations: VaccinationSummary[]
   batchMap: Record<string, BatchInfo>
+  isOfflineFallback: boolean
 }) {
   if (vaccinations.length === 0) {
     return (
       <div className="rounded-xl border border-gray-100 bg-white p-8 text-center text-sm text-gray-400">
-        Aucune vaccination enregistree.
+        {isOfflineFallback
+          ? "Aucune donnee disponible hors ligne. Connectez-vous pour synchroniser."
+          : "Aucune vaccination enregistree."}
       </div>
     )
   }
@@ -445,16 +486,20 @@ function VaccinationsTable({
 function TreatmentsTable({
   treatments,
   batchMap,
+  isOfflineFallback,
 }: {
   treatments: TreatmentSummary[]
   batchMap: Record<string, BatchInfo>
+  isOfflineFallback: boolean
 }) {
   const now = new Date()
 
   if (treatments.length === 0) {
     return (
       <div className="rounded-xl border border-gray-100 bg-white p-8 text-center text-sm text-gray-400">
-        Aucun traitement enregistre.
+        {isOfflineFallback
+          ? "Aucune donnee disponible hors ligne. Connectez-vous pour synchroniser."
+          : "Aucun traitement enregistre."}
       </div>
     )
   }

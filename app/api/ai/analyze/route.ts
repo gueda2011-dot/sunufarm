@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { organizationId, batchId, batchData } = parsed.data
-    const rateLimit = applyRateLimit({
+    const rateLimit = await applyRateLimit({
       key: `ai:${session.user.id}:${organizationId}:${getClientIpFromHeaders(request.headers)}`,
       limit: 10,
       windowMs: 60_000,

@@ -50,7 +50,7 @@ export function BatchMortalityPredictionCard({
   const trendBadge = getTrendBadge(trend)
 
   return (
-    <section className={cn("rounded-2xl border p-4", styles.card)}>
+    <section id="alerte-mortalite" className={cn("rounded-2xl border p-4", styles.card)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-gray-900">Prediction mortalite 7 jours</p>

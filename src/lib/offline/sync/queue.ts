@@ -31,6 +31,24 @@ export async function listPendingSyncCommands(organizationId: string, scope?: Of
   return items.filter((item) => item.status === "pending" || item.status === "failed")
 }
 
+// Délai au-delà duquel un item "syncing" est considéré bloqué (crash mid-sync)
+const SYNC_STUCK_TIMEOUT_MS = 5 * 60 * 1000
+
+export async function recoverStuckSyncingCommands(organizationId: string) {
+  const items = await listSyncCommands(organizationId)
+  const stuckItems = items.filter((item) => {
+    if (item.status !== "syncing") return false
+    const lastAttempt = item.lastAttemptAt ? new Date(item.lastAttemptAt).getTime() : 0
+    return Date.now() - lastAttempt > SYNC_STUCK_TIMEOUT_MS
+  })
+
+  for (const item of stuckItems) {
+    await updateSyncCommandStatus(item.id, "pending", { retryCount: item.retryCount })
+  }
+
+  return stuckItems.length
+}
+
 export async function getSyncCommand(id: string) {
   const item = await withStore<OfflineSyncCommand | undefined>(
     OFFLINE_STORE_NAMES.syncQueue,

@@ -40,6 +40,12 @@ export const purchasesRepository = new OfflineRepository(
   "purchase",
 )
 
+export const expensesRepository = new OfflineRepository(
+  OFFLINE_STORE_NAMES.expenses,
+  "expenses",
+  "expense",
+)
+
 export const batchesRepository = new OfflineReferenceRepository(
   OFFLINE_STORE_NAMES.batches,
   "references",

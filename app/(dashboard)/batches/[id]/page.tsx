@@ -39,6 +39,7 @@ import { ProfitabilityPreviewCard } from "./_components/ProfitabilityPreviewCard
 import { RecentDailyRecords } from "./_components/RecentDailyRecords"
 import { HealthSection } from "./_components/HealthSection"
 import { RecentExpenses } from "./_components/RecentExpenses"
+import { BatchLocalHistory } from "./_components/BatchLocalHistory"
 
 export const metadata: Metadata = { title: "Détail du lot" }
 
@@ -200,6 +201,12 @@ export default async function BatchDetailPage({
         mortalityRate={snapshot.mortalityRatePct}
         lastRecordDate={lastRecordDate}
         isActive={batch.status === "ACTIVE"}
+      />
+
+      <BatchLocalHistory
+        batchId={batch.id}
+        organizationId={organizationId}
+        entryCount={batch.entryCount}
       />
 
       {mortalityInsight && (

@@ -2,9 +2,11 @@
 
 import { getBatches } from "@/src/actions/batches"
 import { getCustomers } from "@/src/actions/customers"
+import { getDailyRecords } from "@/src/actions/daily-records"
 import { getEggRecords } from "@/src/actions/eggs"
+import { getExpenses } from "@/src/actions/expenses"
 import { getFarms } from "@/src/actions/farms"
-import { getVaccinationPlans } from "@/src/actions/health"
+import { getTreatments, getVaccinationPlans, getVaccinations } from "@/src/actions/health"
 import { getPurchases, getSuppliers } from "@/src/actions/purchases"
 import { getSales } from "@/src/actions/sales"
 import { getFeedMovements, getFeedStocks, getMedicineMovements, getMedicineStocks } from "@/src/actions/stock"
@@ -14,7 +16,9 @@ import {
   batchesRepository,
   customersRepository,
   eggProductionRepository,
+  expensesRepository,
   farmsRepository,
+  healthRepository,
   purchasesRepository,
   salesRepository,
   stockItemsRepository,
@@ -22,6 +26,7 @@ import {
   suppliersRepository,
   vaccinationPlansRepository,
 } from "@/src/lib/offline/repositories"
+import { saveDailyRecordsToLocal } from "@/src/lib/offline/repositories/dailyRepository"
 import { OFFLINE_BOOTSTRAP_VERSION, OFFLINE_STORE_NAMES } from "@/src/lib/offline/schema"
 import { markOfflineDevicePrepared } from "@/src/lib/offline-session"
 import type { OfflineBootstrapMeta } from "@/src/lib/offline/types"
@@ -209,8 +214,106 @@ export async function prepareOfflineWorkspace(organizationId: string) {
       })),
     )
 
+    let totalExpenses = 0
+    let totalVaccinations = 0
+    let totalTreatments = 0
+    let expensesBootstrapped = false
+
+    const [expensesResult, vaccinationsResult, treatmentsResult] = await Promise.allSettled([
+      getExpenses({ organizationId, limit: 50 }),
+      getVaccinations({ organizationId, limit: 100 }),
+      getTreatments({ organizationId, limit: 100 }),
+    ])
+
+    if (expensesResult.status === "fulfilled" && expensesResult.value.success) {
+      await expensesRepository.upsertMany(
+        expensesResult.value.data.map((item) => ({
+          localId: item.id,
+          serverId: item.id,
+          organizationId,
+          entityType: "expense",
+          scope: "expenses" as const,
+          syncStatus: "synced" as const,
+          createdAt: new Date(item.createdAt).toISOString(),
+          updatedAt: new Date(item.createdAt).toISOString(),
+          lastSyncAttemptAt: new Date(item.createdAt).toISOString(),
+          syncError: null,
+          label: `Depense ${new Date(item.date).toISOString().slice(0, 10)}`,
+          data: item as unknown,
+        })),
+      )
+      totalExpenses = expensesResult.value.data.length
+      expensesBootstrapped = true
+    }
+
+    if (vaccinationsResult.status === "fulfilled" && vaccinationsResult.value.success) {
+      await healthRepository.upsertMany(
+        vaccinationsResult.value.data.map((item) => ({
+          localId: item.id,
+          serverId: item.id,
+          organizationId,
+          entityType: "vaccination",
+          scope: "health" as const,
+          syncStatus: "synced" as const,
+          createdAt: new Date(item.createdAt).toISOString(),
+          updatedAt: new Date(item.updatedAt).toISOString(),
+          lastSyncAttemptAt: new Date(item.updatedAt).toISOString(),
+          syncError: null,
+          label: `Vaccination ${item.vaccineName}`,
+          data: item as unknown,
+        })),
+      )
+      totalVaccinations = vaccinationsResult.value.data.length
+    }
+
+    if (treatmentsResult.status === "fulfilled" && treatmentsResult.value.success) {
+      await healthRepository.upsertMany(
+        treatmentsResult.value.data.map((item) => ({
+          localId: item.id,
+          serverId: item.id,
+          organizationId,
+          entityType: "treatment",
+          scope: "health" as const,
+          syncStatus: "synced" as const,
+          createdAt: new Date(item.createdAt).toISOString(),
+          updatedAt: new Date(item.updatedAt).toISOString(),
+          lastSyncAttemptAt: new Date(item.updatedAt).toISOString(),
+          syncError: null,
+          label: `Traitement ${item.medicineName}`,
+          data: item as unknown,
+        })),
+      )
+      totalTreatments = treatmentsResult.value.data.length
+    }
+
+    // Daily records: one batch failing should not abort the whole bootstrap.
+    let totalDailyRecords = 0
+    const dailyResults = await Promise.allSettled(
+      batches.data.map((batch) =>
+        getDailyRecords({ organizationId, batchId: batch.id, limit: 30 }),
+      ),
+    )
+    const allDailyRecords = dailyResults.flatMap((result) => {
+      if (result.status === "fulfilled" && result.value.success) {
+        return result.value.data
+      }
+      return []
+    })
+    if (allDailyRecords.length > 0) {
+      await saveDailyRecordsToLocal(organizationId, allDailyRecords)
+      totalDailyRecords = allDailyRecords.length
+    }
+
     const completedAt = new Date().toISOString()
-    const modulesReady = ["daily", "health", "stock", "sales", "eggs", "purchases"]
+    const modulesReady = [
+      "daily",
+      "health",
+      "stock",
+      "sales",
+      "eggs",
+      "purchases",
+      ...(expensesBootstrapped ? ["expenses"] : []),
+    ]
     await writeBootstrapMeta({
       id: BOOTSTRAP_META_ID,
       organizationId,
@@ -231,6 +334,10 @@ export async function prepareOfflineWorkspace(organizationId: string) {
         eggProductions: eggRecords.data.length,
         sales: sales.data.length,
         purchases: purchases.data.length,
+        expenses: totalExpenses,
+        vaccinations: totalVaccinations,
+        treatments: totalTreatments,
+        dailyRecords: totalDailyRecords,
       },
       error: null,
       updatedAt: completedAt,

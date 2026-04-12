@@ -29,7 +29,7 @@ Phase active : `Phase 5 - Automatisation (Sous-lot 1 : Instrumentation — DONE)
 - historique limite
 - apercu decisionnel partiel (statuts, flou, preview)
 
-### Starter - 3500 FCFA
+### Starter - 3000 FCFA
 
 - lots illimites
 - ventes
@@ -39,7 +39,7 @@ Phase active : `Phase 5 - Automatisation (Sous-lot 1 : Instrumentation — DONE)
 - export PDF avec watermark
 - support WhatsApp standard
 
-### Pro - 8000 FCFA
+### Pro - 10000 FCFA
 
 - rentabilite reelle par lot
 - prix minimum de vente
@@ -51,7 +51,7 @@ Phase active : `Phase 5 - Automatisation (Sous-lot 1 : Instrumentation — DONE)
 - support prioritaire
 - rappels intelligents WhatsApp
 
-### Business - 20000 FCFA
+### Business - 25000 FCFA
 
 - multi-fermes
 - equipe et roles

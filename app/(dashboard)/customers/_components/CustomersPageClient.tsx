@@ -10,7 +10,7 @@
  *   - Suppression avec confirmation
  */
 
-import { useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import {
   formatMoneyFCFACompact,
   formatMoneyFCFA,
@@ -18,6 +18,11 @@ import {
 }                                  from "@/src/lib/formatters"
 import { createCustomer, deleteCustomer } from "@/src/actions/customers"
 import type { CustomerSummary }    from "@/src/actions/customers"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { customersRepository } from "@/src/lib/offline/repositories"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -86,15 +91,31 @@ export function CustomersPageClient({
   organizationId,
   userRole,
   customers: initialCustomers,
-  totalCustomers,
-  totalRevenueFcfa,
-  totalBalanceFcfa,
 }: Props) {
   const canMutate = ["SUPER_ADMIN", "OWNER", "MANAGER"].includes(userRole)
 
-  const [customers, setCustomers] = useState<CustomerSummary[]>(initialCustomers)
+  const { data: cachedCustomers = initialCustomers, isOfflineFallback, isStale, readCacheMeta } = useOfflineData<CustomerSummary[]>({
+    key: OFFLINE_RESOURCE_KEYS.customersList,
+    organizationId,
+    initialData: initialCustomers,
+    ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: async () => {
+      const rows = await customersRepository.getAll(organizationId)
+      if (rows.length === 0) return undefined
+      return rows.map((r) => r.data as CustomerSummary)
+    },
+  })
+
+  const [customers, setCustomers] = useState<CustomerSummary[]>(cachedCustomers)
+  // Sync l'état local quand le cache se résout de manière asynchrone (cas offline)
+  useEffect(() => { setCustomers(cachedCustomers) }, [cachedCustomers])
+
   const [search,    setSearch]    = useState("")
   const [typeFilter, setTypeFilter] = useState("")
+
+  const totalCustomers  = customers.length
+  const totalRevenueFcfa = useMemo(() => customers.reduce((sum, c) => sum + (c.totalFcfa ?? 0), 0), [customers])
+  const totalBalanceFcfa = useMemo(() => customers.reduce((sum, c) => sum + (c.balanceFcfa ?? 0), 0), [customers])
 
   // Formulaire création
   const [showForm, setShowForm]   = useState(false)
@@ -209,6 +230,13 @@ export function CustomersPageClient({
           </button>
         )}
       </div>
+
+      <OfflineStateIndicator
+        isOfflineFallback={isOfflineFallback}
+        isStale={isStale}
+        isEmpty={isOfflineFallback && customers.length === 0}
+        readCacheMeta={readCacheMeta}
+      />
 
       {/* ── KPI ────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-3">
@@ -337,7 +365,9 @@ export function CustomersPageClient({
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-gray-100 bg-white p-8 text-center">
           <p className="text-sm text-gray-400">
-            {customers.length === 0
+            {customers.length === 0 && isOfflineFallback
+              ? "Aucune donnée disponible hors ligne. Connectez-vous pour synchroniser."
+              : customers.length === 0
               ? "Aucun client enregistré. Ajoutez votre premier client."
               : "Aucun résultat pour cette recherche."}
           </p>

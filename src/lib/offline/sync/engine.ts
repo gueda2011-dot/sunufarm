@@ -25,6 +25,7 @@ import { saveSyncMapping } from "@/src/lib/offline/sync/mappings"
 import {
   deleteSyncCommand,
   listPendingSyncCommands,
+  recoverStuckSyncingCommands,
   updateSyncCommandStatus,
 } from "@/src/lib/offline/sync/queue"
 import type { OfflineSyncCommand } from "@/src/lib/offline/types"
@@ -38,6 +39,15 @@ function isTemporarySyncError(error: unknown) {
 
 function isConflictMessage(message?: string | null) {
   return !!message && /deja|already|duplicate|conflict/i.test(message)
+}
+
+// Classification prioritaire par HTTP status, fallback sur le message
+function classifyError(responseStatus: number | null, message?: string | null): "conflict" | "failed" | "retry" {
+  if (responseStatus === 409) return "conflict"
+  if (responseStatus !== null && responseStatus >= 500) return "retry"
+  if (responseStatus === 400 || responseStatus === 422) return "failed"
+  if (isConflictMessage(message)) return "conflict"
+  return "failed"
 }
 
 async function replayCommand(command: OfflineSyncCommand) {
@@ -202,6 +212,8 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
     return { processed: 0, synced: 0, failed: 0 }
   }
 
+  await recoverStuckSyncingCommands(organizationId)
+
   const commands = await listPendingSyncCommands(organizationId, scope)
   let processed = 0
   let synced = 0
@@ -210,6 +222,10 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
 
   for (const command of commands) {
     processed += 1
+
+    await updateSyncCommandStatus(command.id, "syncing", {
+      lastAttemptAt: new Date().toISOString(),
+    })
 
     try {
       const replayed = await replayCommand(command)
@@ -240,12 +256,16 @@ export async function runOfflineSync(organizationId: string, scope?: OfflineSync
         result && typeof result === "object" && "error" in result
           ? result.error
           : "SYNC_FAILED"
-      const conflict = isConflictMessage(errorMessage)
+      const classification = classifyError(
+        typeof responseStatus === "number" ? responseStatus : null,
+        typeof errorMessage === "string" ? errorMessage : null,
+      )
+      const conflict = classification === "conflict"
       const nextStatus = conflict ? "conflict" : "failed"
       const retryCount = conflict ? command.retryCount : command.retryCount + 1
 
       await updateSyncCommandStatus(command.id, nextStatus, {
-        error: errorMessage,
+        error: typeof errorMessage === "string" ? errorMessage : "SYNC_FAILED",
         retryCount,
       })
       await markLocalRecordFailure(command, errorMessage ?? "SYNC_FAILED", conflict)

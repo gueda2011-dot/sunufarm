@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { useForm, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -18,6 +18,11 @@ import {
   deleteFarm,
   type FarmSummary,
 } from "@/src/actions/farms"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { farmsRepository } from "@/src/lib/offline/repositories"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
 import {
   getBuildings,
   createBuilding,
@@ -83,8 +88,22 @@ export function FarmsClient({
   canCreateFarm,
   initialFarms,
 }: Props) {
+  const { data: cachedFarms = initialFarms, isOfflineFallback, isStale, readCacheMeta } = useOfflineData<FarmSummary[]>({
+    key: OFFLINE_RESOURCE_KEYS.farmsList,
+    organizationId,
+    initialData: initialFarms,
+    ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: async () => {
+      const rows = await farmsRepository.getAll(organizationId)
+      if (rows.length === 0) return undefined
+      return rows.map((r) => r.data as FarmSummary)
+    },
+  })
+
   const EMPTY_BUILDING_CAPACITY = "" as unknown as number
-  const [farms, setFarms] = useState<FarmSummary[]>(initialFarms)
+  const [farms, setFarms] = useState<FarmSummary[]>(cachedFarms)
+  // Sync l'état local quand le cache se résout de manière asynchrone (cas offline)
+  useEffect(() => { setFarms(cachedFarms) }, [cachedFarms])
   const [expandedFarm, setExpanded] = useState<string | null>(null)
   const [buildings, setBuildings] = useState<Record<string, BuildingSummary[]>>({})
   const [showFarmForm, setShowFarm] = useState(false)
@@ -268,6 +287,13 @@ export function FarmsClient({
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
+      <OfflineStateIndicator
+        isOfflineFallback={isOfflineFallback}
+        isStale={isStale}
+        isEmpty={isOfflineFallback && farms.length === 0}
+        readCacheMeta={readCacheMeta}
+      />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Fermes & Bâtiments</h1>
@@ -371,7 +397,9 @@ export function FarmsClient({
             <Warehouse className="h-10 w-10 text-gray-300 mb-3" />
             <p className="text-sm font-medium text-gray-900">Aucune ferme</p>
             <p className="text-sm text-gray-500 mt-1">
-              Créez votre première ferme pour commencer.
+              {isOfflineFallback
+                ? "Aucune donnée disponible hors ligne. Connectez-vous pour synchroniser."
+                : "Créez votre première ferme pour commencer."}
             </p>
           </CardContent>
         </Card>

@@ -302,6 +302,7 @@ model Organization {
   currency  String    @default("XOF")
   locale    String    @default("fr-SN")
   timezone  String    @default("Africa/Dakar")
+  collectiveIntelligenceSharingEnabled Boolean @default(true)
   logoUrl   String?
   phone     String?
   address   String?
@@ -1319,11 +1320,12 @@ model PredictiveSnapshot {
  * PAS d'organizationId — données strictement anonymisées.
  * Alimente le pool d'intelligence collective cross-organisations.
  *
- * Opt-in : generé uniquement si l'organisation a activé le partage (default: true).
+ * Partage piloté par l'organisation : généré uniquement si le partage est activé.
  * regionCode : dérivé du pays/région de la ferme (DAKAR, THIES, SAINT_LOUIS...).
  */
 model BatchOutcomeSnapshot {
   id String @id @default(cuid())
+  sourceFingerprint String @unique
 
   // Contexte du lot (anonymisé)
   batchType    BatchType

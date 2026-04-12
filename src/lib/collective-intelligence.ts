@@ -14,15 +14,18 @@
  *              → [ collecte données ] → [ calcule métriques ] → [ persiste snapshot ]
  */
 
+import { createHash } from "node:crypto"
 import prisma from "@/src/lib/prisma"
 import { BatchType, BuildingType } from "@/src/generated/prisma/client"
 import { getBatchOperationalSnapshot } from "@/src/lib/batch-metrics"
+import { getServerEnv } from "@/src/lib/env"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface BatchOutcomeSnapshotInput {
+  sourceFingerprint: string
   batchType: BatchType
   breedCode: string | null
   regionCode: string | null
@@ -68,11 +71,13 @@ function roundTo(value: number | null, decimals: number): number | null {
   return Math.round(value * factor) / factor
 }
 
+const SNAPSHOT_FINGERPRINT_ENABLED_AT = new Date("2026-04-12T00:00:00.000Z")
+
 /**
  * Détermine le code région depuis l'adresse ou la localisation de la ferme.
  * Heuristique simple sur le champ address — peut être enrichie plus tard.
  */
-function deriveRegionCode(address: string | null): string | null {
+export function deriveRegionCode(address: string | null): string | null {
   if (!address) return null
   const upper = address.toUpperCase()
   const regions = [
@@ -86,6 +91,16 @@ function deriveRegionCode(address: string | null): string | null {
     }
   }
   return null
+}
+
+export function buildBatchOutcomeSnapshotFingerprint(
+  organizationId: string,
+  batchId: string,
+  secret: string,
+): string {
+  return createHash("sha256")
+    .update(`${organizationId}:${batchId}:${secret}`)
+    .digest("hex")
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +235,7 @@ async function fetchBatchRawData(batchId: string, organizationId: string) {
 
 function computeSnapshotInput(
   raw: Awaited<ReturnType<typeof fetchBatchRawData>>,
+  options: { sourceFingerprint: string },
 ): BatchOutcomeSnapshotInput | null {
   const { batch, dailyRecords, mortalityAgg, feedAgg,
     treatmentCount, vaccinationRecords,
@@ -314,6 +330,7 @@ function computeSnapshotInput(
       : null
 
   return {
+    sourceFingerprint: options.sourceFingerprint,
     batchType: batch.type,
     breedCode,
     regionCode,
@@ -352,22 +369,50 @@ function computeSnapshotInput(
 export async function generateBatchOutcomeSnapshot(
   batchId: string,
   organizationId: string,
-): Promise<void> {
+  options: { swallowErrors?: boolean } = {},
+): Promise<"created" | "updated" | "skipped" | "error"> {
+  const { swallowErrors = true } = options
+
   try {
-    const rawData = await fetchBatchRawData(batchId, organizationId)
-    const snapshotInput = computeSnapshotInput(rawData)
-
-    if (!snapshotInput) return
-
-    await prisma.batchOutcomeSnapshot.create({
-      data: {
-        ...snapshotInput,
-        updatedAt: new Date(),
-      },
+    const organization = await prisma.organization.findFirst({
+      where: { id: organizationId, deletedAt: null },
+      select: { collectiveIntelligenceSharingEnabled: true },
     })
+
+    if (!organization?.collectiveIntelligenceSharingEnabled) {
+      return "skipped"
+    }
+
+    const sourceFingerprint = buildBatchOutcomeSnapshotFingerprint(
+      organizationId,
+      batchId,
+      getServerEnv().AUTH_SECRET,
+    )
+    const rawData = await fetchBatchRawData(batchId, organizationId)
+    const snapshotInput = computeSnapshotInput(rawData, { sourceFingerprint })
+
+    if (!snapshotInput) return "skipped"
+
+    const now = new Date()
+    const snapshot = await prisma.batchOutcomeSnapshot.upsert({
+      where: { sourceFingerprint },
+      create: snapshotInput,
+      update: {
+        ...snapshotInput,
+        updatedAt: now,
+      },
+      select: { createdAt: true, updatedAt: true },
+    })
+
+    return snapshot.createdAt.getTime() === snapshot.updatedAt.getTime()
+      ? "created"
+      : "updated"
   } catch (error) {
-    // On ne fait jamais échouer la clôture du lot à cause du snapshot
     console.error("[CollectiveIntelligence] Erreur génération snapshot:", error)
+    if (!swallowErrors) {
+      throw error
+    }
+    return "error"
   }
 }
 
@@ -381,12 +426,26 @@ export async function backfillBatchOutcomeSnapshots(
 ): Promise<{ processed: number; errors: number }> {
   const { batchSize = 20 } = options
 
-  // Trouver les organisations avec des lots fermés (CLOSED, SOLD, SLAUGHTERED)
+  const organizations = await prisma.organization.findMany({
+    where: {
+      deletedAt: null,
+      collectiveIntelligenceSharingEnabled: true,
+    },
+    select: { id: true },
+  })
+
+  if (organizations.length === 0) {
+    return { processed: 0, errors: 0 }
+  }
+
+  const organizationIds = organizations.map((organization) => organization.id)
+
   const closedBatches = await prisma.batch.findMany({
     where: {
+      organizationId: { in: organizationIds },
       status: { in: ["CLOSED", "SOLD", "SLAUGHTERED"] },
       deletedAt: null,
-      closedAt: { not: null },
+      closedAt: { not: null, gte: SNAPSHOT_FINGERPRINT_ENABLED_AT },
     },
     select: {
       id: true,
@@ -394,28 +453,49 @@ export async function backfillBatchOutcomeSnapshots(
       closedAt: true,
     },
     orderBy: { closedAt: "desc" },
-    take: batchSize * 5, // Marge large pour filtrer les déjà traités
+    take: batchSize * 20,
   })
 
-  // On ne peut pas facilement vérifier si un snapshot existe déjà
-  // (pas de batchId dans le snapshot — c'est voulu pour l'anonymat)
-  // On se base sur une approximation : nombre de snapshots existants vs lots fermés
-  const existingCount = await prisma.batchOutcomeSnapshot.count()
+  const fingerprintByBatch = new Map(
+    closedBatches.map((batch) => [
+      batch.id,
+      buildBatchOutcomeSnapshotFingerprint(
+        batch.organizationId,
+        batch.id,
+        getServerEnv().AUTH_SECRET,
+      ),
+    ]),
+  )
 
-  // Si déjà autant de snapshots que de lots fermés, considérer le backfill terminé
-  if (existingCount >= closedBatches.length) {
-    return { processed: 0, errors: 0 }
-  }
+  const existingSnapshots = await prisma.batchOutcomeSnapshot.findMany({
+    where: {
+      sourceFingerprint: {
+        in: [...fingerprintByBatch.values()],
+      },
+    },
+    select: { sourceFingerprint: true },
+  })
 
-  const toProcess = closedBatches.slice(existingCount, existingCount + batchSize)
+  const existingFingerprints = new Set(
+    existingSnapshots.map((snapshot) => snapshot.sourceFingerprint),
+  )
+
+  const toProcess = closedBatches
+    .filter((batch) => !existingFingerprints.has(fingerprintByBatch.get(batch.id)!))
+    .slice(0, batchSize)
 
   let processed = 0
   let errors = 0
 
   for (const batch of toProcess) {
     try {
-      await generateBatchOutcomeSnapshot(batch.id, batch.organizationId)
-      processed++
+      const result = await generateBatchOutcomeSnapshot(batch.id, batch.organizationId, {
+        swallowErrors: false,
+      })
+
+      if (result === "created" || result === "updated") {
+        processed++
+      }
     } catch {
       errors++
     }

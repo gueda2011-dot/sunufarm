@@ -22,6 +22,7 @@ import { useOfflineData } from "@/src/hooks/useOfflineData"
 import { useOfflineSyncStatus } from "@/src/hooks/useOfflineSyncStatus"
 import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
 import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { loadPurchasesFromLocal } from "@/src/lib/offline/repositories/transactionLoaders"
 import type {
   FeedStockSummary,
   MedicineStockSummary,
@@ -32,6 +33,7 @@ import {
   formatMoneyFCFACompact,
 } from "@/src/lib/formatters"
 import { OfflineSyncCard } from "@/app/(dashboard)/daily/_components/OfflineSyncCard"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
 
 interface Supplier {
   id: string
@@ -150,11 +152,17 @@ export function PurchasesPageClient({
     retryItem,
     removeItem,
   } = useOfflineSyncStatus({ scope: "purchases" })
-  const { data: cachedPurchases = initialPurchases, isOfflineFallback: usesOfflinePurchases } = useOfflineData({
+  const {
+    data: cachedPurchases = initialPurchases,
+    isOfflineFallback: usesOfflinePurchases,
+    isStale: isPurchasesStale,
+    readCacheMeta: readPurchasesCacheMeta,
+  } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.purchasesList,
     organizationId,
     initialData: initialPurchases,
     ttlMs: OFFLINE_TTL_MS.records,
+    localLoader: () => loadPurchasesFromLocal(organizationId),
   })
   const { data: cachedSuppliers = suppliers } = useOfflineData({
     key: OFFLINE_RESOURCE_KEYS.purchasesSuppliers,
@@ -202,7 +210,7 @@ export function PurchasesPageClient({
     id: string
     label?: string
     updatedAt: string
-    status: "pending" | "failed" | "synced"
+    status: "pending" | "syncing" | "failed" | "synced"
     error?: string
   }>>([])
 
@@ -515,11 +523,12 @@ export function PurchasesPageClient({
           <p className="mt-0.5 text-sm text-gray-500">
             Garde les commandes, les paiements et l&apos;integration au stock dans un seul flux.
           </p>
-          {!isOnline && usesOfflinePurchases ? (
-            <p className="mt-1 text-xs text-amber-700">
-              Historique des achats affiche depuis le dernier etat connu.
-            </p>
-          ) : null}
+          <OfflineStateIndicator
+            isOfflineFallback={usesOfflinePurchases}
+            isStale={isPurchasesStale}
+            isEmpty={usesOfflinePurchases && purchases.length === 0}
+            readCacheMeta={readPurchasesCacheMeta}
+          />
         </div>
 
         {canMutate ? (
@@ -808,7 +817,9 @@ export function PurchasesPageClient({
 
       {purchases.length === 0 ? (
         <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center text-sm text-gray-400">
-          Aucun achat enregistre pour le moment.
+          {usesOfflinePurchases
+            ? "Aucune donnée disponible hors ligne. Connectez-vous pour synchroniser."
+            : "Aucun achat enregistre pour le moment."}
         </div>
       ) : (
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">

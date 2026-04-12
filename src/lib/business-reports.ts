@@ -47,6 +47,17 @@ function addSummaryRow(
   row.getCell(3).font = { color: { argb: "FF6B7280" }, italic: true }
 }
 
+function sanitizeSpreadsheetValue(value: string | number) {
+  if (typeof value !== "string") return value
+
+  const trimmed = value.trimStart()
+  if (/^[=+\-@]/.test(trimmed)) {
+    return `'${value}`
+  }
+
+  return value
+}
+
 export function buildBusinessReportCsv(input: {
   organizationName: string
   generatedAt: Date
@@ -54,7 +65,10 @@ export function buildBusinessReportCsv(input: {
 }) {
   const { organizationName, generatedAt, overview } = input
   const toCsvRow = (values: Array<string | number>) => (
-    values.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")
+    values
+      .map((value) => sanitizeSpreadsheetValue(value))
+      .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+      .join(",")
   )
 
   const lines = [
@@ -151,13 +165,31 @@ export async function buildBusinessReportWorkbook(input: {
   })
   styleHeader(prioritySheet.addRow(["Type", "Nom", "Ferme", "Signal", "Niveau"]))
   overview.priority.negativeMarginLots.forEach((lot) => {
-    prioritySheet.addRow(["Marge negative", lot.number, lot.farmName, lot.detail, lot.level])
+    prioritySheet.addRow([
+      "Marge negative",
+      sanitizeSpreadsheetValue(lot.number),
+      sanitizeSpreadsheetValue(lot.farmName),
+      sanitizeSpreadsheetValue(lot.detail),
+      sanitizeSpreadsheetValue(lot.level),
+    ])
   })
   overview.priority.mortalityRiskLots.forEach((lot) => {
-    prioritySheet.addRow(["Risque mortalite", lot.number, lot.farmName, lot.detail, lot.level])
+    prioritySheet.addRow([
+      "Risque mortalite",
+      sanitizeSpreadsheetValue(lot.number),
+      sanitizeSpreadsheetValue(lot.farmName),
+      sanitizeSpreadsheetValue(lot.detail),
+      sanitizeSpreadsheetValue(lot.level),
+    ])
   })
   overview.priority.criticalStockItems.forEach((item) => {
-    prioritySheet.addRow(["Stock critique", item.name, item.farmName, item.label, "critical"])
+    prioritySheet.addRow([
+      "Stock critique",
+      sanitizeSpreadsheetValue(item.name),
+      sanitizeSpreadsheetValue(item.farmName),
+      sanitizeSpreadsheetValue(item.label),
+      "critical",
+    ])
   })
   autosizeColumns(prioritySheet)
 
@@ -168,12 +200,12 @@ export async function buildBusinessReportWorkbook(input: {
   overview.batchComparison.forEach((row) => {
     batchesSheet.addRow([
       row.number,
-      row.farmName,
-      row.buildingName,
+      sanitizeSpreadsheetValue(row.farmName),
+      sanitizeSpreadsheetValue(row.buildingName),
       row.projectedMarginFcfa,
       row.projectedMarginRate == null ? "-" : `${row.projectedMarginRate}%`,
       `${row.mortalityRiskScore}/100`,
-      row.statusLabel,
+      sanitizeSpreadsheetValue(row.statusLabel),
     ])
   })
   autosizeColumns(batchesSheet)
@@ -185,10 +217,10 @@ export async function buildBusinessReportWorkbook(input: {
   overview.recommendations.forEach((item) => {
     recommendationsSheet.addRow([
       item.priority,
-      item.title,
-      item.action,
-      item.description,
-      item.affectedItems.join(", "),
+      sanitizeSpreadsheetValue(item.title),
+      sanitizeSpreadsheetValue(item.action),
+      sanitizeSpreadsheetValue(item.description),
+      sanitizeSpreadsheetValue(item.affectedItems.join(", ")),
     ])
   })
   autosizeColumns(recommendationsSheet)

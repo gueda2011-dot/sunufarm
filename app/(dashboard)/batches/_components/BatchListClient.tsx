@@ -4,6 +4,11 @@ import { useMemo, useState } from "react"
 import { cn } from "@/src/lib/utils"
 import type { BatchSummary } from "@/src/actions/batches"
 import { BatchCard } from "./BatchCard"
+import { useOfflineData } from "@/src/hooks/useOfflineData"
+import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
+import { OFFLINE_TTL_MS } from "@/src/lib/offline-ttl"
+import { batchesRepository } from "@/src/lib/offline/repositories"
+import { OfflineStateIndicator } from "@/src/components/offline/OfflineStateIndicator"
 
 const TYPE_LABELS: Record<string, string> = {
   CHAIR: "Poulet de chair",
@@ -67,19 +72,31 @@ interface BatchListClientProps {
   initialBatches: BatchSummary[]
 }
 
-export function BatchListClient({ initialBatches }: BatchListClientProps) {
+export function BatchListClient({ organizationId, initialBatches }: BatchListClientProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL")
   const [typeFilter, setTypeFilter] = useState<string>("ALL")
   const [farmFilter, setFarmFilter] = useState<string>("ALL")
   const [query, setQuery] = useState("")
 
+  const { data: batches = initialBatches, isOfflineFallback, isStale, readCacheMeta } = useOfflineData<BatchSummary[]>({
+    key: OFFLINE_RESOURCE_KEYS.batchesList,
+    organizationId,
+    initialData: initialBatches,
+    ttlMs: OFFLINE_TTL_MS.references,
+    localLoader: async () => {
+      const rows = await batchesRepository.getAll(organizationId)
+      if (rows.length === 0) return undefined
+      return rows.map((r) => r.data as BatchSummary)
+    },
+  })
+
   const distinctTypes = useMemo(() => {
-    return [...new Set(initialBatches.map((b) => b.type))]
-  }, [initialBatches])
+    return [...new Set(batches.map((b) => b.type))]
+  }, [batches])
 
   const distinctFarms = useMemo(() => {
     const seen = new Map<string, string>()
-    for (const batch of initialBatches) {
+    for (const batch of batches) {
       if (!seen.has(batch.building.farm.id)) {
         seen.set(batch.building.farm.id, batch.building.farm.name)
       }
@@ -88,20 +105,20 @@ export function BatchListClient({ initialBatches }: BatchListClientProps) {
   }, [initialBatches])
 
   const summary = useMemo(() => {
-    const active = initialBatches.filter((batch) => batch.status === "ACTIVE").length
-    const closed = initialBatches.length - active
+    const active = batches.filter((batch) => batch.status === "ACTIVE").length
+    const closed = batches.length - active
     return {
-      total: initialBatches.length,
+      total: batches.length,
       active,
       closed,
       farms: distinctFarms.length,
     }
-  }, [distinctFarms.length, initialBatches])
+  }, [distinctFarms.length, batches])
 
   const normalizedQuery = query.trim().toLowerCase()
 
   const filteredBatches = useMemo(() => {
-    return initialBatches.filter((batch) => {
+    return batches.filter((batch) => {
       if (statusFilter === "ACTIVE" && batch.status !== "ACTIVE") return false
       if (statusFilter === "CLOSED" && batch.status === "ACTIVE") return false
       if (typeFilter !== "ALL" && batch.type !== typeFilter) return false
@@ -138,7 +155,17 @@ export function BatchListClient({ initialBatches }: BatchListClientProps) {
     farmFilter !== "ALL" ||
     query.trim().length > 0
 
-  if (initialBatches.length === 0) {
+  if (batches.length === 0) {
+    if (isOfflineFallback) {
+      return (
+        <OfflineStateIndicator
+          isOfflineFallback={isOfflineFallback}
+          isStale={isStale}
+          isEmpty
+          readCacheMeta={readCacheMeta}
+        />
+      )
+    }
     return (
       <div className="rounded-3xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
         <h2 className="text-lg font-semibold text-gray-900">Aucun lot cree</h2>
@@ -151,6 +178,12 @@ export function BatchListClient({ initialBatches }: BatchListClientProps) {
 
   return (
     <div className="space-y-6">
+      <OfflineStateIndicator
+        isOfflineFallback={isOfflineFallback}
+        isStale={isStale}
+        readCacheMeta={readCacheMeta}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Lots crees" value={summary.total} />
         <SummaryCard label="Lots actifs" value={summary.active} tone="success" />

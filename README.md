@@ -42,7 +42,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - enregistrement quotidien des donnees terrain
 - mortalite, alimentation, eau, temperature (auto via Open-Meteo), humidite et observations (vocales via Cloudinary)
 - historique structure pour mieux comprendre ce qui se passe dans l'elevage
-- mode hors ligne V1 avec mise en file locale et resynchronisation automatique au retour du reseau
+- mode hors ligne avec lecture locale (lots, stocks) et mise en file des saisies pour resynchronisation automatique au retour du reseau
 
 ### Production
 
@@ -69,7 +69,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - tendance predictive `S'ameliore / Stable / Se degrade` sur les stocks les plus sensibles
 - enregistrement des ventes
 - meilleure visibilite sur les mouvements et les sorties
-- creation de ventes disponible hors ligne en V1 avec synchro differee
+- creation de ventes disponible hors ligne avec synchro differee et lecture locale de l'historique
 
 ### Finances
 
@@ -80,7 +80,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - analyse de la rentabilite pour savoir ce qui marche vraiment
 - affichage d'un `Prix minimum de vente` pour aider a savoir a partir de quel niveau vendre un poulet sans perdre d'argent
 - projection predictive de la marge finale des lots actifs pour les plans `Pro` et `Business`
-- creation de depenses disponible hors ligne en V1 avec synchro differée
+- creation de depenses disponible hors ligne avec synchro differee et lecture locale
 
 ### Parcours achats et stock
 
@@ -96,7 +96,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - meilleure tracabilite sanitaire
 - alertes et historique plus faciles a exploiter
 - prediction du risque mortalite sur 7 jours pour les plans `Pro` et `Business`
-- vaccinations et traitements disponibles hors ligne en V1 avec synchro differée
+- vaccinations et traitements disponibles hors ligne avec synchro differee et lecture locale des lots et plans vaccinaux
 
 ### Intelligence Collective (Phase A)
 
@@ -141,7 +141,7 @@ Le produit est pense pour des usages concrets, avec une interface simple et une 
 
 Pour decouvrir SunuFarm sans engagement. Inclut 1 ferme, 1 lot actif, la saisie journaliere complete et une lecture simplifiee du lot avec apercus partiels.
 
-### Starter - 3 500 FCFA / mois
+### Starter - 3 000 FCFA / mois
 
 Pour organiser l'exploitation au quotidien. Inclut les lots illimites, les ventes, depenses, stock basique, historique complet et export PDF avec watermark.
 
@@ -284,32 +284,24 @@ Configuration Firebase Cloud Messaging :
   - Alerte mortalite critique : push instantane aux Owners/Managers des que la mortalite depasse 2% (creation ou correction)
 - recuperation meteo terrain : correction du conflit de parametres Open-Meteo et arrondi des coordonnees (V1.1)
 
-Mode hors ligne V1 :
+Socle hors ligne V2 :
 
-- l'application peut maintenant rouvrir des ecrans critiques hors ligne apres une premiere visite online, grace au service worker et a un cache local IndexedDB
-- pages critiques couvertes en priorite :
-  - `Saisie journaliere`
-  - `Sante`
-  - `Stock`
-  - `Nouvelle vente`
-  - `Oeufs`
-  - `Achats fournisseur`
-- references locales disponibles selon les modules : lots actifs, stocks aliment / medicaments, clients, fournisseurs, fermes et historiques recents
-- les actions metier sont stockees localement dans le navigateur puis rejouees automatiquement au retour du reseau
-- flux de creation couverts en V1 :
+- infrastructure IndexedDB mature (22 stores, migrations versionnees, TTL par type de donnee)
+- 9 types de mutations queues et rejoues automatiquement au retour du reseau :
   - `Saisie journaliere`
   - `Vaccinations`
   - `Traitements`
   - `Depenses`
   - `Ventes`
-  - `Mouvements de stock`
+  - `Mouvements de stock (aliment et medicament)`
   - `Production d'oeufs`
   - `Achats fournisseur`
-- un panneau de synchronisation unifie affiche les elements en attente, les erreurs, permet une resynchronisation globale ou par module et des actions `Retenter` / `Supprimer` par element
-- une couche optimiste locale affiche immediatement certaines saisies hors ligne avec badge `En attente`
-- la page `/offline` sert de hub terrain avec etat reseau, organisation active, compteurs de sync, raccourcis utiles et dernieres ressources locales connues
-- les flux offline critiques utilisent maintenant une `clientMutationId` persistée cote serveur pour limiter les doublons lors d'un rejeu apres reconnexion
-- le perimetre V1 couvre uniquement la creation hors ligne, pas encore l'edition hors ligne, l'upload audio/image hors ligne ni la resolution avancee de conflits
+- lectures hors ligne couvertes sur 10 modules : lots, saisie, sante, stock, oeufs, ventes, achats, clients, fournisseurs, fermes — avec cache IndexedDB local bootstrappe et TTL degrade (references 24h, saisies 30min)
+- moteur de synchronisation avec classification des erreurs (409 conflit, 5xx retry, 4xx echec), recuperation des commandes bloquees et idempotence serveur via `clientMutationId`
+- messages d'erreur metier : les erreurs de synchronisation sont traduites en langage utilisateur avec identification precise de l'entite manquante (client, fournisseur, lot, stock d'aliment, medicament) — le detail technique reste disponible a la demande
+- indicateur d'etat hors ligne unifie (`OfflineStateIndicator`) sur tous les modules lus : 4 etats — connecte, hors ligne local, donnees perimees, vide
+- `OfflineSyncCard` par module avec file de mutations visible, actions Retenter / Supprimer, et feedback de synchronisation en temps reel
+- perimetre encore non couvert : edition hors ligne, upload audio/image hors ligne, resolution interactive de conflits, dashboard/finances en lecture hors ligne
 
 Prediction de rupture stock V1 :
 

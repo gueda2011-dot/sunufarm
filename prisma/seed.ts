@@ -14,6 +14,7 @@ import {
   SubscriptionStatus,
   UserRole,
 } from "../src/generated/prisma"
+import { ensureSenegalBreedCatalog } from "../src/lib/breed-catalog"
 
 const adapter = new PrismaPg({
   connectionString: process.env.SUNUFARM_DATABASE_URL,
@@ -77,19 +78,14 @@ async function clearAll() {
 }
 
 async function createReferenceData() {
-  const species = await prisma.species.create({
-    data: {
-      name: "Poulet",
-      code: "POULET",
-    },
+  await ensureSenegalBreedCatalog(prisma)
+
+  const species = await prisma.species.findUniqueOrThrow({
+    where: { code: "POULET" },
   })
 
-  const breed = await prisma.breed.create({
-    data: {
-      name: "Cobb 500",
-      code: "COBB500",
-      speciesId: species.id,
-    },
+  const breed = await prisma.breed.findUniqueOrThrow({
+    where: { code: "COBB500" },
   })
 
   const [feedGrowth, feedFinish] = await Promise.all([

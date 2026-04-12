@@ -6,6 +6,7 @@ import { getServerEnv } from "@/src/lib/env"
 import type { OrganizationSubscriptionSummary } from "@/src/lib/subscriptions.server"
 import { hasPlanFeature } from "@/src/lib/subscriptions"
 import { getCollectiveBenchmark } from "@/src/lib/collective-benchmark"
+import { deriveRegionCode } from "@/src/lib/collective-intelligence"
 
 const ANALYSIS_MODELS = {
   openai: {
@@ -379,7 +380,7 @@ export async function buildBatchAnalysisInput(
   const collectiveBenchmarkRaw = await getCollectiveBenchmark({
     batchType: batch.type,
     breedCode: batch.breed?.code ?? null,
-    regionCode: null, // dérivé automatiquement par l'engine si adresse disponible
+    regionCode: deriveRegionCode(batch.building.farm.address ?? null),
     entryMonth: entryDate.getUTCMonth() + 1,
   })
 

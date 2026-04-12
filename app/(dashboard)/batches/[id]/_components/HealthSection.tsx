@@ -86,7 +86,10 @@ export function HealthSection({
     id: string
     label: string
     createdAt: string
-    status: "pending" | "failed"
+    status: "pending" | "syncing" | "failed" | "conflict"
+    type?: string
+    scope?: string
+    payload?: unknown
     lastError?: string
   }>>([])
   const [isSyncing, setIsSyncing] = useState(false)
@@ -324,7 +327,7 @@ export function HealthSection({
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="space-y-4">
+    <div id="sante" className="space-y-4">
 
       {/* ── Titre + boutons ──────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2">
@@ -357,7 +360,7 @@ export function HealthSection({
       <OfflineSyncCard
         isOnline={isOnline}
         pendingCount={pendingItems.length}
-        failedCount={pendingItems.filter((item) => item.status === "failed").length}
+        failedCount={pendingItems.filter((item) => item.status === "failed" || item.status === "conflict").length}
         isSyncing={isSyncing}
         lastSyncedAt={lastSyncedAt}
         lastError={lastSyncError}

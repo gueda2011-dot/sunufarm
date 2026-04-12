@@ -182,7 +182,7 @@ export type OfflineQueueItemType =
 export interface OfflineQueueItem {
   id: string
   type: OfflineQueueItemType
-  status: "pending" | "failed"
+  status: "pending" | "syncing" | "failed" | "conflict"
   payload: OfflineQueuePayload
   label: string
   scope: string
@@ -543,7 +543,11 @@ export async function listPendingOfflineDailyQueueItems(): Promise<OfflineQueueI
   return items.map((item) => ({
     id: item.id,
     type: item.action as OfflineQueueItemType,
-    status: item.status === "pending" ? "pending" : "failed",
+    status: item.status === "pending" || item.status === "syncing"
+      ? item.status
+      : item.status === "conflict"
+        ? "conflict"
+        : "failed",
     payload: item.payload as unknown as OfflineQueuePayload,
     label: item.label ?? item.id,
     scope: item.scope,
@@ -577,54 +581,48 @@ export async function flushOfflineQueueByScope(scope: string) {
 
 export async function deleteOfflineDailyQueueItem(id: string) {
   const current = await getSyncCommand(id)
-  console.info("[offline-delete] start", {
-    commandId: id,
-    current,
-  })
-  let purgeDetails = null
+  console.info("[offline-delete] start", { commandId: id, scope: current?.scope })
+
+  // Phase 1 — CRITICAL: remove from sync queue unconditionally.
+  // This is the only thing that controls visibility in the UI.
+  // We do this first so the item disappears from the pending list even if
+  // subsequent cleanup fails (e.g. on mobile with a flaky multi-store transaction).
+  await deleteSyncCommand(id)
+
+  // Phase 2 — BEST-EFFORT: clean up shadow records and draft artifacts.
+  // Errors here are logged but must not prevent phase 1 from taking effect.
   if (current) {
-    if (current.scope === "daily") {
-      purgeDetails = await purgeDailyOfflineArtifacts(current)
-    } else {
-      await deleteSyncCommand(id)
-      await clearOfflineShadow(current.scope, current.localId)
-      await clearSyncErrors({
-        organizationId: current.organizationId,
-        localId: current.localId,
-        commandId: current.id,
+    try {
+      if (current.scope === "daily") {
+        // purgeDailyOfflineArtifacts also tries to delete from syncQueue (already done above,
+        // so that inner delete is a harmless no-op) then cleans up daily entry, syncErrors,
+        // legacyOptimistic and legacyResourceCache.
+        await purgeDailyOfflineArtifacts(current)
+      } else {
+        await clearOfflineShadow(current.scope, current.localId)
+        await clearSyncErrors({
+          organizationId: current.organizationId,
+          localId: current.localId,
+          commandId: current.id,
+          scope: current.scope,
+        })
+      }
+    } catch (cleanupError) {
+      // Cleanup failed but the sync queue entry was already removed — the item will
+      // no longer appear in the pending list. Log and continue.
+      console.warn("[offline-delete] best-effort cleanup failed — queue entry already removed", {
+        commandId: id,
         scope: current.scope,
+        error: cleanupError,
       })
     }
-  } else {
-    await deleteSyncCommand(id)
   }
+
   writeOfflineDailySyncMeta({
     lastSyncedAt: readOfflineDailySyncMeta().lastSyncedAt,
     lastError: null,
   })
-  const verification = current
-    ? {
-        queue: await getSyncCommand(id),
-        dailyRecord: current.scope === "daily" ? await dailyRepository.getById(current.localId) : null,
-        remainingErrorsCount: (await listSyncErrors(current.organizationId)).filter((item) => (
-          item.localId === current.localId &&
-          item.commandId === current.id &&
-          item.scope === current.scope
-        )).length,
-      }
-    : null
-  console.info("[offline-delete] completed", {
-    commandId: id,
-    purgeDetails,
-    verification,
-    storesTouched: [
-      OFFLINE_STORE_NAMES.syncQueue,
-      current?.scope === "daily" ? OFFLINE_STORE_NAMES.dailyEntries : null,
-      OFFLINE_STORE_NAMES.syncErrors,
-      current?.scope === "daily" ? OFFLINE_STORE_NAMES.legacyOptimistic : null,
-      current?.scope === "daily" ? OFFLINE_STORE_NAMES.legacyResourceCache : null,
-    ].filter(Boolean),
-  })
+  console.info("[offline-delete] completed", { commandId: id })
   emitQueueChanged()
 }
 

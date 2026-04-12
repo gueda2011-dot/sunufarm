@@ -15,6 +15,7 @@ export const OFFLINE_STORE_NAMES = {
   eggProductions: "egg_productions",
   sales: "sales",
   purchases: "purchases",
+  expenses: "expenses",
   syncQueue: "sync_queue",
   syncMappings: "sync_mappings",
   syncErrors: "sync_errors",
@@ -23,7 +24,7 @@ export const OFFLINE_STORE_NAMES = {
 } as const
 
 export const OFFLINE_DB_NAME = "sunufarm-offline"
-export const OFFLINE_DB_VERSION = 3
+export const OFFLINE_DB_VERSION = 4
 export const OFFLINE_BOOTSTRAP_VERSION = "2026.04.offline-first"
 
 type StoreName = (typeof OFFLINE_STORE_NAMES)[keyof typeof OFFLINE_STORE_NAMES]
@@ -171,6 +172,16 @@ export const OFFLINE_STORE_DEFINITIONS: StoreDefinition[] = [
   {
     name: OFFLINE_STORE_NAMES.purchases,
     keyPath: "id",
+    indexes: [
+      { name: "organizationId", keyPath: "organizationId" },
+      { name: "scope", keyPath: "scope" },
+      { name: "syncStatus", keyPath: "syncStatus" },
+      { name: "updatedAt", keyPath: "updatedAt" },
+    ],
+  },
+  {
+    name: OFFLINE_STORE_NAMES.expenses,
+    keyPath: "localId",
     indexes: [
       { name: "organizationId", keyPath: "organizationId" },
       { name: "scope", keyPath: "scope" },

@@ -124,10 +124,16 @@ export function CreateBatchForm({
   }, [batchType, species])
 
   const filteredBreeds = useMemo(() => {
-    return breeds.filter((breed) => {
-      if (speciesId && breed.speciesId !== speciesId) return false
+    const breedsForSpecies = breeds.filter((breed) => {
+      return !speciesId || breed.speciesId === speciesId
+    })
+
+    const suggestedBreeds = breedsForSpecies.filter((breed) => {
       return isBreedSuggestedForBatchType(breed.code, batchType)
     })
+
+    // If the recommendation matrix drifts behind the DB catalog, keep the species breeds visible.
+    return suggestedBreeds.length > 0 ? suggestedBreeds : breedsForSpecies
   }, [breeds, speciesId, batchType])
 
   const farmField = register("farmId")

@@ -67,7 +67,10 @@ export function StockMovementPanel({
     id: string
     label: string
     createdAt: string
-    status: "pending" | "failed"
+    status: "pending" | "syncing" | "failed" | "conflict"
+    type?: string
+    scope?: string
+    payload?: unknown
     lastError?: string
   }>>([])
   const [isSyncing, setIsSyncing] = useState(false)
@@ -291,7 +294,7 @@ export function StockMovementPanel({
       <OfflineSyncCard
         isOnline={isOnline}
         pendingCount={pendingItems.length}
-        failedCount={pendingItems.filter((item) => item.status === "failed").length}
+        failedCount={pendingItems.filter((item) => item.status === "failed" || item.status === "conflict").length}
         isSyncing={isSyncing}
         lastSyncedAt={lastSyncedAt}
         lastError={lastSyncError}

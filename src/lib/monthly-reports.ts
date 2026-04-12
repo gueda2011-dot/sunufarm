@@ -54,6 +54,17 @@ function addKpiRow(
   row.getCell(3).font = { color: { argb: "FF6B7280" }, italic: true }
 }
 
+function sanitizeSpreadsheetValue(value: string | number) {
+  if (typeof value !== "string") return value
+
+  const trimmed = value.trimStart()
+  if (/^[=+\-@]/.test(trimmed)) {
+    return `'${value}`
+  }
+
+  return value
+}
+
 export async function getMonthlyReportData(args: {
   organizationId: string
   year: number
@@ -275,7 +286,10 @@ export async function getMonthlyReportData(args: {
 
 export function buildMonthlyReportCsv(report: MonthlyReportData) {
   const toCsvRow = (values: Array<string | number>) => (
-    values.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")
+    values
+      .map((value) => sanitizeSpreadsheetValue(value))
+      .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+      .join(",")
   )
 
   const lines = [
@@ -294,9 +308,9 @@ export function buildMonthlyReportCsv(report: MonthlyReportData) {
     ...report.batchesActive.map((batch) => (
       toCsvRow([
         batch.number,
-        batch.status,
-        batch.farmName,
-        batch.buildingName,
+        sanitizeSpreadsheetValue(batch.status),
+        sanitizeSpreadsheetValue(batch.farmName),
+        sanitizeSpreadsheetValue(batch.buildingName),
         batch.entryDate.toISOString().slice(0, 10),
         batch.entryCount,
         batch.periodMortality,
@@ -393,10 +407,10 @@ export async function buildMonthlyReportWorkbook(report: MonthlyReportData) {
   report.batchesActive.forEach((batch) => {
     batchesSheet.addRow([
       batch.number,
-      batch.status,
-      batch.type,
-      batch.farmName,
-      batch.buildingName,
+      sanitizeSpreadsheetValue(batch.status),
+      sanitizeSpreadsheetValue(batch.type),
+      sanitizeSpreadsheetValue(batch.farmName),
+      sanitizeSpreadsheetValue(batch.buildingName),
       formatDate(batch.entryDate),
       batch.entryCount,
       batch.periodMortality,
@@ -421,10 +435,10 @@ export async function buildMonthlyReportWorkbook(report: MonthlyReportData) {
   report.expenses.forEach((expense) => {
     expensesSheet.addRow([
       formatDate(expense.date),
-      expense.category,
-      expense.description,
-      expense.batchNumber,
-      expense.reference,
+      sanitizeSpreadsheetValue(expense.category),
+      sanitizeSpreadsheetValue(expense.description),
+      sanitizeSpreadsheetValue(expense.batchNumber),
+      sanitizeSpreadsheetValue(expense.reference),
       expense.amountFcfa,
     ])
   })
@@ -445,12 +459,12 @@ export async function buildMonthlyReportWorkbook(report: MonthlyReportData) {
   report.sales.forEach((sale) => {
     salesSheet.addRow([
       formatDate(sale.date),
-      sale.customer,
-      sale.productType,
+      sanitizeSpreadsheetValue(sale.customer),
+      sanitizeSpreadsheetValue(sale.productType),
       sale.totalFcfa,
       sale.paidFcfa,
       sale.dueFcfa,
-      sale.notes,
+      sanitizeSpreadsheetValue(sale.notes),
     ])
   })
   autosizeColumns(salesSheet)
@@ -470,12 +484,12 @@ export async function buildMonthlyReportWorkbook(report: MonthlyReportData) {
   report.purchases.forEach((purchase) => {
     purchasesSheet.addRow([
       formatDate(purchase.date),
-      purchase.supplier,
-      purchase.reference,
+      sanitizeSpreadsheetValue(purchase.supplier),
+      sanitizeSpreadsheetValue(purchase.reference),
       purchase.totalFcfa,
       purchase.paidFcfa,
       purchase.dueFcfa,
-      purchase.notes,
+      sanitizeSpreadsheetValue(purchase.notes),
     ])
   })
   autosizeColumns(purchasesSheet)

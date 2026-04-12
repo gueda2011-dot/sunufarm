@@ -1,4 +1,4 @@
-export type OfflineSyncStatus = "pending" | "synced" | "failed" | "conflict"
+export type OfflineSyncStatus = "pending" | "syncing" | "synced" | "failed" | "conflict"
 
 export type OfflineBootstrapStatus =
   | "idle"

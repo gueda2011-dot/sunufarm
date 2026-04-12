@@ -24,7 +24,7 @@ export function useOfflineSyncStatus(options: UseOfflineSyncStatusOptions = {}) 
     typeof navigator === "undefined" ? true : navigator.onLine
   ))
   const [items, setItems] = useState<OfflineQueueItem[]>([])
-  const [isSyncing, setIsSyncing] = useState(false)
+  const [isSyncingLocal, setIsSyncingLocal] = useState(false)
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
 
@@ -41,9 +41,9 @@ export function useOfflineSyncStatus(options: UseOfflineSyncStatusOptions = {}) 
   }, [scope])
 
   const sync = useCallback(async () => {
-    if (!isOnline || isSyncing) return
+    if (!isOnline || isSyncingLocal) return
 
-    setIsSyncing(true)
+    setIsSyncingLocal(true)
     try {
       if (scope) {
         await flushOfflineQueueByScope(scope)
@@ -52,31 +52,41 @@ export function useOfflineSyncStatus(options: UseOfflineSyncStatusOptions = {}) 
       }
       await refresh()
     } finally {
-      setIsSyncing(false)
+      setIsSyncingLocal(false)
     }
-  }, [isOnline, isSyncing, refresh, scope])
+  }, [isOnline, isSyncingLocal, refresh, scope])
 
   const retryItem = useCallback(async (itemId: string) => {
-    if (!isOnline || isSyncing) return
+    if (!isOnline || isSyncingLocal) return
 
-    setIsSyncing(true)
+    setIsSyncingLocal(true)
     try {
       await retryOfflineQueueItem(itemId)
       await flushOfflineMutationOutbox({ itemId })
       await refresh()
     } finally {
-      setIsSyncing(false)
+      setIsSyncingLocal(false)
     }
-  }, [isOnline, isSyncing, refresh])
+  }, [isOnline, isSyncingLocal, refresh])
 
   const removeItem = useCallback(async (itemId: string) => {
-    await deleteOfflineQueueItem(itemId)
-    await refresh()
+    try {
+      await deleteOfflineQueueItem(itemId)
+    } catch (error) {
+      console.error("[offline-sync] removeItem failed — forcing refresh anyway", error)
+    } finally {
+      await refresh()
+    }
   }, [refresh])
 
   const purgeItem = useCallback(async (itemId: string) => {
-    await purgeOfflineDailyItemLocally(itemId)
-    await refresh()
+    try {
+      await purgeOfflineDailyItemLocally(itemId)
+    } catch (error) {
+      console.error("[offline-sync] purgeItem failed — forcing refresh anyway", error)
+    } finally {
+      await refresh()
+    }
   }, [refresh])
 
   useEffect(() => {
@@ -98,13 +108,30 @@ export function useOfflineSyncStatus(options: UseOfflineSyncStatusOptions = {}) 
     }
   }, [refresh])
 
+  // Auto-sync only when there are genuinely pending items (not failed/conflict).
+  // Failed items require explicit user action (Réessayer or Supprimer).
+  // Using items.length here caused an infinite loop: every sync completion
+  // changed isSyncingLocal → recreated sync callback → effect re-fired →
+  // immediately re-synced the same failed item forever.
+  const pendingItemsCount = useMemo(
+    () => items.filter((i) => i.status === "pending").length,
+    [items],
+  )
+
   useEffect(() => {
-    if (!isOnline || items.length === 0) return
+    if (!isOnline || pendingItemsCount === 0) return
     void sync()
-  }, [isOnline, items.length, sync])
+  }, [isOnline, pendingItemsCount, sync])
+
+  // isSyncing est vrai si une opération de sync locale est en cours OU si des items
+  // sont en statut "syncing" dans la queue (ex: reprise après crash)
+  const isSyncing = useMemo(
+    () => isSyncingLocal || items.some((item) => item.status === "syncing"),
+    [isSyncingLocal, items],
+  )
 
   const failedCount = useMemo(
-    () => items.filter((item) => item.status === "failed").length,
+    () => items.filter((item) => item.status === "failed" || item.status === "conflict").length,
     [items],
   )
 

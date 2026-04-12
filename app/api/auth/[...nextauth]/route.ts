@@ -9,7 +9,7 @@ import {
 export const GET = handlers.GET
 
 export async function POST(request: NextRequest) {
-  const rateLimit = applyRateLimit({
+  const rateLimit = await applyRateLimit({
     key: `auth:${getClientIpFromHeaders(request.headers)}`,
     limit: 10,
     windowMs: 15 * 60_000,

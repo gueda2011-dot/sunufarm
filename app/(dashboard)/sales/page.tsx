@@ -28,7 +28,7 @@ export default async function SalesPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <SalesPageClient sales={sales} />
+      <SalesPageClient organizationId={organizationId} sales={sales} />
     </div>
   )
 }

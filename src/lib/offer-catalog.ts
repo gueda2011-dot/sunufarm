@@ -28,7 +28,7 @@ export const COMMERCIAL_PLAN_CATALOG: Record<CommercialPlan, CommercialPlanDefin
   STARTER: {
     code: "STARTER",
     label: "Starter",
-    monthlyPriceFcfa: 3_500,
+    monthlyPriceFcfa: 3_000,
     promise: "Mieux organiser l'exploitation au quotidien.",
     audience: "Eleveurs qui veulent structurer leurs operations",
     valueHeadline: "Passer de l'habitude a l'organisation",

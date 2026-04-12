@@ -34,4 +34,10 @@ export const OFFLINE_RESOURCE_KEYS = {
   purchasesSuppliers: "purchases:suppliers",
   purchasesFeedStocks: "purchases:feed-stocks",
   purchasesMedicineStocks: "purchases:medicine-stocks",
+  batchesList: "batches:list",
+  customersList: "customers:list",
+  suppliersList: "suppliers:list",
+  salesList: "sales:list",
+  farmsList: "farms:list",
+  expensesList: "expenses:list",
 } as const

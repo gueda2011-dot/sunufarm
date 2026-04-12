@@ -18,7 +18,13 @@ import { StockPageClient } from "./_components/StockPageClient"
 
 export const metadata: Metadata = { title: "Stock" }
 
-export default async function StockPage() {
+export default async function StockPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>
+}) {
+  const { tab: tabParam } = await searchParams
+  const initialTab: "ALIMENT" | "MEDICAMENT" = tabParam === "medicament" ? "MEDICAMENT" : "ALIMENT"
   const session = await auth()
 
   if (!session?.user?.id) {
@@ -108,6 +114,7 @@ export default async function StockPage() {
         medicinePredictions={medicinePredictions}
         feedTrends={feedTrends}
         medicineTrends={medicineTrends}
+        initialTab={initialTab}
       />
     </div>
   )

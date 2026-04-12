@@ -33,7 +33,7 @@ export async function POST(
   }
 
   const { transactionId } = await params
-  const rateLimit = applyRateLimit({
+  const rateLimit = await applyRateLimit({
     key: `checkout:${session.user.id}:${transactionId}:${getClientIpFromHeaders(request.headers)}`,
     limit: 5,
     windowMs: 60_000,
