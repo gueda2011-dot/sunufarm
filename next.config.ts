@@ -36,6 +36,7 @@ const nextConfig: NextConfig = {
               "connect-src 'self'" +
                 " https://*.supabase.co" +
                 " https://*.supabase.in" +
+                " https://api.open-meteo.com" +
                 " https://fcm.googleapis.com" +
                 " https://firebaseinstallations.googleapis.com" +
                 " https://storage.googleapis.com" +
