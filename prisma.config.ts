@@ -16,6 +16,9 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env.SUNUFARM_DATABASE_URL!,
+    // SUNUFARM_DIRECT_URL = connexion directe Supabase (port 5432, requis pour prisma migrate)
+    // SUNUFARM_DATABASE_URL = pooler Supabase (port 6543, utilisé par le client runtime)
+    // En local les deux pointent souvent vers la même URL directe.
+    url: process.env.SUNUFARM_DIRECT_URL ?? process.env.SUNUFARM_DATABASE_URL!,
   },
 })
