@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { predictBatchMortalityRisk } from "./predictive-mortality-rules"
 import type { BatchMortalityFeatures } from "./predictive-mortality-features"
+import { BatchType } from "@/src/generated/prisma/client"
 
 const baseFeatures: BatchMortalityFeatures = {
   batchId: "b1",
+  batchType: BatchType.CHAIR,
   ageDay: 21,
   recentWindowDays: 7,
   previousWindowDays: 7,
@@ -59,5 +61,32 @@ describe("predictBatchMortalityRisk", () => {
     expect(prediction.alertLevel).toBe("critical")
     expect(prediction.riskScore).toBeGreaterThanOrEqual(60)
     expect(prediction.reasons.length).toBeGreaterThan(0)
+  })
+
+  it("neutralise le verdict avant J7", () => {
+    const prediction = predictBatchMortalityRisk({
+      ...baseFeatures,
+      ageDay: 4,
+      recentAverageDailyMortalityRate: 0.02,
+      recentMortality: 10,
+      overdueVaccines: 1,
+    })
+
+    expect(prediction.alertLevel).toBe("ok")
+    expect(prediction.label).toBe("Observation initiale")
+    expect(prediction.summary).toContain("avant J7")
+  })
+
+  it("ne classe pas une pondeuse a 0.3%/jour en critique", () => {
+    const prediction = predictBatchMortalityRisk({
+      ...baseFeatures,
+      batchType: BatchType.PONDEUSE,
+      recentAverageDailyMortalityRate: 0.003,
+      recentMortalityRate: 0.021,
+      recentMortality: 6,
+      missingDailyRecords: 0,
+    })
+
+    expect(prediction.alertLevel).not.toBe("critical")
   })
 })

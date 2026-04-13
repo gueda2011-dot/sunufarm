@@ -12,6 +12,7 @@ import {
   createDailyRecord,
   updateDailyRecord,
 } from "@/src/actions/daily-records"
+import { createFeedBagEvent } from "@/src/actions/feed-bags"
 import { validateCreateDailyRecordInput } from "@/src/lib/daily-record-validation"
 import { fetchLocalWeather } from "@/src/lib/weather"
 import {
@@ -22,6 +23,7 @@ import {
 import {
   createClientMutationId,
   enqueueOfflineDailyRecord,
+  enqueueOfflineFeedBagEvent,
 } from "@/src/lib/offline-mutation-outbox"
 import { cn } from "@/src/lib/utils"
 import { AudioRecorder } from "./AudioRecorder"
@@ -32,14 +34,24 @@ function emptyToUndefined(val: unknown): unknown {
 
 function buildFormSchema(entryCount: number) {
   return z.object({
+    inputMode: z.enum(["kg", "bag"]).default("kg"),
     mortality: z
       .coerce.number({ error: "Entier requis" })
       .int("Doit etre un entier")
       .min(0, "Doit etre >= 0")
       .max(entryCount, `Maximum : ${entryCount} (effectif initial)`),
-    feedKg: z
-      .coerce.number({ error: "Nombre requis" })
-      .min(0, "Doit etre >= 0"),
+    feedKg: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().min(0, "Doit etre >= 0").optional(),
+    ),
+    bagCount: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().positive("Doit etre > 0").optional(),
+    ),
+    bagWeightKg: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().positive("Doit etre > 0").optional(),
+    ),
     feedStockId: z.preprocess(
       emptyToUndefined,
       z.string().cuid("Stock invalide").optional(),
@@ -60,12 +72,41 @@ function buildFormSchema(entryCount: number) {
       emptyToUndefined,
       z.string().url().optional().nullable(),
     ),
+  }).superRefine((value, ctx) => {
+    if (value.inputMode === "bag") {
+      if (value.bagCount === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["bagCount"],
+          message: "Nombre de sacs requis",
+        })
+      }
+      if (value.bagWeightKg === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["bagWeightKg"],
+          message: "Poids unitaire requis",
+        })
+      }
+      return
+    }
+
+    if (value.feedKg === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["feedKg"],
+        message: "Quantite d'aliment requise",
+      })
+    }
   })
 }
 
 type ParsedValues = {
+  inputMode: "kg" | "bag"
   mortality: number
-  feedKg: number
+  feedKg?: number
+  bagCount?: number
+  bagWeightKg?: number
   feedStockId?: string
   waterLiters?: number
   avgWeightG?: number
@@ -86,6 +127,7 @@ interface DailyFormProps {
   organizationId: string
   batchId: string
   selectedDate: string
+  ageDay: number
   entryCount: number
   isEditMode: boolean
   editingRecordId?: string
@@ -117,10 +159,21 @@ function isOfflineFailure(error: unknown) {
   )
 }
 
+function computeEffectiveFeedKg(data: ParsedValues): number {
+  if (data.inputMode === "bag") {
+    const bagCount = data.bagCount ?? 0
+    const bagWeightKg = data.bagWeightKg ?? 0
+    return Math.round(bagCount * bagWeightKg * 100) / 100
+  }
+
+  return data.feedKg ?? 0
+}
+
 export function DailyForm({
   organizationId,
   batchId,
   selectedDate,
+  ageDay,
   entryCount,
   isEditMode,
   editingRecordId,
@@ -159,7 +212,10 @@ export function DailyForm({
     resolver: zodResolver(schema) as Resolver<ParsedValues>,
     defaultValues: {
       mortality: defaultValues.mortality,
+      inputMode: "kg",
       feedKg: defaultValues.feedKg,
+      bagCount: undefined,
+      bagWeightKg: 50,
       feedStockId: defaultValues.feedStockId ?? undefined,
       waterLiters: defaultValues.waterLiters ?? undefined,
       avgWeightG: defaultValues.avgWeightG ?? undefined,
@@ -172,6 +228,13 @@ export function DailyForm({
   })
 
   const draftValues = useWatch({ control })
+  const inputMode = useWatch({ control, name: "inputMode" }) ?? "kg"
+  const bagCount = useWatch({ control, name: "bagCount" }) ?? 0
+  const bagWeightKg = useWatch({ control, name: "bagWeightKg" }) ?? 0
+  const computedBagFeedKg =
+    inputMode === "bag"
+      ? Math.round(bagCount * bagWeightKg * 100) / 100
+      : null
   const hasAutoFetchedWeather = useRef(false)
 
   useEffect(() => {
@@ -202,7 +265,10 @@ export function DailyForm({
 
         reset({
           mortality: parsedDraft.mortality ?? defaultValues.mortality,
+          inputMode: parsedDraft.inputMode ?? "kg",
           feedKg: parsedDraft.feedKg ?? defaultValues.feedKg,
+          bagCount: parsedDraft.bagCount ?? undefined,
+          bagWeightKg: parsedDraft.bagWeightKg ?? 50,
           feedStockId: parsedDraft.feedStockId ?? defaultValues.feedStockId ?? undefined,
           waterLiters: parsedDraft.waterLiters ?? defaultValues.waterLiters ?? undefined,
           avgWeightG: parsedDraft.avgWeightG ?? defaultValues.avgWeightG ?? undefined,
@@ -309,13 +375,15 @@ export function DailyForm({
   }
 
   function buildCreatePayload(data: ParsedValues) {
+    const effectiveFeedKg = computeEffectiveFeedKg(data)
+
     return {
       clientMutationId: createClientMutationId("daily"),
       organizationId,
       batchId,
       date: new Date(`${selectedDate}T00:00:00Z`),
       mortality: data.mortality,
-      feedKg: data.feedKg,
+      feedKg: effectiveFeedKg,
       feedStockId: data.feedStockId,
       waterLiters: data.waterLiters,
       avgWeightG: data.avgWeightG,
@@ -352,6 +420,32 @@ export function DailyForm({
   const queueCurrentEntry = async (data: ParsedValues) => {
     const clientMutationId = createClientMutationId("daily")
     const dateIso = new Date(`${selectedDate}T00:00:00Z`).toISOString()
+    const effectiveFeedKg = computeEffectiveFeedKg(data)
+
+    if (data.inputMode === "bag" && data.bagCount && data.bagWeightKg) {
+      await enqueueOfflineFeedBagEvent({
+        clientMutationId: createClientMutationId("feed-bag"),
+        organizationId,
+        batchId,
+        startDateIso: dateIso,
+        endDateIso: dateIso,
+        startAgeDay: ageDay,
+        endAgeDay: ageDay,
+        bagCount: data.bagCount,
+        bagWeightKg: data.bagWeightKg,
+        totalFeedKg: effectiveFeedKg,
+        feedStockId: data.feedStockId,
+        notes: [
+          `${data.bagCount} sac${data.bagCount > 1 ? "s" : ""} de ${data.bagWeightKg} kg saisi${data.bagCount > 1 ? "s" : ""} hors ligne depuis la saisie journaliere.`,
+          data.observations?.trim() ? data.observations.trim() : null,
+        ].filter(Boolean).join(" "),
+      })
+
+      await clearDrafts()
+      toast.success("Mode sac enregistre hors ligne et mis en attente de synchronisation")
+      onOfflineQueued?.()
+      return
+    }
 
     await enqueueOfflineDailyRecord({
       clientMutationId,
@@ -359,7 +453,7 @@ export function DailyForm({
       batchId,
       dateIso,
       mortality: data.mortality,
-      feedKg: data.feedKg,
+      feedKg: effectiveFeedKg,
       feedStockId: data.feedStockId,
       waterLiters: data.waterLiters,
       avgWeightG: data.avgWeightG,
@@ -380,12 +474,13 @@ export function DailyForm({
     setSubmitFieldErrors({})
 
     if (isEditMode && editingRecordId) {
+      const effectiveFeedKg = computeEffectiveFeedKg(data)
       const result = await updateDailyRecord({
         organizationId,
         batchId,
         dailyRecordId: editingRecordId,
         mortality: data.mortality,
-        feedKg: data.feedKg,
+        feedKg: effectiveFeedKg,
         feedStockId: data.feedStockId ?? null,
         waterLiters: data.waterLiters,
         avgWeightG: data.avgWeightG,
@@ -408,6 +503,36 @@ export function DailyForm({
     try {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         await queueCurrentEntry(data)
+        return
+      }
+
+      if (data.inputMode === "bag") {
+        const totalBagWeightKg = computeEffectiveFeedKg(data)
+        const result = await createFeedBagEvent({
+          organizationId,
+          batchId,
+          feedStockId: data.feedStockId ?? null,
+          clientMutationId: createClientMutationId("feed-bag"),
+          bagWeightKg: totalBagWeightKg,
+          startDate: new Date(`${selectedDate}T00:00:00Z`),
+          endDate: new Date(`${selectedDate}T00:00:00Z`),
+          startAgeDay: ageDay,
+          endAgeDay: ageDay,
+          notes: [
+            totalBagWeightKg > 0 && data.bagCount && data.bagWeightKg
+              ? `${data.bagCount} sac${data.bagCount > 1 ? "s" : ""} de ${data.bagWeightKg} kg saisi${data.bagCount > 1 ? "s" : ""} depuis la saisie journaliere.`
+              : null,
+            data.observations?.trim() ? data.observations.trim() : null,
+          ].filter(Boolean).join(" "),
+        })
+
+        if (result.success) {
+          await clearDrafts()
+          toast.success("Saisie en mode sac enregistree")
+          onSuccess()
+        } else {
+          setSubmitError(result.error)
+        }
         return
       }
 
@@ -500,14 +625,87 @@ export function DailyForm({
         {...register("mortality")}
       />
 
-      <NumericField
-        id="feedKg"
-        label="Aliment distribue"
-        unit="kg"
-        placeholder="0"
-        error={errors.feedKg?.message}
-        {...register("feedKg")}
-      />
+      {!isEditMode ? (
+        <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Mode de saisie aliment</p>
+              <p className="text-xs text-gray-500">
+                Kg direct pour une saisie classique, ou sacs pour reconstruire la journee.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 rounded-xl border border-gray-200 bg-gray-50 p-1 text-sm">
+              <label className="cursor-pointer">
+                <input type="radio" value="kg" className="sr-only" {...register("inputMode")} />
+                <span className={cn(
+                  "block rounded-lg px-3 py-2 font-medium transition-colors",
+                  inputMode === "kg" ? "bg-white text-green-700 shadow-sm" : "text-gray-600",
+                )}>
+                  Kg
+                </span>
+              </label>
+              <label className="cursor-pointer">
+                <input type="radio" value="bag" className="sr-only" {...register("inputMode")} />
+                <span className={cn(
+                  "block rounded-lg px-3 py-2 font-medium transition-colors",
+                  inputMode === "bag" ? "bg-white text-green-700 shadow-sm" : "text-gray-600",
+                )}>
+                  Sacs
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {inputMode === "kg" ? (
+            <NumericField
+              id="feedKg"
+              label="Aliment distribue"
+              unit="kg"
+              placeholder="0"
+              error={errors.feedKg?.message}
+              {...register("feedKg")}
+            />
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <NumericField
+                  id="bagCount"
+                  label="Nombre de sacs"
+                  placeholder="1"
+                  error={errors.bagCount?.message}
+                  {...register("bagCount")}
+                />
+                <NumericField
+                  id="bagWeightKg"
+                  label="Poids unitaire"
+                  unit="kg"
+                  placeholder="50"
+                  error={errors.bagWeightKg?.message}
+                  {...register("bagWeightKg")}
+                />
+              </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+                <p className="font-medium text-emerald-900">
+                  Equivalent journalier: {computedBagFeedKg?.toLocaleString("fr-SN")} kg
+                </p>
+                <p className="mt-1 text-emerald-700">
+                  En ligne, cette saisie cree un evenement sac ferme sur le jour {ageDay}.
+                  Hors ligne, un evenement sac equivalent est mis en attente puis synchronise au retour du reseau.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <NumericField
+          id="feedKg"
+          label="Aliment distribue"
+          unit="kg"
+          placeholder="0"
+          error={errors.feedKg?.message}
+          {...register("feedKg")}
+        />
+      )}
 
       <div className="space-y-1.5">
         <label htmlFor="feedStockId" className="block text-sm font-medium text-gray-700">

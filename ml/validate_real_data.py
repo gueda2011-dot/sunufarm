@@ -83,6 +83,9 @@ OPTIONAL_FEATURES = [
     "aliment_cumule_j14",
     "depenses_cumulees_j14",
     "symptomes_detectes_j14",
+    # Phase 4 — qualité données alimentation (défaut sûr si absent : 0.0 / 1.0)
+    "pct_estime_j14",
+    "confiance_moyenne_j14",
 ]
 
 # Plages biologiques attendues pour poulets de chair (CHAIR / broiler)

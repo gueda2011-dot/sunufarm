@@ -73,6 +73,9 @@ FEATURE_COLS = [
     "depenses_cumulees_j14",
     "temperature_moyenne_j14",
     "symptomes_detectes_j14",
+    # Phase 4 — qualité données alimentation J1–J14
+    "pct_estime_j14",        # % jours estimés depuis sac (0–100), 0 si 100% manuel
+    "confiance_moyenne_j14", # confiance moyenne (0.0–1.0), 1.0 si 100% manuel
 ]
 TARGET = "target_lot_a_risque"
 
@@ -114,6 +117,19 @@ def build_features_from_synthetic(data_dir: str) -> pd.DataFrame:
     agg = agg.merge(outcomes[["lot_id", "lot_a_risque"]], on="lot_id")
     agg = agg.rename(columns={"lot_a_risque": TARGET})
 
+    # Phase 4 — qualité données alimentation
+    # Simulation réaliste : ~35% des lots synthétiques utilisent des sacs
+    # (leur confiance est légèrement réduite mais reste bonne).
+    # Les lots 100% manuels ont pct=0 et confiance=1.0.
+    import numpy as np  # numpy est disponible via pandas
+    rng_phase4 = np.random.default_rng(seed=42)
+    n = len(agg)
+    uses_bag = rng_phase4.random(n) < 0.35
+    pct = rng_phase4.uniform(15, 80, n) * uses_bag   # 0 si pas de sac
+    conf = 1.0 - uses_bag * rng_phase4.uniform(0.05, 0.40, n)  # 1.0 si pas de sac
+    agg["pct_estime_j14"] = pct.round(1)
+    agg["confiance_moyenne_j14"] = conf.round(3)
+
     return agg[["lot_id"] + FEATURE_COLS + [TARGET]]
 
 
@@ -141,9 +157,18 @@ def build_features_from_real(data_dir: str) -> pd.DataFrame:
 
     df = pd.read_csv(features_path)
 
-    missing = [c for c in FEATURE_COLS + [TARGET] if c not in df.columns]
-    if missing:
-        raise ValueError(f"Colonnes manquantes dans le fichier réel : {missing}")
+    # Colonnes Phase 4 optionnelles — valeurs par défaut sûres si absentes (rétro-compat)
+    OPTIONAL_DEFAULTS = {
+        "pct_estime_j14": 0.0,
+        "confiance_moyenne_j14": 1.0,
+    }
+    for col, default in OPTIONAL_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default
+
+    required = [c for c in FEATURE_COLS + [TARGET] if c not in df.columns]
+    if required:
+        raise ValueError(f"Colonnes manquantes dans le fichier réel : {required}")
 
     return df
 

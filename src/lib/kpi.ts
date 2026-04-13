@@ -8,12 +8,27 @@
  */
 
 import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
+import { BatchType } from "@/src/generated/prisma/client"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type AlertLevel = "ok" | "warning" | "critical"
+
+function getMortalityThresholds(batchType: BatchType) {
+  if (batchType === BatchType.PONDEUSE) {
+    return {
+      warning: KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE_LAYER,
+      critical: KPI_THRESHOLDS.MORTALITY_DAILY_CRITICAL_RATE_LAYER,
+    }
+  }
+
+  return {
+    warning: KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE_BROILER,
+    critical: KPI_THRESHOLDS.MORTALITY_DAILY_CRITICAL_RATE_BROILER,
+  }
+}
 
 /**
  * Résultat d'un calcul de marge.
@@ -253,9 +268,13 @@ export function netMargin(revenue: number, totalCosts: number): MarginResult {
  * Niveau d'alerte pour la mortalité journalière.
  * @param dailyRatePct Taux de mortalité du jour en % (ex : 0.5 pour 0.5%)
  */
-export function getMortalityAlert(dailyRatePct: number): AlertLevel {
-  if (dailyRatePct >= KPI_THRESHOLDS.MORTALITY_DAILY_CRITICAL_RATE * 100) return "critical"
-  if (dailyRatePct >= KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE  * 100) return "warning"
+export function getMortalityAlert(
+  dailyRatePct: number,
+  batchType: BatchType = BatchType.CHAIR,
+): AlertLevel {
+  const thresholds = getMortalityThresholds(batchType)
+  if (dailyRatePct >= thresholds.critical * 100) return "critical"
+  if (dailyRatePct >= thresholds.warning * 100) return "warning"
   return "ok"
 }
 

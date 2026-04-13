@@ -42,6 +42,8 @@ export async function getBusinessDashboardOverview(
         select: {
           id: true,
           number: true,
+          entryDate: true,
+          entryAgeDay: true,
           entryCount: true,
           totalCostFcfa: true,
           building: {
@@ -51,7 +53,11 @@ export async function getBusinessDashboardOverview(
             },
           },
           dailyRecords: {
-            select: { mortality: true },
+            select: {
+              mortality: true,
+              dataSource: true,
+              feedKg: true,
+            },
           },
           expenses: {
             select: { amountFcfa: true },
@@ -106,13 +112,23 @@ export async function getBusinessDashboardOverview(
         const observedRevenueFcfa = batch.saleItems.reduce((sum, item) => sum + item.totalFcfa, 0)
         const observedOperationalCostFcfa = batch.expenses.reduce((sum, expense) => sum + expense.amountFcfa, 0)
         const totalMortality = batch.dailyRecords.reduce((sum, record) => sum + record.mortality, 0)
+        const feedRecords = batch.dailyRecords.filter((record) => record.feedKg > 0)
+        const today = new Date()
+        const ageDay = batch.entryAgeDay + Math.max(
+          0,
+          Math.floor((today.getTime() - batch.entryDate.getTime()) / 86_400_000),
+        )
 
         return [{
           id: batch.id,
           number: batch.number,
           farmName: batch.building.farm.name,
           buildingName: batch.building.name,
+          ageDay,
           entryCount: batch.entryCount,
+          manualFeedRecordCount: feedRecords.filter((record) => record.dataSource === "MANUAL_KG").length,
+          estimatedFeedRecordCount: feedRecords.filter((record) => record.dataSource === "ESTIMATED_FROM_BAG").length,
+          totalFeedRecordCount: feedRecords.length,
           observedRevenueFcfa,
           observedTotalCostFcfa: batch.totalCostFcfa + observedOperationalCostFcfa,
           totalMortality,

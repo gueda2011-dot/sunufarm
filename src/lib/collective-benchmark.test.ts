@@ -27,6 +27,7 @@ function makeBenchmark(overrides: Partial<CollectiveBenchmark> = {}): Collective
     usedRegionCode: "DAKAR",
     usedBreedCode: "COBB500",
     usedMonths: [3, 4, 5],
+    adjustedReference: null,
     ...overrides,
   }
 }
@@ -88,6 +89,7 @@ describe("Collective benchmark — structure des champs", () => {
     expect(benchmark).toHaveProperty("medianSalePricePerKgFcfa")
     expect(benchmark).toHaveProperty("usedRegionCode")
     expect(benchmark).toHaveProperty("usedBreedCode")
+    expect(benchmark).toHaveProperty("adjustedReference")
     expect(benchmark.scope).toBe("precise")
   })
 

@@ -70,6 +70,14 @@ const analyzeBatchDataSchema = z.object({
     avgHeatStressDays: z.number().nullable(),
     usedRegionCode: z.string().nullable(),
     usedBreedCode: z.string().nullable(),
+    adjustedReference: z.object({
+      ageDay: z.number().int().nonnegative(),
+      dailyFeedGPerBird: z.number().nullable(),
+      rawGeneticFeedGPerBird: z.number().nullable(),
+      source: z.string().nullable(),
+      senegalProfileCode: z.string().nullable(),
+      curveVersion: z.string().nullable(),
+    }).nullable(),
   }).nullable(),
 })
 
@@ -234,6 +242,7 @@ export async function buildBatchAnalysisInput(
             name: true,
             farm: {
               select: {
+                id: true,
                 name: true,
                 address: true,
               },
@@ -382,6 +391,9 @@ export async function buildBatchAnalysisInput(
     breedCode: batch.breed?.code ?? null,
     regionCode: deriveRegionCode(batch.building.farm.address ?? null),
     entryMonth: entryDate.getUTCMonth() + 1,
+    batchId: batch.id,
+    farmId: batch.building.farm.id,
+    ageDay: snapshot.ageDay,
   })
 
   const collectiveBenchmark = collectiveBenchmarkRaw ? {
@@ -396,6 +408,7 @@ export async function buildBatchAnalysisInput(
     avgHeatStressDays: collectiveBenchmarkRaw.avgHeatStressDays,
     usedRegionCode: collectiveBenchmarkRaw.usedRegionCode,
     usedBreedCode: collectiveBenchmarkRaw.usedBreedCode,
+    adjustedReference: collectiveBenchmarkRaw.adjustedReference,
   } : null
 
   return analyzeBatchDataSchema.parse({
@@ -849,7 +862,7 @@ async function generateBatchAnalysisWithAnthropic(
       system:
         "Tu es le moteur d'analyse avicole de SunuFarm. Reponds uniquement en JSON valide. " +
         "Concentre-toi sur la rentabilite, les risques, et les actions concretes. " +
-        "Pas de texte hors JSON. Si un benchmark interne est present, utilise-le explicitement. " +
+        "Pas de texte hors JSON. Si un benchmark interne ou une reference ajustee locale sont presents, utilise-les explicitement. " +
         "Si aucun benchmark n'est present, renvoie comparisonInsights comme tableau vide.",
       messages: [
         {
@@ -907,7 +920,7 @@ export async function generateBatchAnalysisWithOpenAI(
             {
               type: "input_text",
               text:
-                "Tu es le moteur d'analyse avicole de SunuFarm. Reponds uniquement en JSON valide. Concentre-toi sur la rentabilite, les risques, et les actions concretes. Pas de chatbot, pas de texte hors JSON. Si un benchmark interne est present, utilise-le explicitement pour comparer le lot a des lots similaires de la meme exploitation. Si aucun benchmark n'est present, renvoie comparisonInsights comme tableau vide.",
+                "Tu es le moteur d'analyse avicole de SunuFarm. Reponds uniquement en JSON valide. Concentre-toi sur la rentabilite, les risques, et les actions concretes. Pas de chatbot, pas de texte hors JSON. Si un benchmark interne ou une reference ajustee locale sont presents, utilise-les explicitement pour comparer le lot a des lots similaires et a sa reference attendue. Si aucun benchmark n'est present, renvoie comparisonInsights comme tableau vide.",
             },
           ],
         },

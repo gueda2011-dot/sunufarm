@@ -395,6 +395,7 @@ export function DailyEntryClient({
           organizationId={organizationId}
           batchId={selectedBatchId}
           selectedDate={selectedDate}
+          ageDay={ageDay ?? selectedBatch.entryAgeDay}
           entryCount={selectedBatch.entryCount}
           isEditMode={isEditMode}
           editingRecordId={editingRecord?.id}

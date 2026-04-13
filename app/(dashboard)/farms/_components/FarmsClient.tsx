@@ -29,6 +29,11 @@ import {
   deleteBuilding,
   type BuildingSummary,
 } from "@/src/actions/buildings"
+import {
+  getFarmAdjustmentProfile,
+  type FarmAdjustmentProfileData,
+} from "@/src/actions/farm-adjustment"
+import { FarmAdjustmentPanel } from "./FarmAdjustmentPanel"
 
 // ---------------------------------------------------------------------------
 // Schémas
@@ -106,6 +111,7 @@ export function FarmsClient({
   useEffect(() => { setFarms(cachedFarms) }, [cachedFarms])
   const [expandedFarm, setExpanded] = useState<string | null>(null)
   const [buildings, setBuildings] = useState<Record<string, BuildingSummary[]>>({})
+  const [adjustmentProfiles, setAdjustmentProfiles] = useState<Record<string, FarmAdjustmentProfileData | null>>({})
   const [showFarmForm, setShowFarm] = useState(false)
   const [editingFarm, setEditFarm] = useState<FarmSummary | null>(null)
   const [addBldgFor, setAddBldg] = useState<string | null>(null)
@@ -145,12 +151,22 @@ export function FarmsClient({
     }
   }
 
+  async function loadAdjustmentProfile(farmId: string) {
+    if (farmId in adjustmentProfiles) return
+    const res = await getFarmAdjustmentProfile({ organizationId, farmId })
+    setAdjustmentProfiles((prev) => ({
+      ...prev,
+      [farmId]: res.success ? res.data : null,
+    }))
+  }
+
   function toggleFarm(farmId: string) {
     if (expandedFarm === farmId) {
       setExpanded(null)
     } else {
       setExpanded(farmId)
       loadBuildings(farmId)
+      if (canEdit) loadAdjustmentProfile(farmId)
     }
   }
 
@@ -490,6 +506,18 @@ export function FarmsClient({
                           )}
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Panneau d'ajustement ferme — réservé OWNER/MANAGER */}
+                  {canEdit && (
+                    <div className="mt-3">
+                      <FarmAdjustmentPanel
+                        organizationId={organizationId}
+                        farmId={farm.id}
+                        farmName={farm.name}
+                        initialProfile={adjustmentProfiles[farm.id] ?? null}
+                      />
                     </div>
                   )}
 

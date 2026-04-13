@@ -7,7 +7,7 @@
  */
 
 import Link                      from "next/link"
-import { Lock }                  from "lucide-react"
+import { Lock, Zap }             from "lucide-react"
 import { formatDate, formatWeight } from "@/src/lib/formatters"
 import type { DailyRecordDetail } from "@/src/actions/daily-records"
 import { COMMERCIAL_PLAN_CATALOG } from "@/src/lib/offer-catalog"
@@ -80,6 +80,7 @@ export function RecentDailyRecords({
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400">Date</th>
                   <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-400">Mort.</th>
                   <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-400">Aliment</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-400">Source</th>
                   <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-400">Eau</th>
                   <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-400">Poids moy.</th>
                 </tr>
@@ -105,6 +106,23 @@ export function RecentDailyRecords({
                     </td>
                     <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums whitespace-nowrap">
                       {record.feedKg} kg
+                    </td>
+                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                      {record.dataSource === "ESTIMATED_FROM_BAG" ? (
+                        <span
+                          className="inline-flex items-center justify-center rounded-full bg-amber-100 p-1 text-amber-700"
+                          title={`Estimation reconstruite depuis un sac${record.estimationConfidence ? ` · confiance ${record.estimationConfidence}` : ""}`}
+                        >
+                          <Zap className="h-3.5 w-3.5" aria-hidden="true" />
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex rounded-full border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-500"
+                          title="Saisie manuelle en kg"
+                        >
+                          Manuel
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums whitespace-nowrap">
                       {record.waterLiters != null ? `${record.waterLiters} L` : "—"}

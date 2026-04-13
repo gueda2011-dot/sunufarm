@@ -12,10 +12,13 @@ interface BusinessKpiGridProps {
   activeBatchCount: number
   atRiskBatchCount: number
   criticalStockCount: number
+  manualFeedSharePct: number | null
+  estimatedFeedSharePct: number | null
   marginVerdict: string
   riskVerdict: string
   stockVerdict: string
   mortalityVerdict: string
+  dataQualityVerdict: string
 }
 
 function KpiCard({
@@ -66,10 +69,13 @@ export function BusinessKpiGrid({
   activeBatchCount,
   atRiskBatchCount,
   criticalStockCount,
+  manualFeedSharePct,
+  estimatedFeedSharePct,
   marginVerdict,
   riskVerdict,
   stockVerdict,
   mortalityVerdict,
+  dataQualityVerdict,
 }: BusinessKpiGridProps) {
   return (
     <section className="space-y-3">
@@ -77,18 +83,18 @@ export function BusinessKpiGrid({
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Verdicts cles</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Les chiffres restent visibles, mais la lecture métier passe en premier.
+            Les chiffres restent visibles, mais la lecture metier passe en premier.
           </p>
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           label="Marge globale"
           verdict={marginVerdict}
           value={formatMoneyFCFACompact(totalMarginFcfa)}
           detail={`CA ${formatMoneyFCFACompact(totalRevenueFcfa)} · Couts ${formatMoneyFCFACompact(totalCostsFcfa)}`}
-          tone={totalMarginFcfa < 0 ? "red" : totalMarginFcfa < 100_000 ? "orange" : "green"}
+          tone={totalRevenueFcfa === 0 ? "orange" : totalMarginFcfa < 0 ? "red" : totalMarginFcfa < 100_000 ? "orange" : "green"}
         />
         <KpiCard
           label="Lots a risque"
@@ -110,6 +116,13 @@ export function BusinessKpiGrid({
           value={globalMortalityRate == null ? "—" : formatPercent(globalMortalityRate)}
           detail="Taux mortalite sur l'effectif actif"
           tone={globalMortalityRate != null && globalMortalityRate >= 3 ? "red" : globalMortalityRate != null && globalMortalityRate >= 1.5 ? "orange" : "green"}
+        />
+        <KpiCard
+          label="Qualite alim"
+          verdict={dataQualityVerdict}
+          value={manualFeedSharePct == null ? "—" : formatPercent(manualFeedSharePct)}
+          detail={estimatedFeedSharePct == null ? "Part manuelle des saisies aliment" : `${formatPercent(estimatedFeedSharePct)} estimes depuis sacs`}
+          tone={manualFeedSharePct == null ? "default" : manualFeedSharePct >= 70 ? "green" : manualFeedSharePct >= 40 ? "orange" : "red"}
         />
       </div>
     </section>

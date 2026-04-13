@@ -29,6 +29,21 @@ interface DailyLocalPayload {
   audioRecordUrl?: string | null
 }
 
+interface DailyFeedBagEventLocalPayload {
+  clientMutationId: string
+  organizationId: string
+  batchId: string
+  startDateIso: string
+  endDateIso: string
+  startAgeDay: number
+  endAgeDay: number
+  bagCount: number
+  bagWeightKg: number
+  totalFeedKg: number
+  feedStockId?: string
+  notes?: string
+}
+
 interface DailyPendingRow {
   id: string
   date: string
@@ -45,26 +60,62 @@ function isDailyPayload(value: unknown): value is DailyLocalPayload {
   return typeof value === "object" && value !== null && "batchId" in value && "dateIso" in value
 }
 
+function isDailyFeedBagPayload(value: unknown): value is DailyFeedBagEventLocalPayload {
+  return typeof value === "object" && value !== null && "batchId" in value && "startDateIso" in value
+}
+
 function toDailyRecordDetail(record: OfflineRecord<unknown>): DailyRecordDetail | null {
   const payload = record.data
-  if (!isDailyPayload(payload)) return null
+  if (isDailyPayload(payload)) {
+    return {
+      id: record.serverId ?? record.localId,
+      organizationId: record.organizationId,
+      batchId: payload.batchId,
+      date: new Date(payload.dateIso),
+      mortality: payload.mortality,
+      feedKg: payload.feedKg,
+      dataSource: "MANUAL_KG",
+      feedBagEventId: null,
+      estimationConfidence: null,
+      feedStockId: payload.feedStockId ?? null,
+      feedStockName: null,
+      waterLiters: payload.waterLiters ?? null,
+      temperatureMin: payload.temperatureMin ?? null,
+      temperatureMax: payload.temperatureMax ?? null,
+      humidity: payload.humidity ?? null,
+      avgWeightG: payload.avgWeightG ?? null,
+      observations: payload.observations ?? null,
+      audioRecordUrl: payload.audioRecordUrl ?? null,
+      recordedById: null,
+      lockedAt: null,
+      isLocked: false,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt),
+      mortalityRecords: [],
+    }
+  }
+
+  if (!isDailyFeedBagPayload(payload)) return null
 
   return {
     id: record.serverId ?? record.localId,
     organizationId: record.organizationId,
     batchId: payload.batchId,
-    date: new Date(payload.dateIso),
-    mortality: payload.mortality,
-    feedKg: payload.feedKg,
+    date: new Date(payload.startDateIso),
+    mortality: 0,
+    feedKg: payload.totalFeedKg,
+    dataSource: "ESTIMATED_FROM_BAG",
+    feedBagEventId: record.localId,
+    estimationConfidence: null,
     feedStockId: payload.feedStockId ?? null,
     feedStockName: null,
-    waterLiters: payload.waterLiters ?? null,
-    temperatureMin: payload.temperatureMin ?? null,
-    temperatureMax: payload.temperatureMax ?? null,
-    humidity: payload.humidity ?? null,
-    avgWeightG: payload.avgWeightG ?? null,
-    observations: payload.observations ?? null,
-    audioRecordUrl: payload.audioRecordUrl ?? null,
+    waterLiters: null,
+    temperatureMin: null,
+    temperatureMax: null,
+    humidity: null,
+    avgWeightG: null,
+    observations: payload.notes ?? null,
+    audioRecordUrl: null,
     recordedById: null,
     lockedAt: null,
     isLocked: false,
@@ -118,6 +169,34 @@ export async function loadDailyFeedStocksFromLocal(
   return feedStocks.length > 0 ? feedStocks : undefined
 }
 
+export async function adjustDailyFeedStockQuantityLocally(
+  organizationId: string,
+  feedStockId: string,
+  deltaKg: number,
+) {
+  const row = await stockItemsRepository.getById(`feed:${feedStockId}`)
+  if (!row || row.organizationId !== organizationId) {
+    return null
+  }
+
+  const stock = row.data as DailyFeedStockReference
+  const nextQuantityKg = Math.max(0, stock.quantityKg + deltaKg)
+
+  await stockItemsRepository.upsertMany(organizationId, [{
+    id: row.id,
+    serverId: row.serverId ?? feedStockId,
+    data: {
+      ...stock,
+      quantityKg: nextQuantityKg,
+    },
+  }])
+
+  return {
+    ...stock,
+    quantityKg: nextQuantityKg,
+  }
+}
+
 export async function saveDailyRecordsToLocal(
   organizationId: string,
   records: DailyRecordDetail[],
@@ -159,6 +238,9 @@ export async function loadDailyRecordsFromLocal(
           date: new Date(serverLike.date),
           mortality: Number(serverLike.mortality ?? 0),
           feedKg: Number(serverLike.feedKg ?? 0),
+          dataSource: serverLike.dataSource ?? "MANUAL_KG",
+          feedBagEventId: serverLike.feedBagEventId ?? null,
+          estimationConfidence: serverLike.estimationConfidence ?? null,
           feedStockId: serverLike.feedStockId ?? null,
           feedStockName: serverLike.feedStockName ?? null,
           waterLiters: serverLike.waterLiters ?? null,
@@ -191,14 +273,21 @@ export async function loadPendingDailyRecordsFromLocal(
   const rows = await dailyRepository.getAll(organizationId)
   return rows
     .filter((row) => row.syncStatus !== "synced")
-    .filter((row) => isDailyPayload(row.data) && row.data.batchId === batchId)
+    .filter((row) => (
+      (isDailyPayload(row.data) && row.data.batchId === batchId) ||
+      (isDailyFeedBagPayload(row.data) && row.data.batchId === batchId)
+    ))
     .map((row) => ({
       id: row.localId,
-      date: (row.data as DailyLocalPayload).dateIso,
-      mortality: (row.data as DailyLocalPayload).mortality,
-      feedKg: (row.data as DailyLocalPayload).feedKg,
-      waterLiters: (row.data as DailyLocalPayload).waterLiters,
-      audioRecordUrl: (row.data as DailyLocalPayload).audioRecordUrl,
+      date: isDailyPayload(row.data)
+        ? row.data.dateIso
+        : (row.data as DailyFeedBagEventLocalPayload).startDateIso,
+      mortality: isDailyPayload(row.data) ? row.data.mortality : 0,
+      feedKg: isDailyPayload(row.data)
+        ? row.data.feedKg
+        : (row.data as DailyFeedBagEventLocalPayload).totalFeedKg,
+      waterLiters: isDailyPayload(row.data) ? row.data.waterLiters : undefined,
+      audioRecordUrl: isDailyPayload(row.data) ? row.data.audioRecordUrl : null,
       isOptimistic: true,
       syncStatus: row.syncStatus as "pending" | "failed" | "conflict",
       syncError: row.syncError ?? undefined,

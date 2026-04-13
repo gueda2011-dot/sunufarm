@@ -2,6 +2,7 @@
 
 import { createEggRecord } from "@/src/actions/eggs"
 import { createExpense } from "@/src/actions/expenses"
+import { createFeedBagEvent } from "@/src/actions/feed-bags"
 import { createPurchase } from "@/src/actions/purchases"
 import { createSale } from "@/src/actions/sales"
 import { createFeedMovement, createMedicineMovement } from "@/src/actions/stock"
@@ -98,6 +99,13 @@ async function replayCommand(command: OfflineSyncCommand) {
     }
     case "CREATE_EXPENSE":
       return createExpense(command.payload)
+    case "CREATE_FEED_BAG_EVENT":
+      return createFeedBagEvent({
+        ...(command.payload as Record<string, unknown>),
+        startDate: new Date((command.payload as { startDateIso: string }).startDateIso),
+        endDate: new Date((command.payload as { endDateIso: string }).endDateIso),
+        bagWeightKg: (command.payload as { totalFeedKg: number }).totalFeedKg,
+      })
     case "CREATE_VACCINATION":
       return createVaccination({
         ...(command.payload as Record<string, unknown>),

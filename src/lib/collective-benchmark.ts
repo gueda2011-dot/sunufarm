@@ -16,6 +16,7 @@
 
 import prisma from "@/src/lib/prisma"
 import { BatchType } from "@/src/generated/prisma/client"
+import { getAdjustedCurveForBatch } from "@/src/lib/feed-reference"
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -59,6 +60,16 @@ export interface CollectiveBenchmark {
   usedRegionCode: string | null
   usedBreedCode: string | null
   usedMonths: number[]
+
+  // Référence ajustée du lot courant (si le contexte permet de la calculer)
+  adjustedReference: {
+    ageDay: number
+    dailyFeedGPerBird: number | null
+    rawGeneticFeedGPerBird: number | null
+    source: "genetic" | "senegal" | "farm" | null
+    senegalProfileCode: string | null
+    curveVersion: string | null
+  } | null
 }
 
 interface BenchmarkContext {
@@ -66,6 +77,9 @@ interface BenchmarkContext {
   breedCode?: string | null
   regionCode?: string | null
   entryMonth?: number
+  batchId?: string
+  farmId?: string
+  ageDay?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +160,51 @@ function buildFromSnapshots(
     usedRegionCode: context.regionCode ?? null,
     usedBreedCode: context.breedCode ?? null,
     usedMonths: context.months,
+    adjustedReference: null,
+  }
+}
+
+async function resolveAdjustedReferenceContext(
+  context: BenchmarkContext,
+): Promise<CollectiveBenchmark["adjustedReference"]> {
+  if (
+    !context.batchId ||
+    !context.farmId ||
+    !context.breedCode ||
+    context.ageDay == null ||
+    (context.batchType !== BatchType.CHAIR && context.batchType !== BatchType.PONDEUSE)
+  ) {
+    return null
+  }
+
+  const { curve, senegalProfileCode, farmFactors } = await getAdjustedCurveForBatch(prisma, {
+    batchId: context.batchId,
+    farmId: context.farmId,
+    batchType: context.batchType,
+    breedCode: context.breedCode,
+    startAgeDay: context.ageDay,
+    endAgeDay: context.ageDay,
+  })
+
+  const point = curve[0]
+  if (!point) {
+    return {
+      ageDay: context.ageDay,
+      dailyFeedGPerBird: null,
+      rawGeneticFeedGPerBird: null,
+      source: null,
+      senegalProfileCode,
+      curveVersion: null,
+    }
+  }
+
+  return {
+    ageDay: context.ageDay,
+    dailyFeedGPerBird: point.dailyFeedGPerBird,
+    rawGeneticFeedGPerBird: point.rawGeneticFeedG,
+    source: farmFactors ? "farm" : senegalProfileCode !== "STANDARD_LOCAL" ? "senegal" : "genetic",
+    senegalProfileCode,
+    curveVersion: point.version,
   }
 }
 
@@ -161,6 +220,7 @@ export async function getCollectiveBenchmark(
   context: BenchmarkContext,
 ): Promise<CollectiveBenchmark | null> {
   const { batchType, breedCode, regionCode, entryMonth } = context
+  const adjustedReference = await resolveAdjustedReferenceContext(context)
 
   const months = entryMonth
     ? getAdjacentMonths(entryMonth, MAX_SEASON_LAG_MONTHS)
@@ -188,7 +248,10 @@ export async function getCollectiveBenchmark(
     })
 
     if (precise.length >= MIN_SAMPLE_PRECISE) {
-      return buildFromSnapshots(precise, "precise", { regionCode, breedCode, months })
+      return {
+        ...buildFromSnapshots(precise, "precise", { regionCode, breedCode, months }),
+        adjustedReference,
+      }
     }
   }
 
@@ -201,11 +264,14 @@ export async function getCollectiveBenchmark(
     })
 
     if (broad.length >= MIN_SAMPLE_BROAD) {
-      return buildFromSnapshots(broad, "broad", {
-        regionCode: null,
-        breedCode,
-        months: months,
-      })
+      return {
+        ...buildFromSnapshots(broad, "broad", {
+          regionCode: null,
+          breedCode,
+          months: months,
+        }),
+        adjustedReference,
+      }
     }
   }
 
@@ -217,11 +283,14 @@ export async function getCollectiveBenchmark(
   })
 
   if (typeOnly.length >= MIN_SAMPLE_BROAD) {
-    return buildFromSnapshots(typeOnly, "type_only", {
-      regionCode: null,
-      breedCode: null,
-      months: [],
-    })
+    return {
+      ...buildFromSnapshots(typeOnly, "type_only", {
+        regionCode: null,
+        breedCode: null,
+        months: [],
+      }),
+      adjustedReference,
+    }
   }
 
   return null

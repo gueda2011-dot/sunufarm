@@ -95,6 +95,9 @@ export interface DailyRecordDetail {
   date:           Date
   mortality:      number
   feedKg:         number
+  dataSource:     "MANUAL_KG" | "ESTIMATED_FROM_BAG" | "ADVANCED_SACS_PER_DAY"
+  feedBagEventId: string | null
+  estimationConfidence: "HIGH" | "MEDIUM" | "LOW" | null
   feedStockId:    string | null
   feedStockName:  string | null
   waterLiters:    number | null
@@ -136,6 +139,9 @@ const dailyRecordDetailSelect = {
   date:           true,
   mortality:      true,
   feedKg:         true,
+  dataSource:     true,
+  feedBagEventId: true,
+  estimationConfidence: true,
   waterLiters:    true,
   temperatureMin: true,
   temperatureMax: true,

@@ -9,9 +9,14 @@
  */
 
 export const KPI_THRESHOLDS = {
+  // Aucun verdict de performance avant cet age
+  PERFORMANCE_VERDICT_MIN_AGE_DAYS: 7,
+
   // Mortalité journalière (ratio 0–1)
-  MORTALITY_DAILY_WARNING_RATE:  0.005, // ≥ 0.5%/jour → warning
-  MORTALITY_DAILY_CRITICAL_RATE: 0.010, // ≥ 1.0%/jour → critical
+  MORTALITY_DAILY_WARNING_RATE_BROILER:  0.005, // ≥ 0.5%/jour → warning
+  MORTALITY_DAILY_CRITICAL_RATE_BROILER: 0.010, // ≥ 1.0%/jour → critical
+  MORTALITY_DAILY_WARNING_RATE_LAYER:    0.003, // ≥ 0.3%/jour → warning
+  MORTALITY_DAILY_CRITICAL_RATE_LAYER:   0.006, // ≥ 0.6%/jour → critical
 
   // Taux de ponte pondeuses (ratio 0–1)
   LAYING_RATE_WARNING_RATE:  0.70, // < 70% → warning

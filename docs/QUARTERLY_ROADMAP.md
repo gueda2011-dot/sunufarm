@@ -13,7 +13,7 @@ Elle sert a planifier les prochains blocs produit et tech de facon plus operatio
 - priorites reliees a `docs/MODULE_PRIORITIES.md`
 - arbitrage entre stabilite, valeur produit et capacite d'execution
 
-## Trimestre Actuel
+## Trimestre Actuel — Q2 2026
 
 ### Objectif principal
 
@@ -24,6 +24,17 @@ Stabiliser le coeur du produit et rendre l'execution equipe plus previsible.
 - fiabiliser encore `batches`, `daily-records`, `reports` et `subscriptions / payments`
 - garder les parcours critiques simples a rejouer en demo et en support
 - reduire les points de friction sur les exports et le pilotage admin
+
+### Livre ce trimestre
+
+- [x] Logique de maturite economique sur la vue Business (`getProfitabilityStatus`) : verdict "Cycle en demarrage" quand aucune vente n'existe, pour ne jamais afficher "non rentable" a tort en phase de demarrage — score global et couleur de carte adaptes en consequence
+- [x] Projection de marge finale basee sur le burn rate observe et le benchmark interne de lots similaires
+- [x] Refonte logique alimentaire Phase 1–4 (plan `c:\Users\pcpro\.claude\plans\swirling-plotting-lamport.md`) :
+  - [x] Phase 1 : schéma Prisma (FeedBagEvent, ZootechnicalCurvePoint, FarmAdjustmentProfile), seed courbes Cobb500/Ross308/ISA Brown/Lohmann Brown interpolées
+  - [x] Phase 2 : moteur reconstruction pondérée (CURVE_WEIGHTED), fonctions chair/pondeuse/dispatcher, farm-feed-adjustment (OBSERVING), server actions feed-bags, 25 tests unitaires
+  - [x] Phase 3A : diagnostics contextuels (libellés, seuil J7, qualité données), toggle sac/kg DailyForm, FeedReferencePanel graphe réel vs référence, offline support
+  - [x] Phase 3B : seuils KPI différenciés chair/pondeuse (kpi-thresholds.ts), garde PERFORMANCE_VERDICT_MIN_AGE_DAYS
+  - [x] Phase 4 : Lohmann Brown (71 points hebdo J7–J490), enrichissement BatchOutcomeSnapshot (curveVersion/senegalProfileUsed/farmAdjustmentStatus/pctEstimatedJ14/avgConfidenceJ14), features ML (pct_estime_j14, confiance_moyenne_j14), server actions FarmAdjustmentProfile (compute/activate/reset), UI FarmAdjustmentPanel
 
 ### Tech
 

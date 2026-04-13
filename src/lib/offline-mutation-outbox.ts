@@ -5,6 +5,7 @@ import { requestToPromise, withStores } from "@/src/lib/offline/db"
 import { OFFLINE_RESOURCE_KEYS } from "@/src/lib/offline-keys"
 import { OFFLINE_STORE_NAMES } from "@/src/lib/offline/schema"
 import {
+  adjustDailyFeedStockQuantityLocally,
   dailyRepository,
   eggProductionRepository,
   healthRepository,
@@ -41,6 +42,21 @@ export interface OfflineDailyQueuePayload {
   temperatureMax?: number
   humidity?: number
   audioRecordUrl?: string | null
+}
+
+export interface OfflineFeedBagEventQueuePayload {
+  clientMutationId: string
+  organizationId: string
+  batchId: string
+  feedStockId?: string
+  startDateIso: string
+  endDateIso: string
+  startAgeDay: number
+  endAgeDay: number
+  bagCount: number
+  bagWeightKg: number
+  totalFeedKg: number
+  notes?: string
 }
 
 export interface OfflineVaccinationQueuePayload {
@@ -159,6 +175,7 @@ export interface OfflinePurchaseQueuePayload {
 
 type OfflineQueuePayload =
   | OfflineDailyQueuePayload
+  | OfflineFeedBagEventQueuePayload
   | OfflineExpenseQueuePayload
   | OfflineVaccinationQueuePayload
   | OfflineTreatmentQueuePayload
@@ -170,6 +187,7 @@ type OfflineQueuePayload =
 
 export type OfflineQueueItemType =
   | "CREATE_DAILY_RECORD"
+  | "CREATE_FEED_BAG_EVENT"
   | "CREATE_EXPENSE"
   | "CREATE_VACCINATION"
   | "CREATE_TREATMENT"
@@ -233,6 +251,31 @@ function toDateKey(value: string) {
   return new Date(value).toISOString().slice(0, 10)
 }
 
+function isFeedBagEventPayload(value: unknown): value is OfflineFeedBagEventQueuePayload {
+  return typeof value === "object" && value !== null && "startDateIso" in value && "bagCount" in value
+}
+
+function extractDailyIdentity(payload: OfflineQueuePayload) {
+  if ("dateIso" in payload) {
+    return {
+      batchId: payload.batchId,
+      dateIso: payload.dateIso,
+    }
+  }
+
+  if (isFeedBagEventPayload(payload)) {
+    return {
+      batchId: payload.batchId,
+      dateIso: payload.startDateIso,
+    }
+  }
+
+  return {
+    batchId: undefined,
+    dateIso: undefined,
+  }
+}
+
 function buildDailyDraftStorageKey(organizationId: string, batchId: string, dateIso: string) {
   return `sunufarm:draft:daily:${organizationId}:${batchId}:${toDateKey(dateIso)}`
 }
@@ -266,9 +309,8 @@ async function clearOfflineShadow(scope: OfflineModuleScope, localId: string) {
 }
 
 async function purgeDailyIndexedDbArtifacts(command: NonNullable<Awaited<ReturnType<typeof getSyncCommand>>>) {
-  const payload = command.payload as Partial<OfflineDailyQueuePayload>
-  const batchId = payload.batchId
-  const dateIso = payload.dateIso
+  const payload = command.payload as OfflineQueuePayload
+  const { batchId, dateIso } = extractDailyIdentity(payload)
   const targetCacheKey = batchId ? OFFLINE_RESOURCE_KEYS.dailyRecords(batchId) : null
 
   return withStores(
@@ -348,10 +390,12 @@ async function purgeDailyIndexedDbArtifacts(command: NonNullable<Awaited<ReturnT
   )
 }
 
-async function clearDailyDraftArtifacts(payload: OfflineDailyQueuePayload) {
-  const dateIso = payload.dateIso
-  const formKey = buildDailyDraftFormKey(payload.organizationId, payload.batchId, dateIso)
-  const storageKey = buildDailyDraftStorageKey(payload.organizationId, payload.batchId, dateIso)
+async function clearDailyDraftArtifacts(payload: { organizationId: string } & OfflineQueuePayload) {
+  const { batchId, dateIso } = extractDailyIdentity(payload)
+  if (!batchId || !dateIso) return null
+
+  const formKey = buildDailyDraftFormKey(payload.organizationId, batchId, dateIso)
+  const storageKey = buildDailyDraftStorageKey(payload.organizationId, batchId, dateIso)
 
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(storageKey)
@@ -383,8 +427,8 @@ async function purgeDailyOfflineArtifacts(command: Awaited<ReturnType<typeof get
   const indexedDbPurge = await purgeDailyIndexedDbArtifacts(command)
 
   const draftArtifacts =
-    payload.organizationId && payload.batchId && payload.dateIso
-      ? await clearDailyDraftArtifacts(payload as OfflineDailyQueuePayload)
+    payload.organizationId
+      ? await clearDailyDraftArtifacts(payload as OfflineQueuePayload & { organizationId: string })
       : null
 
   return {
@@ -405,6 +449,10 @@ function buildQueueLabel(type: OfflineQueueItemType, payload: OfflineQueuePayloa
   switch (type) {
     case "CREATE_DAILY_RECORD":
       return `Saisie journaliere ${(payload as OfflineDailyQueuePayload).dateIso.slice(0, 10)}`
+    case "CREATE_FEED_BAG_EVENT": {
+      const bagPayload = payload as OfflineFeedBagEventQueuePayload
+      return `Mode sac ${bagPayload.startDateIso.slice(0, 10)}`
+    }
     case "CREATE_EXPENSE":
       return `Depense ${(payload as OfflineExpenseQueuePayload).description}`
     case "CREATE_VACCINATION":
@@ -427,6 +475,7 @@ function buildQueueLabel(type: OfflineQueueItemType, payload: OfflineQueuePayloa
 function buildQueueScope(type: OfflineQueueItemType): OfflineModuleScope {
   switch (type) {
     case "CREATE_DAILY_RECORD":
+    case "CREATE_FEED_BAG_EVENT":
       return "daily"
     case "CREATE_EXPENSE":
       return "expenses"
@@ -450,6 +499,21 @@ async function createLocalShadow(type: OfflineQueueItemType, payload: OfflineQue
     case "CREATE_DAILY_RECORD":
       await dailyRepository.createLocal({
         localId: (payload as OfflineDailyQueuePayload).clientMutationId,
+        organizationId: payload.organizationId,
+        label: buildQueueLabel(type, payload),
+        data: payload as unknown,
+      })
+      break
+    case "CREATE_FEED_BAG_EVENT":
+      if ((payload as OfflineFeedBagEventQueuePayload).feedStockId) {
+        await adjustDailyFeedStockQuantityLocally(
+          payload.organizationId,
+          (payload as OfflineFeedBagEventQueuePayload).feedStockId as string,
+          -(payload as OfflineFeedBagEventQueuePayload).totalFeedKg,
+        )
+      }
+      await dailyRepository.createLocal({
+        localId: (payload as OfflineFeedBagEventQueuePayload).clientMutationId,
         organizationId: payload.organizationId,
         label: buildQueueLabel(type, payload),
         data: payload as unknown,
@@ -593,6 +657,17 @@ export async function deleteOfflineDailyQueueItem(id: string) {
   // Errors here are logged but must not prevent phase 1 from taking effect.
   if (current) {
     try {
+      if (current.action === "CREATE_FEED_BAG_EVENT") {
+        const payload = current.payload as Partial<OfflineFeedBagEventQueuePayload>
+        if (payload.feedStockId && typeof payload.totalFeedKg === "number") {
+          await adjustDailyFeedStockQuantityLocally(
+            current.organizationId,
+            payload.feedStockId,
+            payload.totalFeedKg,
+          )
+        }
+      }
+
       if (current.scope === "daily") {
         // purgeDailyOfflineArtifacts also tries to delete from syncQueue (already done above,
         // so that inner delete is a harmless no-op) then cleans up daily entry, syncErrors,
@@ -653,6 +728,10 @@ export const retryOfflineQueueItem = retryOfflineDailyQueueItem
 
 export async function enqueueOfflineDailyRecord(payload: OfflineDailyQueuePayload) {
   return enqueueOfflineItem("CREATE_DAILY_RECORD", payload)
+}
+
+export async function enqueueOfflineFeedBagEvent(payload: OfflineFeedBagEventQueuePayload) {
+  return enqueueOfflineItem("CREATE_FEED_BAG_EVENT", payload)
 }
 
 export async function enqueueOfflineExpense(payload: OfflineExpenseQueuePayload) {

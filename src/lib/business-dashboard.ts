@@ -1,3 +1,4 @@
+import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
 import type { AlertLevel } from "@/src/lib/kpi"
 import type { BatchMarginProjection } from "@/src/lib/predictive-margin-rules"
 import type { BatchMortalityPrediction } from "@/src/lib/predictive-mortality-rules"
@@ -12,7 +13,11 @@ export interface BusinessBatchSource {
   number: string
   farmName: string
   buildingName: string
+  ageDay: number
   entryCount: number
+  manualFeedRecordCount: number
+  estimatedFeedRecordCount: number
+  totalFeedRecordCount: number
   observedRevenueFcfa: number
   observedTotalCostFcfa: number
   totalMortality: number
@@ -89,10 +94,13 @@ export interface BusinessDashboardViewModel {
     activeBatchCount: number
     atRiskBatchCount: number
     criticalStockCount: number
+    manualFeedSharePct: number | null
+    estimatedFeedSharePct: number | null
     marginVerdict: string
     riskVerdict: string
     stockVerdict: string
     mortalityVerdict: string
+    dataQualityVerdict: string
   }
   priority: {
     negativeMarginLots: BusinessPriorityLot[]
@@ -151,17 +159,60 @@ function compareBatches(a: BusinessBatchSource, b: BusinessBatchSource): number 
   return a.marginPrediction.projectedProfitFcfa - b.marginPrediction.projectedProfitFcfa
 }
 
-function buildMarginVerdict(totalMarginFcfa: number, atRiskBatchCount: number): string {
+export interface ProfitabilityStatus {
+  status: string
+  message: string
+  level: "info" | "warning" | "success" | "danger"
+}
+
+export function getProfitabilityStatus(params: {
+  revenue: number
+  expenses: number
+  margin: number
+}): ProfitabilityStatus {
+  const { revenue, margin } = params
+
+  if (revenue === 0) {
+    return {
+      status: "Cycle en demarrage",
+      message: "Premieres depenses enregistrees, en attente de ventes",
+      level: "warning",
+    }
+  }
+
+  if (margin > 0) {
+    return {
+      status: "Exploitation rentable",
+      message: "La marge est positive sur la periode",
+      level: "success",
+    }
+  }
+
+  return {
+    status: "Exploitation non rentable",
+    message: "Les charges depassent les revenus sur la periode",
+    level: "danger",
+  }
+}
+
+function buildMarginVerdict(totalRevenueFcfa: number, totalMarginFcfa: number, atRiskBatchCount: number): string {
+  if (totalRevenueFcfa === 0) return "Cycle en demarrage"
   if (totalMarginFcfa < 0) return "Exploitation non rentable"
   if (atRiskBatchCount >= 3) return "Marge sous pression"
   if (totalMarginFcfa < 100_000) return "Marge a consolider"
   return "Situation favorable"
 }
 
-function buildRiskVerdict(atRiskBatchCount: number): string {
+function buildRiskVerdict(atRiskBatchCount: number, youngBatchCount: number, matureBatchCount: number): string {
+  if (matureBatchCount === 0 && youngBatchCount > 0) {
+    return `Lecture encore trop jeune avant J${KPI_THRESHOLDS.PERFORMANCE_VERDICT_MIN_AGE_DAYS}`
+  }
   if (atRiskBatchCount >= 4) return `${atRiskBatchCount} lots menacent la performance`
   if (atRiskBatchCount >= 2) return `${atRiskBatchCount} lots demandent une action rapide`
   if (atRiskBatchCount === 1) return "1 lot prioritaire a traiter"
+  if (youngBatchCount > 0) {
+    return `Lecture stable, avec ${youngBatchCount} lot${youngBatchCount > 1 ? "s" : ""} encore avant J${KPI_THRESHOLDS.PERFORMANCE_VERDICT_MIN_AGE_DAYS}`
+  }
   return "Aucun lot en alerte forte"
 }
 
@@ -171,28 +222,46 @@ function buildStockVerdict(criticalStockCount: number): string {
   return "Aucune rupture critique"
 }
 
-function buildMortalityVerdict(globalMortalityRate: number | null): string {
+function buildMortalityVerdict(
+  globalMortalityRate: number | null,
+  youngBatchCount: number,
+  matureBatchCount: number,
+): string {
+  if (matureBatchCount === 0 && youngBatchCount > 0) {
+    return `Lecture sanitaire encore precoce avant J${KPI_THRESHOLDS.PERFORMANCE_VERDICT_MIN_AGE_DAYS}`
+  }
   if (globalMortalityRate == null) return "Lecture sanitaire incomplete"
   if (globalMortalityRate >= 3) return "Pression sanitaire elevee"
   if (globalMortalityRate >= 1.5) return "Sante a surveiller"
+  if (youngBatchCount > 0) return "Situation sanitaire plutot saine, avec des lots encore jeunes"
   return "Situation sanitaire plutot saine"
 }
 
+function buildDataQualityVerdict(manualFeedSharePct: number | null): string {
+  if (manualFeedSharePct == null) return "Lecture alimentaire incomplete"
+  if (manualFeedSharePct >= 70) return "Base terrain solide"
+  if (manualFeedSharePct >= 40) return "Base mixte manuel + estimation"
+  return "Base surtout reconstruite"
+}
+
 function buildGlobalStatus(input: {
+  totalRevenueFcfa: number
   totalMarginFcfa: number
   atRiskBatchCount: number
   criticalStockCount: number
   mortalityRiskCount: number
 }): BusinessDashboardViewModel["globalStatus"] {
+  const noRevenue = input.totalRevenueFcfa === 0
+
   let score = 100
   score -= input.atRiskBatchCount * 10
   score -= input.criticalStockCount * 15
   score -= input.mortalityRiskCount * 8
-  if (input.totalMarginFcfa < 0) score -= 25
-  else if (input.totalMarginFcfa < 100_000) score -= 10
+  if (!noRevenue && input.totalMarginFcfa < 0) score -= 25
+  else if (!noRevenue && input.totalMarginFcfa < 100_000) score -= 10
   score = Math.max(0, Math.min(100, score))
 
-  if (input.totalMarginFcfa < 0 || input.criticalStockCount >= 2 || input.atRiskBatchCount >= 4) {
+  if ((!noRevenue && input.totalMarginFcfa < 0) || input.criticalStockCount >= 2 || input.atRiskBatchCount >= 4) {
     return {
       level: "critical",
       label: "Situation critique",
@@ -333,10 +402,19 @@ export function buildBusinessDashboardViewModel(input: {
   const atRiskBatchCount = input.batches.filter((batch) => (
     batch.marginPrediction.alertLevel !== "ok" || batch.mortalityPrediction.alertLevel !== "ok"
   )).length
+  const totalManualFeedRecords = input.batches.reduce((sum, batch) => sum + batch.manualFeedRecordCount, 0)
+  const totalEstimatedFeedRecords = input.batches.reduce((sum, batch) => sum + batch.estimatedFeedRecordCount, 0)
+  const totalFeedRecords = input.batches.reduce((sum, batch) => sum + batch.totalFeedRecordCount, 0)
+  const youngBatchCount = input.batches.filter((batch) => (
+    batch.ageDay < KPI_THRESHOLDS.PERFORMANCE_VERDICT_MIN_AGE_DAYS
+  )).length
+  const matureBatchCount = input.batches.length - youngBatchCount
   const mortalityRiskCount = input.batches.filter((batch) => (
     batch.mortalityPrediction.alertLevel !== "ok"
   )).length
   const globalMortalityRate = totalEntryCount > 0 ? round((totalMortality / totalEntryCount) * 100) : null
+  const manualFeedSharePct = totalFeedRecords > 0 ? round((totalManualFeedRecords / totalFeedRecords) * 100, 0) : null
+  const estimatedFeedSharePct = totalFeedRecords > 0 ? round((totalEstimatedFeedRecords / totalFeedRecords) * 100, 0) : null
 
   const criticalStockItems = input.stockItems
     .filter((item) => item.prediction.alertLevel === "critical")
@@ -399,6 +477,7 @@ export function buildBusinessDashboardViewModel(input: {
 
   return {
     globalStatus: buildGlobalStatus({
+      totalRevenueFcfa,
       totalMarginFcfa,
       atRiskBatchCount,
       criticalStockCount: criticalStockItems.length,
@@ -412,10 +491,13 @@ export function buildBusinessDashboardViewModel(input: {
       activeBatchCount: input.batches.length,
       atRiskBatchCount,
       criticalStockCount: criticalStockItems.length,
-      marginVerdict: buildMarginVerdict(totalMarginFcfa, atRiskBatchCount),
-      riskVerdict: buildRiskVerdict(atRiskBatchCount),
+      manualFeedSharePct,
+      estimatedFeedSharePct,
+      marginVerdict: buildMarginVerdict(totalRevenueFcfa, totalMarginFcfa, atRiskBatchCount),
+      riskVerdict: buildRiskVerdict(atRiskBatchCount, youngBatchCount, matureBatchCount),
       stockVerdict: buildStockVerdict(criticalStockItems.length),
-      mortalityVerdict: buildMortalityVerdict(globalMortalityRate),
+      mortalityVerdict: buildMortalityVerdict(globalMortalityRate, youngBatchCount, matureBatchCount),
+      dataQualityVerdict: buildDataQualityVerdict(manualFeedSharePct),
     },
     priority: {
       negativeMarginLots,

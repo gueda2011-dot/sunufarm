@@ -1,4 +1,5 @@
 import { KPI_THRESHOLDS } from "@/src/constants/kpi-thresholds"
+import { BatchType } from "@/src/generated/prisma/client"
 import type { AlertLevel } from "@/src/lib/kpi"
 import type { BatchMortalityFeatures } from "@/src/lib/predictive-mortality-features"
 
@@ -44,16 +45,53 @@ function getAlertLevel(score: number): AlertLevel {
   return "ok"
 }
 
+function getMortalityThresholds(batchType: BatchType) {
+  if (batchType === BatchType.PONDEUSE) {
+    return {
+      warning: KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE_LAYER,
+      critical: KPI_THRESHOLDS.MORTALITY_DAILY_CRITICAL_RATE_LAYER,
+    }
+  }
+
+  return {
+    warning: KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE_BROILER,
+    critical: KPI_THRESHOLDS.MORTALITY_DAILY_CRITICAL_RATE_BROILER,
+  }
+}
+
 export function predictBatchMortalityRisk(
   features: BatchMortalityFeatures,
 ): BatchMortalityPrediction {
+  if (features.ageDay < KPI_THRESHOLDS.PERFORMANCE_VERDICT_MIN_AGE_DAYS) {
+    return {
+      batchId: features.batchId,
+      riskScore: 0,
+      alertLevel: "ok",
+      label: "Observation initiale",
+      summary: `Lecture sanitaire en construction avant J${KPI_THRESHOLDS.PERFORMANCE_VERDICT_MIN_AGE_DAYS}.`,
+      reasons: [],
+      metrics: {
+        recentMortality: features.recentMortality,
+        previousMortality: features.previousMortality,
+        recentMortalityRatePct: round(features.recentMortalityRate * 100),
+        previousMortalityRatePct: round(features.previousMortalityRate * 100),
+        recentAverageDailyMortalityRatePct: round(features.recentAverageDailyMortalityRate * 100),
+        missingDailyRecords: features.missingDailyRecords,
+        activeTreatments: features.activeTreatments,
+        overdueVaccines: features.overdueVaccines,
+        dueVaccines: features.dueVaccines,
+      },
+    }
+  }
+
   let riskScore = 0
   const reasons: string[] = []
+  const thresholds = getMortalityThresholds(features.batchType)
 
-  if (features.recentAverageDailyMortalityRate >= KPI_THRESHOLDS.MORTALITY_DAILY_CRITICAL_RATE) {
+  if (features.recentAverageDailyMortalityRate >= thresholds.critical) {
     riskScore += 40
     reasons.push(`mortalite moyenne recente elevee (${round(features.recentAverageDailyMortalityRate * 100)}%/jour)`)
-  } else if (features.recentAverageDailyMortalityRate >= KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE) {
+  } else if (features.recentAverageDailyMortalityRate >= thresholds.warning) {
     riskScore += 25
     reasons.push(`mortalite recente a surveiller (${round(features.recentAverageDailyMortalityRate * 100)}%/jour)`)
   }

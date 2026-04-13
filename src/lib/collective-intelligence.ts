@@ -53,6 +53,13 @@ export interface BatchOutcomeSnapshotInput {
   totalFeedKg: number | null
   feedKgPerBird: number | null
   avgFinalWeightG: number | null
+
+  // Phase 4 — traçabilité référentiel et qualité données ML
+  curveVersion: string | null
+  senegalProfileUsed: string | null
+  farmAdjustmentStatus: string | null
+  pctEstimatedJ14: number | null
+  avgConfidenceJ14: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +111,57 @@ export function buildBatchOutcomeSnapshotFingerprint(
 }
 
 // ---------------------------------------------------------------------------
+// Qualité des données alimentation J1–J14 (Phase 4)
+// ---------------------------------------------------------------------------
+
+const CONFIDENCE_SCORE = { HIGH: 1.0, MEDIUM: 0.5, LOW: 0.0 } as const
+
+export interface J14DataQualityInput {
+  entryDate: Date
+  dailyRecords: Array<{
+    date: Date
+    dataSource?: string | null
+    estimationConfidence?: string | null
+  }>
+}
+
+export interface J14DataQualityResult {
+  /** % de jours J1–J14 avec dataSource = ESTIMATED_FROM_BAG (null si aucun record J14) */
+  pctEstimatedJ14: number | null
+  /** Confiance moyenne J1–J14 : HIGH=1.0, MEDIUM=0.5, LOW=0.0, MANUAL_KG=1.0 (null si aucun record J14) */
+  avgConfidenceJ14: number | null
+}
+
+export function computeJ14DataQuality(input: J14DataQualityInput): J14DataQualityResult {
+  const j14Cutoff = new Date(input.entryDate)
+  j14Cutoff.setUTCDate(j14Cutoff.getUTCDate() + 14)
+  const j14Records = input.dailyRecords.filter((r) => new Date(r.date) < j14Cutoff)
+
+  if (j14Records.length === 0) {
+    return { pctEstimatedJ14: null, avgConfidenceJ14: null }
+  }
+
+  const estimatedCount = j14Records.filter(
+    (r) => r.dataSource === "ESTIMATED_FROM_BAG"
+  ).length
+  const pctEstimatedJ14 = roundTo((estimatedCount / j14Records.length) * 100, 1)
+
+  const confidenceValues = j14Records
+    .filter((r) => r.estimationConfidence !== null && r.estimationConfidence !== undefined)
+    .map((r) => CONFIDENCE_SCORE[r.estimationConfidence as keyof typeof CONFIDENCE_SCORE] ?? 1.0)
+  // Records without estimationConfidence are MANUAL_KG → confidence = 1.0
+  const manualCount = j14Records.length - confidenceValues.length
+  const allConfidenceValues = [
+    ...confidenceValues,
+    ...Array<number>(manualCount).fill(1.0),
+  ]
+  const avg = average(allConfidenceValues)
+  const avgConfidenceJ14 = avg !== null ? roundTo(avg, 3) : null
+
+  return { pctEstimatedJ14, avgConfidenceJ14 }
+}
+
+// ---------------------------------------------------------------------------
 // Collecte des données brutes du lot
 // ---------------------------------------------------------------------------
 
@@ -119,6 +177,7 @@ async function fetchBatchRawData(batchId: string, organizationId: string) {
     saleItems,
     expenses,
     lastWeightRecord,
+    latestFeedBagEvent,
   ] = await Promise.all([
     // Lot + contexte bâtiment/ferme/race
     prisma.batch.findFirst({
@@ -146,7 +205,7 @@ async function fetchBatchRawData(batchId: string, organizationId: string) {
       },
     }),
 
-    // Saisies journalières complètes (météo + mortalité)
+    // Saisies journalières complètes (météo + mortalité + source donnée Phase 4)
     prisma.dailyRecord.findMany({
       where: { batchId, organizationId },
       select: {
@@ -156,6 +215,8 @@ async function fetchBatchRawData(batchId: string, organizationId: string) {
         temperatureMax: true,
         humidity: true,
         avgWeightG: true,
+        dataSource: true,
+        estimationConfidence: true,
       },
       orderBy: { date: "asc" },
     }),
@@ -213,7 +274,34 @@ async function fetchBatchRawData(batchId: string, organizationId: string) {
       orderBy: { date: "desc" },
       select: { avgWeightG: true },
     }),
+
+    // Phase 4 — version de courbe utilisée (depuis les FeedBagEvents)
+    prisma.feedBagEvent.findFirst({
+      where: { batchId, organizationId, curveVersion: { not: null } },
+      orderBy: { createdAt: "desc" },
+      select: { curveVersion: true },
+    }),
   ])
+
+  // Phase 4 — profil Sénégal + statut d'ajustement ferme
+  // On les charge séparément car ils nécessitent batch pour avoir farmId
+  const batchWithFarm = await prisma.batch.findFirst({
+    where: { id: batchId, organizationId },
+    select: {
+      building: {
+        select: {
+          farm: {
+            select: {
+              senegalProfileCode: true,
+              farmAdjustmentProfile: {
+                select: { status: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
 
   return {
     batch,
@@ -226,6 +314,9 @@ async function fetchBatchRawData(batchId: string, organizationId: string) {
     saleItems,
     expenses,
     lastWeightRecord,
+    latestFeedBagEvent,
+    senegalProfileCode: batchWithFarm?.building.farm.senegalProfileCode ?? null,
+    farmAdjustmentStatus: batchWithFarm?.building.farm.farmAdjustmentProfile?.status ?? null,
   }
 }
 
@@ -239,7 +330,8 @@ function computeSnapshotInput(
 ): BatchOutcomeSnapshotInput | null {
   const { batch, dailyRecords, mortalityAgg, feedAgg,
     treatmentCount, vaccinationRecords,
-    saleItems, expenses, lastWeightRecord } = raw
+    saleItems, expenses, lastWeightRecord,
+    latestFeedBagEvent, senegalProfileCode, farmAdjustmentStatus } = raw
 
   if (!batch) return null
 
@@ -329,6 +421,12 @@ function computeSnapshotInput(
       ? roundTo(totalFeedKg / opSnapshot.liveCount, 2)
       : null
 
+  // Phase 4 — qualité des données J1–J14
+  const { pctEstimatedJ14, avgConfidenceJ14 } = computeJ14DataQuality({
+    entryDate,
+    dailyRecords,
+  })
+
   return {
     sourceFingerprint: options.sourceFingerprint,
     batchType: batch.type,
@@ -354,6 +452,12 @@ function computeSnapshotInput(
     totalFeedKg,
     feedKgPerBird,
     avgFinalWeightG: lastWeightRecord?.avgWeightG ?? null,
+    // Phase 4 — traçabilité référentiel et qualité données ML
+    curveVersion: latestFeedBagEvent?.curveVersion ?? null,
+    senegalProfileUsed: senegalProfileCode ?? null,
+    farmAdjustmentStatus: farmAdjustmentStatus ?? null,
+    pctEstimatedJ14,
+    avgConfidenceJ14,
   }
 }
 

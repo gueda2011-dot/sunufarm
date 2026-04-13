@@ -15,6 +15,7 @@ import {
   UserRole,
 } from "../src/generated/prisma"
 import { ensureSenegalBreedCatalog } from "../src/lib/breed-catalog"
+import { ensureZootechnicalCurves } from "./seeds/zootechnical-curves"
 
 const adapter = new PrismaPg({
   connectionString: process.env.SUNUFARM_DATABASE_URL,
@@ -79,6 +80,7 @@ async function clearAll() {
 
 async function createReferenceData() {
   await ensureSenegalBreedCatalog(prisma)
+  await ensureZootechnicalCurves(prisma)
 
   const species = await prisma.species.findUniqueOrThrow({
     where: { code: "POULET" },

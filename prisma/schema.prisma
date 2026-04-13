@@ -163,6 +163,64 @@ enum SubscriptionPaymentStatus {
 }
 
 // =============================================================================
+// ENUMS — LOGIQUE ALIMENTAIRE (Phase 1 refonte alimentation)
+// =============================================================================
+
+// Source de la donnée de consommation journalière
+enum FeedDataSource {
+  MANUAL_KG              // saisie directe kg/jour (mode existant)
+  ESTIMATED_FROM_BAG     // reconstruit depuis FeedBagEvent via moteur pondéré
+  ADVANCED_SACS_PER_DAY  // mode avancé : sacs/jour (grandes fermes)
+}
+
+// Niveau de confiance de l'estimation
+enum ConfidenceLevel {
+  HIGH    // durée ≤ 7j ET cohérence avec référence ≤ 15%
+  MEDIUM  // durée 8-14j OU écart 15-30% avec référence
+  LOW     // durée > 14j OU écart > 30% OU courbe de mauvaise qualité
+}
+
+// Méthode de distribution du poids du sac sur la période
+enum FeedEstimationMethod {
+  LINEAR         // répartition plate — fallback si pas de courbe disponible
+  CURVE_WEIGHTED // pondération au prorata de la courbe zootechnique
+}
+
+// Type de source pour les courbes zootechniques
+enum ZootechnicalSourceType {
+  GENETIC_OFFICIAL  // tables constructeur publiées (Cobb, Ross, ISA, Lohmann...)
+  SENEGAL_ADJUSTED  // coefficients appliqués pour le contexte sénégalais
+  FARM_DERIVED      // calculé depuis l'historique réel de la ferme
+}
+
+// Granularité native des données sources
+enum CurveGranularity {
+  DAILY                // données natives jour par jour
+  WEEKLY_INTERPOLATED  // agrégats hebdomadaires interpolés en journalier
+}
+
+// Méthode d'interpolation utilisée
+enum InterpolationMethod {
+  LINEAR        // interpolation linéaire entre deux points hebdomadaires
+  CUBIC_SPLINE  // spline cubique (plus fidèle à la biologie — Phase 2+)
+}
+
+// Niveau de qualité du point de courbe
+enum CurveQualityLevel {
+  HIGH       // données constructeur officielles, interpolation fidèle
+  MEDIUM     // données partielles ou approximées
+  LOW        // estimation grossière, ne pas utiliser pour audit
+  ESTIMATED  // générée algorithmiquement sans source primaire
+}
+
+// Statut de l'ajustement ferme (progression OBSERVING → SUGGESTED → ACTIVE)
+enum FarmAdjustmentStatus {
+  OBSERVING  // l'app observe et calcule les écarts, n'applique rien
+  SUGGESTED  // l'app a calculé un facteur plausible et le propose
+  ACTIVE     // l'utilisateur a validé, l'ajustement est appliqué aux calculs
+}
+
+// =============================================================================
 // RÉFÉRENTIELS GLOBAUX (partagés entre toutes les organisations)
 // =============================================================================
 
@@ -328,6 +386,8 @@ model Organization {
   paymentTransactions  PaymentTransaction[]
   aiBatchAnalyses      AIBatchAnalysis[]
   formDrafts           FormDraft[]
+  feedBagEvents        FeedBagEvent[]
+  farmAdjustmentProfiles FarmAdjustmentProfile[]
 
   @@index([slug])
 }
@@ -522,11 +582,16 @@ model Farm {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization   Organization    @relation(fields: [organizationId], references: [id])
-  buildings      Building[]
-  feedStocks     FeedStock[]
-  medicineStocks MedicineStock[]
-  employees      Employee[]
+  // Profil Sénégal associé à la ferme (null = STANDARD_LOCAL par défaut)
+  // Valeurs : "DIFFICILE" | "STANDARD_LOCAL" | "BON_NIVEAU"
+  senegalProfileCode String? // référence aux constantes src/constants/senegal-profiles.ts
+
+  organization         Organization         @relation(fields: [organizationId], references: [id])
+  buildings            Building[]
+  feedStocks           FeedStock[]
+  medicineStocks       MedicineStock[]
+  employees            Employee[]
+  farmAdjustmentProfile FarmAdjustmentProfile?
 
   @@index([organizationId])
 }
@@ -583,6 +648,10 @@ model Batch {
   closedAt    DateTime?
   closeReason String?
 
+  // Override du profil Sénégal pour ce lot spécifique (null = hérite de la ferme)
+  // Valeurs : "DIFFICILE" | "STANDARD_LOCAL" | "BON_NIVEAU"
+  senegalProfileOverride String?
+
   notes     String?
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -600,6 +669,7 @@ model Batch {
   expenses           Expense[]
   saleItems          SaleItem[]
   aiBatchAnalyses    AIBatchAnalysis[]
+  feedBagEvents      FeedBagEvent[]
 
   // Le numéro SF-YYYY-NNN est unique au sein d'une organisation
   @@unique([number, organizationId])
@@ -638,11 +708,20 @@ model DailyRecord {
   recordedById String? // userId de la personne qui a saisi
   lockedAt     DateTime? // verrouillé automatiquement après J+1 minuit
 
+  // ==========================================================================
+  // Traçabilité de la source alimentaire (Phase 1 — refonte alimentation)
+  // Champs additifs : valeur par défaut pour compatibilité avec l'existant
+  // ==========================================================================
+  dataSource           FeedDataSource  @default(MANUAL_KG)
+  feedBagEventId       String? // FK vers FeedBagEvent si dataSource = ESTIMATED_FROM_BAG
+  estimationConfidence ConfidenceLevel? // null si MANUAL_KG
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   batch            Batch             @relation(fields: [batchId], references: [id])
   mortalityRecords MortalityRecord[]
+  feedBagEvent     FeedBagEvent?     @relation(fields: [feedBagEventId], references: [id], onDelete: SetNull)
 
   // Contrainte métier : 1 seule saisie par lot et par jour
   @@unique([batchId, date])
@@ -836,6 +915,7 @@ model FeedStock {
   farm      Farm           @relation(fields: [farmId], references: [id])
   feedType  FeedType       @relation(fields: [feedTypeId], references: [id])
   movements FeedMovement[]
+  bagEvents FeedBagEvent[]
 
   @@index([farmId])
   @@index([organizationId])
@@ -1360,6 +1440,15 @@ model BatchOutcomeSnapshot {
   feedKgPerBird  Float? // FCR partiel : aliment/sujet vivant
   avgFinalWeightG Int? // poids moyen à la vente
 
+  // Traçabilité référentiel zootechnique (Phase 4)
+  curveVersion         String? // version ZootechnicalCurvePoint utilisée lors du snapshot ("2024-01")
+  senegalProfileUsed   String? // profil Sénégal actif au moment du snapshot ("STANDARD_LOCAL")
+  farmAdjustmentStatus String? // statut FarmAdjustmentProfile ("OBSERVING" | "SUGGESTED" | "ACTIVE")
+
+  // Qualité des données d'entrée J1–J14 (Phase 4 — features ML)
+  pctEstimatedJ14  Float? // % de jours J1–J14 avec dataSource = ESTIMATED_FROM_BAG
+  avgConfidenceJ14 Float? // confiance moyenne J1–J14 (HIGH=1.0, MEDIUM=0.5, LOW=0.0)
+
   // Métadonnées
   dataVersion Int      @default(1)
   createdAt   DateTime @default(now())
@@ -1460,4 +1549,171 @@ model AnalyticsEvent {
   @@index([organizationId, event, createdAt])
   @@index([userId, event, createdAt])
   @@map("analytics_events")
+}
+
+// =============================================================================
+// ALIMENTATION — ÉVÉNEMENTS SACS (Phase 1 refonte alimentation)
+// =============================================================================
+
+/**
+ * Enregistrement d'un sac d'aliment utilisé sur un lot.
+ *
+ * Mode principal terrain : l'éleveur déclare qu'un sac de N kg a été ouvert
+ * à startDate et terminé à endDate. Le moteur de reconstruction répartit les
+ * kg au prorata de la courbe zootechnique de référence (ou linéairement en
+ * fallback), et génère les DailyRecord correspondants avec dataSource = ESTIMATED_FROM_BAG.
+ *
+ * Règle de priorité : si un DailyRecord MANUAL_KG existe pour la même date,
+ * il n'est JAMAIS écrasé — la saisie manuelle prime toujours.
+ *
+ * Idempotence offline : clientMutationId garantit la déduplication.
+ */
+model FeedBagEvent {
+  id               String    @id @default(cuid())
+  organizationId   String
+  batchId          String
+  feedStockId      String? // lien vers le stock d'aliment source (optionnel)
+  clientMutationId String?   @unique // idempotence offline
+
+  bagWeightKg Float    // poids réel du sac en kg (ex: 50)
+  startDate   DateTime @db.Date // date d'ouverture du sac
+  endDate     DateTime? @db.Date // date de fin (null = sac en cours)
+  startAgeDay Int      // âge du lot en jours à l'ouverture du sac
+  endAgeDay   Int?     // âge du lot en jours à la fermeture (null si en cours)
+
+  // Méthode de reconstruction utilisée pour générer les DailyRecord
+  estimationMethod FeedEstimationMethod @default(CURVE_WEIGHTED)
+  // Version de courbe ZootechnicalCurvePoint utilisée lors de la reconstruction
+  curveVersion     String? // ex: "2024-01" — pour audit trail
+
+  notes        String?
+  recordedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  batch        Batch         @relation(fields: [batchId], references: [id])
+  feedStock    FeedStock?    @relation(fields: [feedStockId], references: [id], onDelete: SetNull)
+  dailyRecords DailyRecord[] // les DailyRecord générés depuis ce sac
+
+  @@index([batchId])
+  @@index([organizationId])
+  @@index([startDate])
+}
+
+// =============================================================================
+// RÉFÉRENTIEL ZOOTECHNIQUE (Phase 1 refonte alimentation)
+// =============================================================================
+
+/**
+ * Courbes de référence zootechnique par souche, type de lot et jour d'âge.
+ *
+ * Sources V1 :
+ *   - Cobb 500 chair : Cobb 500 Broiler Performance & Nutrition Supplement 2022
+ *   - ISA Brown pondeuse : ISA Management Guide 2021
+ *   - Ross 308 chair : Ross 308 Broiler Nutrition Specifications 2022
+ *
+ * Granularité source : hebdomadaire → interpolé en journalier (LINEAR en V1).
+ *
+ * Versioning :
+ *   - isActive = true → version active pour les calculs
+ *   - Toute mise à jour crée une nouvelle version (isActive = true),
+ *     l'ancienne passe à isActive = false — jamais de DELETE.
+ *   - La contrainte @@unique([breedCode, batchType, ageDay, version]) garantit
+ *     qu'une seule valeur existe par (souche, type, jour, version).
+ *
+ * Niveau d'ajustement :
+ *   - GENETIC_OFFICIAL : tables constructeur brutes (source = tables officielles)
+ *   - SENEGAL_ADJUSTED : coefficients profil Sénégal appliqués sur GENETIC_OFFICIAL
+ *   - FARM_DERIVED     : calculé depuis historique réel de la ferme (Phase 4)
+ */
+model ZootechnicalCurvePoint {
+  id        String    @id @default(cuid())
+  breedCode String    // "COBB500", "ROSS308", "ISA_BROWN", "LOHMANN_BROWN", "HY_LINE_BROWN"
+  batchType BatchType // CHAIR | PONDEUSE
+
+  ageDay Int // jour d'âge (1–42 pour chair, 1–560 pour pondeuse)
+
+  // Données chair (g/oiseau — null pour les pondeuses)
+  dailyFeedGPerBird Float? // consommation journalière g/oiseau/jour
+  cumulativeFeedG   Float? // consommation cumulée depuis J1 g/oiseau
+  bodyWeightG       Float? // poids vif théorique en grammes
+
+  // Données pondeuse (null pour les chairs)
+  layingRatePct   Float? // taux de ponte %
+  eggMassGPerBird Float? // masse oeuf produite g/oiseau/jour
+  feedPerEggG     Float? // indice de consommation par oeuf (g aliment / g oeuf)
+
+  // Traçabilité — OBLIGATOIRE pour tout point de courbe
+  version             String                 // ex: "2024-01" — SemVer-like ou date
+  sourceType          ZootechnicalSourceType // GENETIC_OFFICIAL | SENEGAL_ADJUSTED | FARM_DERIVED
+  sourceLabel         String                 // ex: "Cobb 500 Performance Guide 2022"
+  sourceUrl           String?                // lien vers le document source si disponible
+  granularity         CurveGranularity       // DAILY | WEEKLY_INTERPOLATED
+  interpolationMethod InterpolationMethod?   // null si données natives journalières
+  qualityLevel        CurveQualityLevel      // HIGH | MEDIUM | LOW | ESTIMATED
+  notes               String?                // hypothèses, trous documentés, anomalies
+
+  isActive  Boolean  @default(true) // false = version archivée, non utilisée dans les calculs
+  createdAt DateTime @default(now())
+
+  // Un seul point par (souche, type, jour, version)
+  @@unique([breedCode, batchType, ageDay, version])
+  // Index de requête principale : récupérer la courbe active pour une souche
+  @@index([breedCode, batchType, isActive])
+  @@index([batchType, ageDay])
+}
+
+// =============================================================================
+// AJUSTEMENT FERME — APPRENTISSAGE PROGRESSIF (Phase 1 refonte alimentation)
+// =============================================================================
+
+/**
+ * Profil d'ajustement spécifique à une ferme, calculé depuis son historique réel.
+ *
+ * Progression à 3 états :
+ *   OBSERVING → l'app observe les écarts mais n'applique rien aux calculs
+ *   SUGGESTED → l'app a calculé un facteur plausible et le propose au manager
+ *   ACTIVE    → le manager a validé, les facteurs sont appliqués aux calculs
+ *
+ * Règles de transition :
+ *   OBSERVING → SUGGESTED : automatique si basedOnBatchCount >= minBatchesForSuggestion
+ *                            ET écart > 5% vs profil Sénégal actif
+ *   SUGGESTED → ACTIVE    : action explicite manager/owner uniquement
+ *   ACTIVE    → OBSERVING : reset manuel OU divergence forte des lots suivants
+ *
+ * Les facteurs sont des multiplicateurs appliqués sur la référence Sénégal :
+ *   référence_utile = génétique × profil_sénégal × facteur_ferme (si ACTIVE)
+ */
+model FarmAdjustmentProfile {
+  id             String               @id @default(cuid())
+  organizationId String
+  farmId         String               @unique // 1 profil par ferme
+
+  status FarmAdjustmentStatus @default(OBSERVING)
+
+  // Facteurs calculés depuis BatchOutcomeSnapshot (null si status = OBSERVING)
+  weightFactor Float? // ex: 0.86 — ratio poids réel / poids génétique
+  feedFactor   Float? // ratio consommation réelle / consommation génétique
+  fcrFactor    Float? // ratio FCR réel / FCR génétique
+  layingFactor Float? // ratio taux ponte réel / taux génétique (pondeuse)
+
+  // Méta-données de confiance du calcul
+  basedOnBatchCount       Int @default(0) // nombre de lots utilisés pour le calcul
+  basedOnPeriodMonths     Int? // fenêtre temporelle analysée en mois
+  minBatchesForSuggestion Int @default(3) // seuil avant de proposer un ajustement
+
+  // Audit
+  calculatedAt      DateTime?
+  validatedAt       DateTime?
+  validatedByUserId String?
+  notes             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  farm         Farm         @relation(fields: [farmId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
 }

@@ -16,6 +16,7 @@ export interface BatchMortalityFeatureInput {
 
 export interface BatchMortalityFeatures {
   batchId: string
+  batchType: BatchType
   ageDay: number
   recentWindowDays: number
   previousWindowDays: number
@@ -104,6 +105,7 @@ export function computeBatchMortalityFeatures(
 
   return {
     batchId: input.batchId,
+    batchType: input.batchType,
     ageDay,
     recentWindowDays,
     previousWindowDays,

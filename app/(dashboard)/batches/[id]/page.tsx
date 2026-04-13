@@ -29,11 +29,13 @@ import { FREE_HISTORY_LIMIT } from "@/src/lib/entitlements"
 import { getPremiumSurfaceCopy } from "@/src/lib/premium-surface-copy"
 import { track } from "@/src/lib/analytics"
 import prisma from "@/src/lib/prisma"
+import { getAdjustedCurveForBatch } from "@/src/lib/feed-reference"
 import { BatchHeader } from "./_components/BatchHeader"
 import { BatchMarginProjectionCard } from "./_components/BatchMarginProjectionCard"
 import { BatchMortalityPredictionCard } from "./_components/BatchMortalityPredictionCard"
 import { BatchAIAnalysisCard } from "./_components/BatchAIAnalysisCard"
 import { BatchKpis } from "./_components/BatchKpis"
+import { FeedReferencePanel, type FeedReferencePanelPoint } from "./_components/FeedReferencePanel"
 import { ProfitabilityCard } from "./_components/ProfitabilityCard"
 import { ProfitabilityPreviewCard } from "./_components/ProfitabilityPreviewCard"
 import { RecentDailyRecords } from "./_components/RecentDailyRecords"
@@ -42,6 +44,13 @@ import { RecentExpenses } from "./_components/RecentExpenses"
 import { BatchLocalHistory } from "./_components/BatchLocalHistory"
 
 export const metadata: Metadata = { title: "Détail du lot" }
+
+function formatChartDate(date: Date): string {
+  return new Intl.DateTimeFormat("fr-SN", {
+    day: "2-digit",
+    month: "2-digit",
+  }).format(date)
+}
 
 export default async function BatchDetailPage({
   params,
@@ -118,6 +127,78 @@ export default async function BatchDetailPage({
     (expenses.length > 0 || batch._count.saleItems > 0 || totalMortality > 0)
   const totalEggsProduced = eggProductionAgg._sum.totalEggs ?? 0
   const totalSellableEggs = eggProductionAgg._sum.sellableEggs ?? 0
+  const feedRecordsForPanel = [...records]
+    .filter((record) => record.feedKg > 0)
+    .sort((left, right) => left.date.getTime() - right.date.getTime())
+  const manualFeedRecordCount = feedRecordsForPanel.filter((record) => record.dataSource === "MANUAL_KG").length
+  const estimatedFeedRecordCount = feedRecordsForPanel.filter((record) => record.dataSource === "ESTIMATED_FROM_BAG").length
+  const totalFeedRecordCount = feedRecordsForPanel.length
+  const manualFeedSharePct =
+    totalFeedRecordCount > 0
+      ? Math.round((manualFeedRecordCount / totalFeedRecordCount) * 100)
+      : null
+  const estimatedFeedSharePct =
+    totalFeedRecordCount > 0
+      ? Math.round((estimatedFeedRecordCount / totalFeedRecordCount) * 100)
+      : null
+
+  let feedReferencePoints: FeedReferencePanelPoint[] = []
+
+  if (feedRecordsForPanel.length > 0 && batch.breed?.code) {
+    const firstRecord = feedRecordsForPanel[0]
+    const lastRecord = feedRecordsForPanel[feedRecordsForPanel.length - 1]
+    const startAgeDay = batch.entryAgeDay + Math.max(
+      0,
+      Math.floor((firstRecord.date.getTime() - batch.entryDate.getTime()) / 86_400_000),
+    )
+    const endAgeDay = batch.entryAgeDay + Math.max(
+      0,
+      Math.floor((lastRecord.date.getTime() - batch.entryDate.getTime()) / 86_400_000),
+    )
+
+    const { curve } = await getAdjustedCurveForBatch(prisma, {
+      batchId: batch.id,
+      farmId: batch.building.farmId,
+      batchType: batch.type as "CHAIR" | "PONDEUSE",
+      breedCode: batch.breed.code,
+      startAgeDay,
+      endAgeDay,
+    })
+
+    const curveByAgeDay = new Map(curve.map((point) => [point.ageDay, point]))
+    let cumulativeMortality = 0
+
+    feedReferencePoints = feedRecordsForPanel.map((record) => {
+      const ageDay = batch.entryAgeDay + Math.max(
+        0,
+        Math.floor((record.date.getTime() - batch.entryDate.getTime()) / 86_400_000),
+      )
+      const liveBirdsEstimate = Math.max(1, batch.entryCount - cumulativeMortality)
+      cumulativeMortality += record.mortality
+
+      const referencePoint = curveByAgeDay.get(ageDay)
+      const referenceKg = referencePoint
+        ? Math.round((referencePoint.dailyFeedGPerBird * liveBirdsEstimate) / 10) / 100
+        : null
+
+      return {
+        id: record.id,
+        label: formatChartDate(record.date),
+        date: record.date.toISOString(),
+        ageDay,
+        actualKg: record.feedKg,
+        referenceKg,
+        actualGPerBird:
+          liveBirdsEstimate > 0
+            ? Math.round((record.feedKg * 1000) / liveBirdsEstimate * 10) / 10
+            : null,
+        referenceGPerBird: referencePoint?.dailyFeedGPerBird ?? null,
+        source: record.dataSource,
+        confidence: record.estimationConfidence,
+      }
+    })
+  }
+
   const hasBreakEvenData =
     hasDecisionData &&
     (batch.type !== "PONDEUSE" || totalSellableEggs > 0)
@@ -207,6 +288,12 @@ export default async function BatchDetailPage({
         batchId={batch.id}
         organizationId={organizationId}
         entryCount={batch.entryCount}
+      />
+
+      <FeedReferencePanel
+        points={feedReferencePoints}
+        manualFeedSharePct={manualFeedSharePct}
+        estimatedFeedSharePct={estimatedFeedSharePct}
       />
 
       {mortalityInsight && (

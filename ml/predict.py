@@ -48,6 +48,9 @@ class LotJ14Data:
     depenses_cumulees_j14: float    # FCFA
     temperature_moyenne_j14: float  # °C
     symptomes_detectes_j14: int     # 0 ou 1
+    # Phase 4 — qualité données alimentation (optionnel, avec valeurs par défaut sûres)
+    pct_estime_j14: float = 0.0     # % de jours J1–J14 estimés depuis sac (0–100)
+    confiance_moyenne_j14: float = 1.0  # confiance moyenne données J14 (0.0–1.0)
 
 
 @dataclass
@@ -85,6 +88,9 @@ def _score_from_model(data: LotJ14Data, model: dict) -> float:
         "depenses_cumulees_j14": data.depenses_cumulees_j14,
         "temperature_moyenne_j14": data.temperature_moyenne_j14,
         "symptomes_detectes_j14": data.symptomes_detectes_j14,
+        # Phase 4 — qualité données (optionnel selon version modèle)
+        "pct_estime_j14": data.pct_estime_j14,
+        "confiance_moyenne_j14": data.confiance_moyenne_j14,
     }
 
     # Standardisation

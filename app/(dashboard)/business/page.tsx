@@ -181,10 +181,13 @@ export default async function BusinessPage() {
         activeBatchCount={overview.kpis.activeBatchCount}
         atRiskBatchCount={overview.kpis.atRiskBatchCount}
         criticalStockCount={overview.kpis.criticalStockCount}
+        manualFeedSharePct={overview.kpis.manualFeedSharePct}
+        estimatedFeedSharePct={overview.kpis.estimatedFeedSharePct}
         marginVerdict={overview.kpis.marginVerdict}
         riskVerdict={overview.kpis.riskVerdict}
         stockVerdict={overview.kpis.stockVerdict}
         mortalityVerdict={overview.kpis.mortalityVerdict}
+        dataQualityVerdict={overview.kpis.dataQualityVerdict}
       />
 
       <BusinessPriorityPanel

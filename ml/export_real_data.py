@@ -57,6 +57,9 @@ FEATURE_COLS = [
     "depenses_cumulees_j14",
     "temperature_moyenne_j14",
     "symptomes_detectes_j14",
+    # Phase 4 — qualité données alimentation J1–J14
+    "pct_estime_j14",
+    "confiance_moyenne_j14",
 ]
 TARGET = "target_lot_a_risque"
 
@@ -332,6 +335,9 @@ SELECT
     "avgTemperatureMax"       AS avg_temperature_max,
     "majorMortalityDays"      AS major_mortality_days,
     "finalMarginRatePct"      AS final_margin_rate_pct,
+    -- Phase 4 — qualité données alimentation
+    "pctEstimatedJ14"         AS pct_estimated_j14,
+    "avgConfidenceJ14"        AS avg_confidence_j14,
     "createdAt"               AS created_at
 
 FROM "BatchOutcomeSnapshot"
@@ -410,6 +416,14 @@ def snapshot_to_features(row: dict) -> dict | None:
         or (marge_pct is not None and marge_pct < SEUIL_MARGE)
     )
 
+    # Phase 4 — qualité données alimentation
+    # Valeur par défaut sûre si le snapshot est antérieur à Phase 4 (NULL en base)
+    pct_estime = row.get("pct_estimated_j14")
+    pct_estime_j14 = float(pct_estime) if pct_estime is not None else 0.0
+
+    avg_conf = row.get("avg_confidence_j14")
+    confiance_j14 = float(avg_conf) if avg_conf is not None else 1.0
+
     return {
         "snapshot_id":              row["snapshot_id"],
         "effectif_initial":         effectif,
@@ -420,6 +434,8 @@ def snapshot_to_features(row: dict) -> dict | None:
         "depenses_cumulees_j14":    depenses_j14,
         "temperature_moyenne_j14":  temperature_j14,
         "symptomes_detectes_j14":   symptomes_j14,
+        "pct_estime_j14":           pct_estime_j14,
+        "confiance_moyenne_j14":    confiance_j14,
         "target_lot_a_risque":      lot_a_risque,
     }
 

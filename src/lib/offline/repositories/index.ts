@@ -81,3 +81,5 @@ export const vaccinationPlansRepository = new OfflineReferenceRepository(
   "references",
   "vaccination_plan",
 )
+
+export { adjustDailyFeedStockQuantityLocally } from "@/src/lib/offline/repositories/dailyRepository"

@@ -20,10 +20,13 @@ function buildOverview(): BusinessDashboardViewModel {
       activeBatchCount: 3,
       atRiskBatchCount: 2,
       criticalStockCount: 1,
+      manualFeedSharePct: 65,
+      estimatedFeedSharePct: 35,
       marginVerdict: "Marge sous pression",
       riskVerdict: "2 lots demandent une action rapide",
       stockVerdict: "1 rupture critique a traiter",
       mortalityVerdict: "Sante a surveiller",
+      dataQualityVerdict: "Base mixte manuel + estimation",
     },
     priority: {
       negativeMarginLots: [

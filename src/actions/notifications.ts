@@ -77,6 +77,7 @@ import {
   NotificationType,
   NotificationStatus,
   BatchStatus,
+  BatchType,
   UserRole,
   Prisma,
 } from "@/src/generated/prisma/client"
@@ -881,6 +882,7 @@ async function checkHighMortalityAlerts(
           id: true,
           number: true,
           entryCount: true,
+          type: true,
         },
       },
     },
@@ -889,8 +891,11 @@ async function checkHighMortalityAlerts(
   const candidates = records.flatMap((record) => {
     if (record.batch.entryCount <= 0) return []
 
+    const warningThreshold = record.batch.type === BatchType.PONDEUSE
+      ? KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE_LAYER
+      : KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE_BROILER
     const mortalityRate = record.mortality / record.batch.entryCount
-    if (mortalityRate < KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE) {
+    if (mortalityRate < warningThreshold) {
       return []
     }
 
@@ -905,7 +910,7 @@ async function checkHighMortalityAlerts(
         batchNumber: record.batch.number,
         mortality: record.mortality,
         mortalityRate,
-        threshold: KPI_THRESHOLDS.MORTALITY_DAILY_WARNING_RATE,
+        threshold: warningThreshold,
       },
     }]
   })

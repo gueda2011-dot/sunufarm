@@ -55,6 +55,7 @@ Concretement, SunuFarm aide a transformer une exploitation avicole en activite m
 - vue transverse de pilotage global reservee au plan `Business`
 - synthese de situation en haut de page avec niveau de gravite, score exploitation et priorite d'action
 - KPI consolides exploitation : chiffre d'affaires, couts, marge, mortalite globale, lots a risque, stocks critiques
+- verdict de rentabilite base sur la maturite economique du cycle : "Cycle en demarrage" si aucune vente, "Exploitation rentable" ou "Exploitation non rentable" uniquement si des revenus existent
 - priorisation des signaux existants pour aider a decider plus vite
 - comparaison des lots actifs avec statut global de pilotage et lecture plus dirigeant
 - recommandations deterministes construites a partir des risques deja calcules, hierarchisees comme un plan d'action
@@ -362,6 +363,16 @@ Business - polissage produit :
   - recommandations dirigeant
   - export Business consolide
   - multi-fermes, equipe et exports avances
+
+Business - lecture maturite economique :
+
+- introduction de `getProfitabilityStatus` : fonction metier qui raisonne en fonction de la maturite du cycle, pas en calcul brut de marge
+- si aucune vente n'a encore ete enregistree (`revenue === 0`), le verdict affiche "Cycle en demarrage" avec un ton orange — jamais "Exploitation non rentable"
+- si des revenus existent et la marge est positive : "Exploitation rentable"
+- si des revenus existent et la marge est negative : "Exploitation non rentable"
+- le score global et le statut critique ne penalisent plus la marge negative quand il n'y a pas encore de ventes
+- la couleur de la carte "Marge globale" reste orange (et non rouge) en phase de demarrage
+- les depenses et la marge restent toujours affichees independamment du statut metier — seul le verdict change
 
 Scripts utiles :
 
